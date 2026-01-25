@@ -4,12 +4,12 @@ import unittest
 
 from app import create_app
 from app.config import Config
-from app.db import get_db
+from app.db import close_db, get_db
 
 
 class IntegrationWatermarksAndScopesTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         db_path = os.path.join(self._tmpdir.name, "plataforma_compras_test.db")
 
         class TempConfig(Config):
@@ -22,6 +22,8 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
         self.headers = {"X-Company-Id": "1"}
 
     def tearDown(self) -> None:
+        with self.app.app_context():
+            close_db()
         self._tmpdir.cleanup()
 
     def test_integration_watermarks_columns(self) -> None:

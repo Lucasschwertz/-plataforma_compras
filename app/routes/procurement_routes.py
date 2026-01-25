@@ -1,7 +1,7 @@
 ﻿
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Tuple
 
 from flask import Blueprint, jsonify, render_template, request
@@ -1110,7 +1110,12 @@ def _upsert_integration_watermark(
     cursor: str | None = None,
 ) -> None:
     if not source_updated_at:
-        source_updated_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        source_updated_at = (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
 
     db.execute(
         """
