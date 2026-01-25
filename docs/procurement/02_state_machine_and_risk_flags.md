@@ -98,3 +98,30 @@ Exemplo canonico:
 - last_success_source_updated_at + last_success_source_id garantem ordenacao e desempate.
 - sync_runs e auditoria, nao watermark.
 - Reexecucoes devem ser idempotentes: nao criar novos sync_runs se o status final ja foi alcancado, nem regredir watermark.
+
+## Sync incremental (mock no MVP)
+
+Endpoint:
+- POST /api/procurement/integrations/sync?scope={entity}
+
+Scopes suportados neste MVP:
+- supplier
+- purchase_request
+
+Payload opcional:
+```json
+{ "limit": 100 }
+```
+
+Resposta:
+```json
+{
+  "status": "succeeded",
+  "scope": "supplier",
+  "sync_run_id": 1,
+  "result": {
+    "records_in": 3,
+    "records_upserted": 3
+  }
+}
+```

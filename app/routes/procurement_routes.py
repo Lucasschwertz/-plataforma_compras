@@ -1,12 +1,14 @@
 ﻿
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple
 
 from flask import Blueprint, jsonify, render_template, request
 
 from app.db import get_db
+from app.erp_mock import DEFAULT_RISK_FLAGS, fetch_erp_records
 from app.tenant import current_company_id
 
 
@@ -15,6 +17,15 @@ procurement_bp = Blueprint("procurement", __name__)
 
 ALLOWED_TYPES = {"purchase_request", "rfq", "purchase_order"}
 ALLOWED_PRIORITIES = {"low", "medium", "high", "urgent"}
+ALLOWED_PR_STATUSES = {
+    "pending_rfq",
+    "in_rfq",
+    "awarded",
+    "ordered",
+    "partially_received",
+    "received",
+    "cancelled",
+}
 
 # Compatibilidade: aceitar scopes antigos (plural) nos filtros de logs.
 SCOPE_ALIASES = {
@@ -24,7 +35,15 @@ SCOPE_ALIASES = {
     "purchase_requests": ("purchase_request", "purchase_requests"),
     "rfq": ("rfq", "rfqs"),
     "rfqs": ("rfq", "rfqs"),
+    "supplier": ("supplier", "suppliers"),
+    "suppliers": ("supplier", "suppliers"),
+    "category": ("category", "categories"),
+    "categories": ("category", "categories"),
+    "receipt": ("receipt", "receipts"),
+    "receipts": ("receipt", "receipts"),
 }
+
+SYNC_SUPPORTED_SCOPES = {"supplier", "purchase_request"}
 
 
 @procurement_bp.route("/procurement/inbox", methods=["GET"])
@@ -290,6 +309,78 @@ def integration_logs_api():
             "sync_runs": sync_runs,
             "status_events": recent_events,
             "filters": {"scope": scope, "limit": limit},
+        }
+    )
+
+
+@procurement_bp.route("/api/procurement/integrations/sync", methods=["POST"])
+def integration_sync_api():
+    db = get_db()
+    company_id = current_company_id() or 1
+    payload = request.get_json(silent=True) or {}
+
+    scope_value = (payload.get("scope") or request.args.get("scope") or "").strip()
+    if not scope_value:
+        return jsonify({"error": "scope_required", "message": "Informe scope."}), 400
+
+    canonical_scope = SCOPE_ALIASES.get(scope_value, (scope_value,))[0]
+    if canonical_scope not in SYNC_SUPPORTED_SCOPES:
+        return (
+            jsonify(
+                {
+                    "error": "scope_not_supported",
+                    "message": "Scope nao suportado neste MVP.",
+                    "scope": canonical_scope,
+                }
+            ),
+            400,
+        )
+
+    limit_value = payload.get("limit")
+    if limit_value is None:
+        limit_value = request.args.get("limit")
+    limit = _parse_int(
+        str(limit_value) if limit_value is not None else None,
+        default=100,
+        min_value=1,
+        max_value=500,
+    )
+
+    sync_run_id = _start_sync_run(db, company_id, scope=canonical_scope)
+
+    try:
+        result = _sync_from_erp(db, company_id, canonical_scope, limit=limit)
+        _finish_sync_run(
+            db,
+            company_id,
+            sync_run_id,
+            status="succeeded",
+            records_in=result["records_in"],
+            records_upserted=result["records_upserted"],
+        )
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 - MVP: loga erro resumido
+        _finish_sync_run(db, company_id, sync_run_id, status="failed", records_in=0, records_upserted=0)
+        db.execute(
+            """
+            UPDATE sync_runs
+            SET error_summary = ?
+            WHERE id = ? AND company_id = ?
+            """,
+            (str(exc)[:200], sync_run_id, company_id),
+        )
+        db.commit()
+        return (
+            jsonify({"error": "sync_failed", "message": "Falha ao sincronizar.", "details": str(exc)[:200]}),
+            500,
+        )
+
+    return jsonify(
+        {
+            "status": "succeeded",
+            "scope": canonical_scope,
+            "sync_run_id": sync_run_id,
+            "result": result,
         }
     )
 
@@ -1099,6 +1190,140 @@ def _finish_sync_run(
         """,
         (status, records_in, records_upserted, sync_run_id, company_id),
     )
+
+
+def _load_integration_watermark(db, company_id: int, entity: str) -> dict | None:
+    row = db.execute(
+        """
+        SELECT last_success_source_updated_at, last_success_source_id, last_success_cursor
+        FROM integration_watermarks
+        WHERE company_id = ? AND system = 'senior' AND entity = ?
+        """,
+        (company_id, entity),
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "updated_at": row["last_success_source_updated_at"],
+        "source_id": row["last_success_source_id"],
+        "cursor": row["last_success_cursor"],
+    }
+
+
+def _sync_from_erp(db, company_id: int, entity: str, limit: int) -> dict:
+    watermark = _load_integration_watermark(db, company_id, entity)
+    records = fetch_erp_records(
+        entity,
+        watermark["updated_at"] if watermark else None,
+        watermark["source_id"] if watermark else None,
+        limit=limit,
+    )
+
+    records_upserted = 0
+    for record in records:
+        if entity == "supplier":
+            records_upserted += _upsert_supplier(db, company_id, record)
+        elif entity == "purchase_request":
+            records_upserted += _upsert_purchase_request(db, company_id, record)
+
+    if records:
+        last = records[-1]
+        _upsert_integration_watermark(
+            db,
+            company_id,
+            entity=entity,
+            source_updated_at=last.get("updated_at"),
+            source_id=last.get("external_id"),
+            cursor=None,
+        )
+
+    return {"records_in": len(records), "records_upserted": records_upserted}
+
+
+def _upsert_supplier(db, company_id: int, record: dict) -> int:
+    external_id = record.get("external_id")
+    name = record.get("name") or external_id or "Fornecedor"
+    tax_id = record.get("tax_id")
+    risk_flags = record.get("risk_flags") or DEFAULT_RISK_FLAGS
+    risk_flags_json = json.dumps(risk_flags, separators=(",", ":"), ensure_ascii=True)
+    updated_at = record.get("updated_at") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    existing = db.execute(
+        """
+        SELECT id
+        FROM suppliers
+        WHERE external_id = ? AND (company_id IS NULL OR company_id = ?)
+        LIMIT 1
+        """,
+        (external_id, company_id),
+    ).fetchone()
+
+    if existing:
+        db.execute(
+            """
+            UPDATE suppliers
+            SET name = ?, tax_id = ?, risk_flags = ?, updated_at = ?
+            WHERE id = ? AND (company_id IS NULL OR company_id = ?)
+            """,
+            (name, tax_id, risk_flags_json, updated_at, existing["id"], company_id),
+        )
+        return 1
+
+    db.execute(
+        """
+        INSERT INTO suppliers (name, external_id, tax_id, risk_flags, company_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (name, external_id, tax_id, risk_flags_json, company_id, updated_at, updated_at),
+    )
+    return 1
+
+
+def _upsert_purchase_request(db, company_id: int, record: dict) -> int:
+    external_id = record.get("external_id")
+    number = record.get("number") or external_id
+    status = record.get("status") or "pending_rfq"
+    priority = record.get("priority") or "medium"
+    requested_by = record.get("requested_by")
+    department = record.get("department")
+    needed_at = record.get("needed_at")
+    updated_at = record.get("updated_at") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    if status not in ALLOWED_PR_STATUSES:
+        status = "pending_rfq"
+    if priority not in ALLOWED_PRIORITIES:
+        priority = "medium"
+
+    existing = db.execute(
+        """
+        SELECT id
+        FROM purchase_requests
+        WHERE external_id = ? AND (company_id IS NULL OR company_id = ?)
+        LIMIT 1
+        """,
+        (external_id, company_id),
+    ).fetchone()
+
+    if existing:
+        db.execute(
+            """
+            UPDATE purchase_requests
+            SET number = ?, status = ?, priority = ?, requested_by = ?, department = ?, needed_at = ?, updated_at = ?
+            WHERE id = ? AND (company_id IS NULL OR company_id = ?)
+            """,
+            (number, status, priority, requested_by, department, needed_at, updated_at, existing["id"], company_id),
+        )
+        return 1
+
+    db.execute(
+        """
+        INSERT INTO purchase_requests (
+            number, status, priority, requested_by, department, needed_at, external_id, company_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (number, status, priority, requested_by, department, needed_at, external_id, company_id, updated_at, updated_at),
+    )
+    return 1
 
 
 def _upsert_integration_watermark(
