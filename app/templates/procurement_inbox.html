@@ -1,0 +1,740 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plataforma Compras - Inbox</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="header">
+        <div class="brand">
+          <a class="brand-link" href="/">
+            <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
+            <div class="brand-text">
+              <div class="brand-title">Plataforma Compras</div>
+              <div class="brand-tagline">Inbox de Compras | Empresa #{{ company_id }}</div>
+            </div>
+          </a>
+        </div>
+        <div class="actions">
+          <a class="button ghost" href="/procurement/integrations/logs">Logs</a>
+          <button class="button" id="refreshBtn">Atualizar</button>
+          <button class="button" id="seedBtn">Popular Dados</button>
+          <button class="button primary" id="createRfqBtn">Criar Cotacao</button>
+        </div>
+      </section>
+
+      <section class="toolbar" aria-label="Filtros da inbox">
+        <input class="input" id="searchInput" placeholder="Buscar por referencia..." />
+        <select class="select" id="typeFilter">
+          <option value="">Todos os tipos</option>
+          <option value="purchase_request">Solicitacao</option>
+          <option value="rfq">Cotacao</option>
+          <option value="purchase_order">Ordem de compra</option>
+        </select>
+        <input class="input" id="statusFilter" placeholder="Status interno (ex: pending_rfq, open)" />
+        <select class="select" id="priorityFilter">
+          <option value="">Todas prioridades</option>
+          <option value="urgent">Urgente</option>
+          <option value="high">Alta</option>
+          <option value="medium">Media</option>
+          <option value="low">Baixa</option>
+        </select>
+        <button class="button ghost" id="applyFiltersBtn">Aplicar</button>
+        <button class="button ghost" id="clearFiltersBtn">Limpar</button>
+      </section>
+
+      <section class="kpis" id="kpis">
+        <div class="kpi-card">
+          <div class="kpi-label">Pendentes de Cotacao</div>
+          <div class="kpi-value" data-kpi="pending_rfq">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Aguardando Cotacoes</div>
+          <div class="kpi-value" data-kpi="awaiting_quotes">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Decisao sem OC</div>
+          <div class="kpi-value" data-kpi="awarded_waiting_po">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">OC pendente ERP</div>
+          <div class="kpi-value" data-kpi="awaiting_erp_push">0</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Referencia</th>
+                <th>Status</th>
+                <th>Prioridade</th>
+                <th>Necessidade</th>
+                <th>Idade (dias)</th>
+                <th>Atualizado</th>
+                <th>Meta</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody id="inboxBody"></tbody>
+          </table>
+        </div>
+        <div class="footer-row">
+          <div id="summary" class="small">Carregando...</div>
+          <div class="meta" id="metaInfo"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modals -->
+    <div class="modal-backdrop" id="rfqModalBackdrop" role="dialog" aria-modal="true">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 class="modal-title">Criar Cotacao</h2>
+          <button class="button small ghost" data-close-modal="rfq">Fechar</button>
+        </div>
+        <form id="rfqForm">
+          <div class="modal-body">
+            <div class="field">
+              <label class="field-label" for="rfqTitleInput">Titulo</label>
+              <input class="input" id="rfqTitleInput" name="title" required />
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="button ghost" data-close-modal="rfq">Cancelar</button>
+            <button type="submit" class="button primary" id="rfqSubmitBtn">Criar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="awardModalBackdrop" role="dialog" aria-modal="true">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 class="modal-title">Decisao da Cotacao</h2>
+          <button class="button small ghost" data-close-modal="award">Fechar</button>
+        </div>
+        <form id="awardForm">
+          <div class="modal-body">
+            <div class="meta" id="awardMeta"></div>
+            <input type="hidden" id="awardRfqIdInput" />
+            <div class="field">
+              <label class="field-label" for="awardSupplierInput">Fornecedor</label>
+              <input class="input" id="awardSupplierInput" required />
+            </div>
+            <div class="field">
+              <label class="field-label" for="awardReasonInput">Motivo</label>
+              <textarea class="textarea" id="awardReasonInput" required></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="button ghost" data-close-modal="award">Cancelar</button>
+            <button type="submit" class="button primary" id="awardSubmitBtn">Confirmar decisao</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="poModalBackdrop" role="dialog" aria-modal="true">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 class="modal-title">Gerar Ordem de Compra</h2>
+          <button class="button small ghost" data-close-modal="po">Fechar</button>
+        </div>
+        <form id="poForm">
+          <div class="modal-body">
+            <div class="meta" id="poMeta"></div>
+            <input type="hidden" id="poAwardIdInput" />
+            <div class="field">
+              <label class="field-label" for="poSupplierInput">Fornecedor</label>
+              <input class="input" id="poSupplierInput" disabled />
+            </div>
+            <div class="field">
+              <label class="field-label">Status inicial</label>
+              <div class="meta-pill">aprovada</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="button ghost" data-close-modal="po">Cancelar</button>
+            <button type="submit" class="button primary" id="poSubmitBtn">Gerar OC</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="pushModalBackdrop" role="dialog" aria-modal="true">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 class="modal-title">Enviar OC ao ERP</h2>
+          <button class="button small ghost" data-close-modal="push">Fechar</button>
+        </div>
+        <form id="pushForm">
+          <div class="modal-body">
+            <div class="meta" id="pushMeta"></div>
+            <input type="hidden" id="pushPoIdInput" />
+            <div class="field">
+              <label class="field-label">Confirmacao</label>
+              <div class="meta-pill">A OC sera enviada e marcada como ERP aceito (erp_accepted).</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="button ghost" data-close-modal="push">Cancelar</button>
+            <button type="submit" class="button primary" id="pushSubmitBtn">Enviar agora</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      const inboxBody = document.getElementById("inboxBody");
+      const summary = document.getElementById("summary");
+      const metaInfo = document.getElementById("metaInfo");
+
+      const refreshBtn = document.getElementById("refreshBtn");
+      const seedBtn = document.getElementById("seedBtn");
+      const createRfqBtn = document.getElementById("createRfqBtn");
+
+      const searchInput = document.getElementById("searchInput");
+      const typeFilter = document.getElementById("typeFilter");
+      const statusFilter = document.getElementById("statusFilter");
+      const priorityFilter = document.getElementById("priorityFilter");
+      const applyFiltersBtn = document.getElementById("applyFiltersBtn");
+      const clearFiltersBtn = document.getElementById("clearFiltersBtn");
+
+      const rfqModalBackdrop = document.getElementById("rfqModalBackdrop");
+      const awardModalBackdrop = document.getElementById("awardModalBackdrop");
+      const poModalBackdrop = document.getElementById("poModalBackdrop");
+      const pushModalBackdrop = document.getElementById("pushModalBackdrop");
+
+      const rfqForm = document.getElementById("rfqForm");
+      const rfqTitleInput = document.getElementById("rfqTitleInput");
+      const rfqSubmitBtn = document.getElementById("rfqSubmitBtn");
+
+      const awardForm = document.getElementById("awardForm");
+      const awardRfqIdInput = document.getElementById("awardRfqIdInput");
+      const awardSupplierInput = document.getElementById("awardSupplierInput");
+      const awardReasonInput = document.getElementById("awardReasonInput");
+      const awardSubmitBtn = document.getElementById("awardSubmitBtn");
+      const awardMeta = document.getElementById("awardMeta");
+
+      const poForm = document.getElementById("poForm");
+      const poAwardIdInput = document.getElementById("poAwardIdInput");
+      const poSupplierInput = document.getElementById("poSupplierInput");
+      const poSubmitBtn = document.getElementById("poSubmitBtn");
+      const poMeta = document.getElementById("poMeta");
+
+      const pushForm = document.getElementById("pushForm");
+      const pushPoIdInput = document.getElementById("pushPoIdInput");
+      const pushSubmitBtn = document.getElementById("pushSubmitBtn");
+      const pushMeta = document.getElementById("pushMeta");
+
+      const state = {
+        limit: 50,
+        offset: 0,
+        filters: {
+          search: "",
+          type: "",
+          status: "",
+          priority: "",
+        },
+        itemsByKey: new Map(),
+        lastItems: [],
+      };
+
+      function initFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+
+        const readInt = (key, fallback) => {
+          const raw = params.get(key);
+          if (!raw) return fallback;
+          const parsed = Number(raw);
+          return Number.isFinite(parsed) ? parsed : fallback;
+        };
+
+        state.limit = Math.min(200, Math.max(1, readInt("limit", state.limit)));
+        state.offset = Math.max(0, readInt("offset", state.offset));
+
+        const applyParam = (key, element) => {
+          const value = (params.get(key) || "").trim();
+          if (!value) return;
+          state.filters[key] = value;
+          element.value = value;
+        };
+
+        applyParam("search", searchInput);
+        applyParam("type", typeFilter);
+        applyParam("status", statusFilter);
+        applyParam("priority", priorityFilter);
+      }
+      function buildInboxUrl() {
+        const params = new URLSearchParams();
+        params.set("limit", String(state.limit));
+        params.set("offset", String(state.offset));
+
+        for (const [key, value] of Object.entries(state.filters)) {
+          if (value) params.set(key, value);
+        }
+
+        return `/api/procurement/inbox?${params.toString()}`;
+      }
+
+      function keyFor(item) {
+        return `${item.type}:${item.id}`;
+      }
+
+      function openModal(backdrop) {
+        backdrop.classList.add("open");
+      }
+
+      function closeModal(backdrop) {
+        backdrop.classList.remove("open");
+      }
+
+      function closeAllModals() {
+        closeModal(rfqModalBackdrop);
+        closeModal(awardModalBackdrop);
+        closeModal(poModalBackdrop);
+        closeModal(pushModalBackdrop);
+      }
+
+      [rfqModalBackdrop, awardModalBackdrop, poModalBackdrop, pushModalBackdrop].forEach((backdrop) => {
+        backdrop.addEventListener("click", (event) => {
+          if (event.target === backdrop) closeModal(backdrop);
+        });
+      });
+
+      document.querySelectorAll("[data-close-modal]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const modal = btn.getAttribute("data-close-modal");
+          if (modal === "rfq") closeModal(rfqModalBackdrop);
+          if (modal === "award") closeModal(awardModalBackdrop);
+          if (modal === "po") closeModal(poModalBackdrop);
+          if (modal === "push") closeModal(pushModalBackdrop);
+        });
+      });
+
+      async function loadInbox() {
+        summary.textContent = "Carregando inbox...";
+        const res = await fetch(buildInboxUrl());
+        const data = await res.json();
+
+        state.lastItems = data.items || [];
+        state.itemsByKey = new Map(state.lastItems.map((item) => [keyFor(item), item]));
+
+        updateKpis(data.kpis || {});
+        renderMeta(data);
+        renderRows(state.lastItems);
+
+        const activeFilters = Object.entries(state.filters)
+          .filter(([, value]) => Boolean(value))
+          .map(([key, value]) => `${key}=${value}`)
+          .join(", ");
+
+        const filtersLabel = activeFilters ? ` | filtros: ${activeFilters}` : "";
+        summary.textContent = `${state.lastItems.length} itens na inbox${filtersLabel}`;
+      }
+
+      function renderMeta(data) {
+        metaInfo.innerHTML = "";
+        const filters = data.filters || {};
+        const pills = [];
+        pills.push(`<span class="meta-pill">limit=${data.paging?.limit ?? state.limit}</span>`);
+        pills.push(`<span class="meta-pill">offset=${data.paging?.offset ?? state.offset}</span>`);
+        for (const [key, value] of Object.entries(filters)) {
+          if (value) pills.push(`<span class="meta-pill">${key}: ${escapeHtml(value)}</span>`);
+        }
+        pills.push('<span class="meta-pill">Use header X-Company-Id para trocar empresa</span>');
+        metaInfo.innerHTML = pills.join("");
+      }
+
+      function updateKpis(kpis) {
+        for (const [key, value] of Object.entries(kpis)) {
+          const el = document.querySelector(`[data-kpi="${key}"]`);
+          if (el) el.textContent = value;
+        }
+      }
+
+      function renderRows(items) {
+        if (!items.length) {
+          inboxBody.innerHTML = `
+            <tr>
+              <td colspan="9" class="empty-row">Inbox vazia para os filtros atuais.</td>
+            </tr>
+          `;
+          return;
+        }
+
+        inboxBody.innerHTML = items
+          .map((item) => {
+            const actions = renderActions(item);
+            const meta = renderRowMeta(item);
+            return `
+              <tr>
+                <td class="type-label">${prettyType(item.type)}</td>
+                <td><strong>${escapeHtml(item.ref || "-")}</strong></td>
+                <td class="status">${escapeHtml(prettyStatus(item.status || "-"))}</td>
+                <td>${renderPriority(item.priority)}</td>
+                <td>${escapeHtml(item.needed_at || "-")}</td>
+                <td>${item.age_days ?? 0}</td>
+                <td class="muted">${escapeHtml(item.updated_at || "-")}</td>
+                <td>${meta}</td>
+                <td>${actions}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        bindRowActions();
+      }
+
+      function renderRowMeta(item) {
+        const pills = [];
+        if (item.type === "rfq" && item.award_id) {
+          pills.push(`<span class="meta-pill">decisao #${item.award_id}</span>`);
+          if (item.award_purchase_order_id) {
+            pills.push(`<span class="meta-pill">oc #${item.award_purchase_order_id}</span>`);
+          }
+        }
+        if (item.type === "purchase_order" && item.status === "erp_accepted") {
+          pills.push('<span class="meta-pill">ERP aceito</span>');
+        }
+        return pills.length ? `<div class="meta">${pills.join("")}</div>` : "-";
+      }
+
+      function renderActions(item) {
+        const actions = [];
+        if (item.type === "rfq") {
+          actions.push(
+            `<a class="button small ghost" href="/procurement/cotacoes/${item.id}">Mesa</a>
+            <button class="button small" data-action="comparison" data-id="${item.id}">Comparar</button>`
+          );
+          if (item.status !== "awarded") {
+            actions.push(
+              `<button class="button small primary" data-action="award" data-id="${item.id}">Decidir</button>`
+            );
+          }
+          if (item.status === "awarded" && item.award_id && !item.award_purchase_order_id) {
+            actions.push(
+              `<button class="button small" data-action="create-po" data-award-id="${item.award_id}" data-rfq-id="${item.id}">Gerar OC</button>`
+            );
+          }
+          if (item.award_purchase_order_id) {
+            actions.push(
+              `<a class="button small ghost" href="/procurement/purchase-orders/${item.award_purchase_order_id}">Ver OC</a>`
+            );
+          }
+        }
+        if (item.type === "purchase_request") {
+          actions.push(
+            `<button class="button small" data-action="new-rfq" data-id="${item.id}">Criar Cotacao</button>`
+          );
+        }
+        if (item.type === "purchase_order") {
+          actions.push(
+            `<a class="button small ghost" href="/procurement/purchase-orders/${item.id}">Detalhe</a>`
+          );
+          if (item.status !== "erp_accepted") {
+            actions.push(
+              `<button class="button small primary" data-action="push-erp" data-id="${item.id}">Enviar ao ERP</button>`
+            );
+          } else {
+            actions.push('<span class="meta-pill">ERP OK</span>');
+          }
+        }
+        if (!actions.length) {
+          actions.push(`<span class="small muted">-</span>`);
+        }
+        return `<div class="actions-cell">${actions.join("")}</div>`;
+      }
+
+      function bindRowActions() {
+        document.querySelectorAll("[data-action='comparison']").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const id = btn.getAttribute("data-id");
+            const res = await fetch(`/api/procurement/rfqs/${id}/comparison`);
+            const data = await res.json();
+            alert(`Cotacao ${data.rfq_id}: ${data.suggestion_reason}`);
+          });
+        });
+
+        document.querySelectorAll("[data-action='award']").forEach((btn) => {
+          btn.addEventListener("click", () => openAwardModal(Number(btn.getAttribute("data-id"))));
+        });
+
+        document.querySelectorAll("[data-action='new-rfq']").forEach((btn) => {
+          btn.addEventListener("click", () => openRfqModal());
+        });
+
+        document.querySelectorAll("[data-action='create-po']").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const awardId = Number(btn.getAttribute("data-award-id"));
+            const rfqId = Number(btn.getAttribute("data-rfq-id"));
+            openPoModal(awardId, rfqId);
+          });
+        });
+
+        document.querySelectorAll("[data-action='push-erp']").forEach((btn) => {
+          btn.addEventListener("click", () => openPushModal(Number(btn.getAttribute("data-id"))));
+        });
+      }
+
+      function openRfqModal(presetTitle = "") {
+        rfqTitleInput.value = presetTitle || "Cotacao - Nova cotacao";
+        openModal(rfqModalBackdrop);
+        rfqTitleInput.focus();
+      }
+
+      function openAwardModal(rfqId) {
+        const rfqItem = state.itemsByKey.get(`rfq:${rfqId}`);
+        awardRfqIdInput.value = String(rfqId);
+        awardSupplierInput.value = "Fornecedor A";
+        awardReasonInput.value = "Melhor prazo com preco competitivo";
+
+        awardMeta.innerHTML = rfqItem
+          ? `<span class="meta-pill">Cotacao #${rfqId}</span><span class="meta-pill">${escapeHtml(
+              rfqItem.ref || "Cotacao"
+            )}</span>`
+          : `<span class="meta-pill">Cotacao #${rfqId}</span>`;
+
+        openModal(awardModalBackdrop);
+        awardSupplierInput.focus();
+      }
+
+      function openPoModal(awardId, rfqId) {
+        const rfqItem = state.itemsByKey.get(`rfq:${rfqId}`);
+        poAwardIdInput.value = String(awardId);
+        poSupplierInput.value = "Fornecedor selecionado";
+
+        poMeta.innerHTML = `
+          <span class="meta-pill">decisao #${awardId}</span>
+          ${rfqItem ? `<span class="meta-pill">Cotacao #${rfqId}</span>` : ""}
+        `;
+
+        openModal(poModalBackdrop);
+      }
+
+      function openPushModal(purchaseOrderId) {
+        pushPoIdInput.value = String(purchaseOrderId);
+        const poItem = state.itemsByKey.get(`purchase_order:${purchaseOrderId}`);
+        pushMeta.innerHTML = poItem
+          ? `<span class="meta-pill">OC #${purchaseOrderId}</span><span class="meta-pill">${escapeHtml(
+              poItem.ref || "OC"
+            )}</span>`
+          : `<span class="meta-pill">OC #${purchaseOrderId}</span>`;
+        openModal(pushModalBackdrop);
+      }
+
+      async function seedData() {
+        seedBtn.disabled = true;
+        seedBtn.textContent = "Populando...";
+        try {
+          await fetch("/api/procurement/seed", { method: "POST" });
+          await loadInbox();
+        } finally {
+          seedBtn.disabled = false;
+          seedBtn.textContent = "Popular Dados";
+        }
+      }
+
+      function applyFiltersFromUi() {
+        state.filters.search = (searchInput.value || "").trim();
+        state.filters.type = (typeFilter.value || "").trim();
+        state.filters.status = (statusFilter.value || "").trim();
+        state.filters.priority = (priorityFilter.value || "").trim();
+        state.offset = 0;
+        loadInbox();
+      }
+
+      function clearFilters() {
+        state.filters = { search: "", type: "", status: "", priority: "" };
+        searchInput.value = "";
+        typeFilter.value = "";
+        statusFilter.value = "";
+        priorityFilter.value = "";
+        state.offset = 0;
+        loadInbox();
+      }
+
+      rfqForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const title = (rfqTitleInput.value || "").trim();
+        if (!title) return;
+
+        rfqSubmitBtn.disabled = true;
+        rfqSubmitBtn.textContent = "Criando...";
+        try {
+          const res = await fetch("/api/procurement/rfqs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title }),
+          });
+          if (!res.ok) {
+            alert("Nao foi possivel criar a cotacao.");
+            return;
+          }
+          closeModal(rfqModalBackdrop);
+          await loadInbox();
+        } finally {
+          rfqSubmitBtn.disabled = false;
+          rfqSubmitBtn.textContent = "Criar";
+        }
+      });
+
+      awardForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const rfqId = Number(awardRfqIdInput.value);
+        const supplier_name = (awardSupplierInput.value || "").trim();
+        const reason = (awardReasonInput.value || "").trim();
+        if (!rfqId || !supplier_name || !reason) return;
+
+        awardSubmitBtn.disabled = true;
+        awardSubmitBtn.textContent = "Aplicando...";
+        try {
+          const res = await fetch(`/api/procurement/rfqs/${rfqId}/award`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ supplier_name, reason }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(`Erro ao registrar decisao: ${err.error || "desconhecido"}`);
+            return;
+          }
+          closeModal(awardModalBackdrop);
+          await loadInbox();
+        } finally {
+          awardSubmitBtn.disabled = false;
+          awardSubmitBtn.textContent = "Confirmar decisao";
+        }
+      });
+
+      poForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const awardId = Number(poAwardIdInput.value);
+        if (!awardId) return;
+
+        poSubmitBtn.disabled = true;
+        poSubmitBtn.textContent = "Gerando...";
+        try {
+          const res = await fetch(`/api/procurement/awards/${awardId}/purchase-orders`, {
+            method: "POST",
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            alert(`Erro ao gerar OC: ${data.error || "desconhecido"}`);
+            return;
+          }
+          closeModal(poModalBackdrop);
+          await loadInbox();
+          if (data.purchase_order_id) {
+            window.location.href = `/procurement/purchase-orders/${data.purchase_order_id}`;
+          }
+        } finally {
+          poSubmitBtn.disabled = false;
+          poSubmitBtn.textContent = "Gerar OC";
+        }
+      });
+
+      pushForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const purchaseOrderId = Number(pushPoIdInput.value);
+        if (!purchaseOrderId) return;
+
+        pushSubmitBtn.disabled = true;
+        pushSubmitBtn.textContent = "Enviando...";
+        try {
+          const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, {
+            method: "POST",
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(`Erro no push ERP: ${err.error || "desconhecido"}`);
+            return;
+          }
+          closeModal(pushModalBackdrop);
+          await loadInbox();
+        } finally {
+          pushSubmitBtn.disabled = false;
+          pushSubmitBtn.textContent = "Enviar agora";
+        }
+      });
+
+      refreshBtn.addEventListener("click", loadInbox);
+      seedBtn.addEventListener("click", seedData);
+      createRfqBtn.addEventListener("click", () => openRfqModal());
+
+      applyFiltersBtn.addEventListener("click", applyFiltersFromUi);
+      clearFiltersBtn.addEventListener("click", clearFilters);
+
+      searchInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") applyFiltersFromUi();
+      });
+      statusFilter.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") applyFiltersFromUi();
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeAllModals();
+      });
+
+      function renderPriority(priority) {
+        if (!priority) return "-";
+        const cls = `badge prio-${priority}`;
+        return `<span class="${cls}">${priority}</span>`;
+      }
+
+      function prettyStatus(status) {
+        const map = {
+          pending_rfq: "Pendente de cotacao",
+          in_rfq: "Em cotacao",
+          awarded: "Aprovada",
+          ordered: "Ordenada",
+          partially_received: "Recebimento parcial",
+          received: "Recebida",
+          cancelled: "Cancelada",
+          draft: "Rascunho",
+          open: "Aberta",
+          collecting_quotes: "Coletando cotacoes",
+          closed: "Encerrada",
+          approved: "Aprovada",
+          sent_to_erp: "Enviada ao ERP",
+          erp_accepted: "Aceita no ERP",
+          erp_error: "Erro no ERP",
+          converted_to_po: "Convertida em OC",
+          running: "Em execucao",
+          succeeded: "Sucesso",
+          failed: "Falha",
+        };
+        return map[status] || status || "-";
+      }
+      function prettyType(type) {
+        switch (type) {
+          case "purchase_request":
+            return "Solicitacao";
+          case "rfq":
+            return "Cotacao";
+          case "purchase_order":
+            return "Ordem";
+          default:
+            return type || "-";
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+      initFromUrl();
+      loadInbox();
+    </script>
+  </body>
+</html>

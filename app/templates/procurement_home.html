@@ -1,0 +1,87 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plataforma Compras</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="header">
+        <div class="brand">
+          <a class="brand-link" href="/">
+            <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
+            <div class="brand-text">
+              <div class="brand-title">Plataforma Compras</div>
+              <div class="brand-tagline">Operacao + analise no mesmo lugar. Empresa #{{ company_id }}</div>
+            </div>
+          </a>
+        </div>
+        <div class="actions">
+          <a class="button primary" href="/procurement/inbox">Abrir Inbox</a>
+          <a class="button ghost" href="/procurement/integrations/logs">Ver Logs</a>
+        </div>
+      </section>
+
+      <section class="page-grid">
+        <article class="card">
+          <h3>Comecar por Categoria</h3>
+          <div class="list">
+            <a class="list-item" href="/procurement/inbox?type=purchase_request">
+              <div class="top">
+                <div class="title">Solicitacoes</div>
+                <div class="meta-line">Entrada</div>
+              </div>
+              <div class="meta-line">Veja tudo que ainda precisa virar cotacao.</div>
+            </a>
+            <a class="list-item" href="/procurement/inbox?type=rfq&status=open">
+              <div class="top">
+                <div class="title">Cotacoes abertas</div>
+                <div class="meta-line">Em andamento</div>
+              </div>
+              <div class="meta-line">Processos com cotacao em aberto e aguardando propostas.</div>
+            </a>
+            <a class="list-item" href="/procurement/inbox?type=rfq&status=awarded">
+              <div class="top">
+                <div class="title">Cotacoes com decisao</div>
+                <div class="meta-line">Decisao</div>
+              </div>
+              <div class="meta-line">Cotacoes aprovadas que podem gerar ordem de compra.</div>
+            </a>
+            <a class="list-item" href="/procurement/inbox?type=purchase_order&status=approved">
+              <div class="top">
+                <div class="title">Ordens aprovadas</div>
+                <div class="meta-line">Operacao</div>
+              </div>
+              <div class="meta-line">Ordens prontas para envio ao ERP.</div>
+            </a>
+            <a class="list-item" href="/procurement/inbox?type=purchase_order&status=erp_error">
+              <div class="top">
+                <div class="title">Erros no ERP</div>
+                <div class="meta-line">Atencao</div>
+              </div>
+              <div class="meta-line">Ordens com falha no envio e que precisam de correcao.</div>
+            </a>
+          </div>
+        </article>
+
+        <article class="card">
+          <h3>Atalhos Rapidos</h3>
+          <div class="actions" style="margin-bottom: 8px">
+            <a class="button" href="/procurement/inbox?type=rfq">Ver Cotacoes</a>
+            <a class="button" href="/procurement/inbox?type=purchase_order">Ver OCs</a>
+          </div>
+          <div class="actions" style="margin-bottom: 8px">
+            <a class="button ghost" href="/procurement/inbox?priority=urgent">Prioridade urgente</a>
+            <a class="button ghost" href="/procurement/inbox?status=sent_to_erp">Enviadas ao ERP</a>
+          </div>
+          <div class="actions">
+            <a class="button ghost" href="/api/procurement/inbox">API da Inbox</a>
+            <a class="button ghost" href="/api/procurement/integrations/logs">API de Logs</a>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

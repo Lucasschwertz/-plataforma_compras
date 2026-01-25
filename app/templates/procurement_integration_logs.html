@@ -1,0 +1,183 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Logs de Integracao - Plataforma Compras</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="page-header">
+        <div>
+          <h1 class="page-title">Logs de Integracao</h1>
+          <p class="page-subtitle">Empresa #{{ company_id }} | execucoes + eventos</p>
+        </div>
+        <div class="actions">
+          <a class="button ghost" href="/procurement/inbox">Voltar para Inbox</a>
+        </div>
+      </section>
+
+      <section class="toolbar" aria-label="Filtros de logs">
+        <select class="select" id="scopeFilter">
+          <option value="">Todos os escopos</option>
+          <option value="purchase_order">purchase_order</option>
+          <option value="purchase_request">purchase_request</option>
+          <option value="rfq">rfq</option>
+        </select>
+        <input class="input" id="limitInput" type="number" min="10" max="200" value="80" />
+        <button class="button ghost" id="applyLogsFiltersBtn">Aplicar</button>
+        <button class="button ghost" id="clearLogsFiltersBtn">Limpar</button>
+      </section>
+
+      <section class="page-grid">
+        <article class="card">
+          <h3>Execucoes de Integracao</h3>
+          <div class="list" id="syncRunsList"></div>
+        </article>
+
+        <article class="card">
+          <h3>Eventos de Status</h3>
+          <div class="list" id="eventsList"></div>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const scopeFilter = document.getElementById("scopeFilter");
+      const limitInput = document.getElementById("limitInput");
+      const applyLogsFiltersBtn = document.getElementById("applyLogsFiltersBtn");
+      const clearLogsFiltersBtn = document.getElementById("clearLogsFiltersBtn");
+
+      const syncRunsList = document.getElementById("syncRunsList");
+      const eventsList = document.getElementById("eventsList");
+
+      const state = {
+        scope: "",
+        limit: 80,
+      };
+
+      function escapeHtml(value) {
+        return String(value ?? "-")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function prettyStatus(status) {
+        const map = {
+          running: "Em execucao",
+          succeeded: "Sucesso",
+          failed: "Falha",
+          pending_rfq: "Pendente de cotacao",
+          in_rfq: "Em cotacao",
+          awarded: "Aprovada",
+          approved: "Aprovada",
+          sent_to_erp: "Enviada ao ERP",
+          erp_accepted: "Aceita no ERP",
+          erp_error: "Erro no ERP",
+        };
+        return map[status] || status || "-";
+      }
+
+      function prettyScope(scope) {
+        const map = {
+          purchase_order: "Ordens de compra",
+          purchase_orders: "Ordens de compra",
+          purchase_request: "Solicitacoes",
+          purchase_requests: "Solicitacoes",
+          rfq: "Cotacoes",
+          rfqs: "Cotacoes",
+        };
+        return map[scope] || scope || "-";
+      }
+      function buildUrl() {
+        const params = new URLSearchParams();
+        params.set("limit", String(state.limit));
+        if (state.scope) params.set("scope", state.scope);
+        return `/api/procurement/integrations/logs?${params.toString()}`;
+      }
+
+      function renderSyncRuns(items) {
+        if (!items.length) {
+          syncRunsList.innerHTML = '<div class="small">Sem execucoes de integracao.</div>';
+          return;
+        }
+
+        syncRunsList.innerHTML = items
+          .map(
+            (s) => `
+              <div class="list-item">
+                <div class="top">
+                  <div class="title">execucao #${escapeHtml(s.id)} | ${escapeHtml(prettyStatus(s.status))}</div>
+                  <div class="meta-line">${escapeHtml(s.started_at)}</div>
+                </div>
+                <div class="meta-line">escopo: ${escapeHtml(prettyScope(s.scope))} | tentativa: ${escapeHtml(s.attempt)}</div>
+                <div class="meta-line">
+                  registros: in=${escapeHtml(s.records_in)} upserted=${escapeHtml(s.records_upserted)} failed=${escapeHtml(
+              s.records_failed
+            )}
+                </div>
+                <div class="meta-line">duracao (ms): ${escapeHtml(s.duration_ms || "-")}</div>
+                ${s.error_summary ? `<div class="meta-line">erro: ${escapeHtml(s.error_summary)}</div>` : ""}
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function renderEvents(items) {
+        if (!items.length) {
+          eventsList.innerHTML = '<div class="small">Sem eventos.</div>';
+          return;
+        }
+
+        eventsList.innerHTML = items
+          .map(
+            (e) => `
+              <div class="list-item">
+                <div class="top">
+                  <div class="title">${escapeHtml(e.entity)} #${escapeHtml(e.entity_id)} -> ${escapeHtml(
+              e.to_status
+            )}</div>
+                  <div class="meta-line">${escapeHtml(e.occurred_at)}</div>
+                </div>
+                <div class="meta-line">de: ${escapeHtml(e.from_status || "-")}</div>
+                <div class="meta-line">motivo: ${escapeHtml(e.reason || "-")}</div>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      async function loadLogs() {
+        const res = await fetch(buildUrl());
+        const data = await res.json();
+        renderSyncRuns(data.sync_runs || []);
+        renderEvents(data.status_events || []);
+      }
+
+      function applyFilters() {
+        state.scope = (scopeFilter.value || "").trim();
+        state.limit = Math.min(200, Math.max(10, Number(limitInput.value || 80)));
+        limitInput.value = String(state.limit);
+        loadLogs();
+      }
+
+      function clearFilters() {
+        state.scope = "";
+        state.limit = 80;
+        scopeFilter.value = "";
+        limitInput.value = "80";
+        loadLogs();
+      }
+
+      applyLogsFiltersBtn.addEventListener("click", applyFilters);
+      clearLogsFiltersBtn.addEventListener("click", clearFilters);
+
+      loadLogs();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,188 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OC {{ purchase_order_id }} - Plataforma Compras</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="page-header">
+        <div>
+          <h1 class="page-title">Detalhe da OC #{{ purchase_order_id }}</h1>
+          <p class="page-subtitle">Empresa #{{ company_id }} | Fonte: backend</p>
+        </div>
+        <div class="actions">
+          <a class="button ghost" href="/procurement/inbox">Voltar para Inbox</a>
+          <a class="button ghost" href="/procurement/integrations/logs">Logs de integracao</a>
+        </div>
+      </section>
+
+      <section class="page-grid">
+        <article class="card">
+          <h3>Resumo</h3>
+          <div class="kv" id="poSummary"></div>
+          <div class="actions" style="margin-top: 12px">
+            <button class="button primary" id="pushErpBtn">Enviar ao ERP</button>
+            <a class="button" id="openInboxBtn" href="/procurement/inbox">Abrir Inbox</a>
+          </div>
+        </article>
+
+        <article class="card">
+          <h3>Eventos</h3>
+          <div class="list" id="eventsList"></div>
+        </article>
+
+        <article class="card">
+          <h3>Execucoes de Integracao</h3>
+          <div class="list" id="syncRunsList"></div>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const purchaseOrderId = Number({{ purchase_order_id }});
+
+      const poSummary = document.getElementById("poSummary");
+      const eventsList = document.getElementById("eventsList");
+      const syncRunsList = document.getElementById("syncRunsList");
+      const pushErpBtn = document.getElementById("pushErpBtn");
+
+      function escapeHtml(value) {
+        return String(value ?? "-")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function prettyStatus(status) {
+        const map = {
+          pending_rfq: "Pendente de cotacao",
+          in_rfq: "Em cotacao",
+          awarded: "Aprovada",
+          ordered: "Ordenada",
+          partially_received: "Recebimento parcial",
+          received: "Recebida",
+          cancelled: "Cancelada",
+          draft: "Rascunho",
+          open: "Aberta",
+          collecting_quotes: "Coletando cotacoes",
+          closed: "Encerrada",
+          approved: "Aprovada",
+          sent_to_erp: "Enviada ao ERP",
+          erp_accepted: "Aceita no ERP",
+          erp_error: "Erro no ERP",
+          converted_to_po: "Convertida em OC",
+          running: "Em execucao",
+          succeeded: "Sucesso",
+          failed: "Falha",
+        };
+        return map[status] || status || "-";
+      }
+      function renderSummary(po) {
+        const rows = [
+          ["Numero", po.number || `OC-${po.id}`],
+          ["Status", prettyStatus(po.status)],
+          ["Fornecedor", po.supplier_name || "-"],
+          ["Decisao", po.award_id ?? "-"],
+          ["Moeda", po.currency || "BRL"],
+          ["Total", po.total_amount ?? "-"],
+          ["ID externo", po.external_id || "-"],
+          ["Erro ERP", po.erp_last_error || "-"],
+          ["Criada em", po.created_at],
+          ["Atualizada em", po.updated_at],
+        ];
+
+        poSummary.innerHTML = rows
+          .map(([k, v]) => `<div class="k">${escapeHtml(k)}</div><div>${escapeHtml(v)}</div>`)
+          .join("");
+
+        pushErpBtn.disabled = po.status === "erp_accepted";
+        pushErpBtn.textContent = po.status === "erp_accepted" ? "ERP OK" : "Enviar ao ERP";
+      }
+
+      function renderEvents(events) {
+        if (!events.length) {
+          eventsList.innerHTML = '<div class="small">Sem eventos ainda.</div>';
+          return;
+        }
+        eventsList.innerHTML = events
+          .map(
+            (e) => `
+              <div class="list-item">
+                <div class="top">
+                  <div class="title">${escapeHtml(prettyStatus(e.to_status))}</div>
+                  <div class="meta-line">${escapeHtml(e.occurred_at)}</div>
+                </div>
+                <div class="meta-line">de: ${escapeHtml(e.from_status || "-")} | motivo: ${escapeHtml(
+              e.reason || "-"
+            )}</div>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function renderSyncRuns(syncRuns) {
+        if (!syncRuns.length) {
+          syncRunsList.innerHTML = '<div class="small">Sem execucoes de integracao ainda.</div>';
+          return;
+        }
+        syncRunsList.innerHTML = syncRuns
+          .map(
+            (s) => `
+              <div class="list-item">
+                <div class="top">
+                  <div class="title">execucao #${escapeHtml(s.id)} | ${escapeHtml(prettyStatus(s.status))}</div>
+                  <div class="meta-line">${escapeHtml(s.started_at)}</div>
+                </div>
+                <div class="meta-line">
+                  escopo: ${escapeHtml(s.scope)} | duracao (ms): ${escapeHtml(s.duration_ms || "-")}
+                </div>
+                <div class="meta-line">
+                  registros: in=${escapeHtml(s.records_in)} upserted=${escapeHtml(s.records_upserted)} failed=${escapeHtml(
+              s.records_failed
+            )}
+                </div>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      async function loadDetail() {
+        const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}`);
+        const data = await res.json();
+        if (!res.ok) {
+          poSummary.innerHTML = `<div class="small">Erro: ${escapeHtml(
+            data.message || data.error || "desconhecido"
+          )}</div>`;
+          eventsList.innerHTML = "";
+          syncRunsList.innerHTML = "";
+          pushErpBtn.disabled = true;
+          return;
+        }
+        renderSummary(data.purchase_order);
+        renderEvents(data.events || []);
+        renderSyncRuns(data.sync_runs || []);
+      }
+
+      pushErpBtn.addEventListener("click", async () => {
+        pushErpBtn.disabled = true;
+        pushErpBtn.textContent = "Enviando...";
+        try {
+          await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, {
+            method: "POST",
+          });
+        } finally {
+          await loadDetail();
+        }
+      });
+
+      loadDetail();
+    </script>
+  </body>
+</html>

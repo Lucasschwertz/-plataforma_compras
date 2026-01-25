@@ -1,0 +1,500 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cotacao {{ rfq_id }} - Plataforma Compras</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="page-header">
+        <div class="brand">
+          <a class="brand-link" href="/">
+            <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
+            <div class="brand-text">
+              <div class="brand-title">Mesa de Cotacao</div>
+              <div class="brand-tagline">Cotacao #{{ rfq_id }} | Empresa #{{ company_id }}</div>
+            </div>
+          </a>
+        </div>
+        <div class="actions">
+          <a class="button ghost" href="/procurement/inbox?type=rfq">Voltar para Cotacoes</a>
+          <a class="button ghost" href="/procurement/integrations/logs">Logs</a>
+        </div>
+      </section>
+
+      <section class="page-grid">
+        <article class="card">
+          <h3>Resumo da Cotacao</h3>
+          <div class="kv" id="cotacaoResumo"></div>
+          <div class="actions" style="margin-top: 12px">
+            <button class="button" id="atualizarBtn">Atualizar</button>
+            <a class="button primary" href="/procurement/inbox?type=rfq">Abrir Inbox</a>
+          </div>
+        </article>
+
+        <article class="card">
+          <h3>Decisao</h3>
+          <div class="kv" id="decisaoResumo"></div>
+          <div class="small" id="decisaoHint" style="margin-top: 8px"></div>
+          <form id="decisaoForm" style="margin-top: 12px; display: grid; gap: 8px">
+            <div class="field">
+              <label class="field-label" for="fornecedorInput">Fornecedor</label>
+              <input class="input" id="fornecedorInput" required />
+            </div>
+            <div class="field">
+              <label class="field-label" for="motivoInput">Motivo da decisao</label>
+              <textarea class="textarea" id="motivoInput" required></textarea>
+            </div>
+            <div class="actions">
+              <button class="button primary" type="submit" id="decidirBtn">Registrar decisao</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="card">
+          <h3>Ordem de Compra</h3>
+          <div class="kv" id="ocResumo"></div>
+          <div class="actions" style="margin-top: 12px" id="ocAcoes"></div>
+        </article>
+
+        <article class="card" style="grid-column: 1 / -1">
+          <h3>Itens e Fornecedores por Item</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Quantidade</th>
+                  <th>Melhor proposta</th>
+                  <th>Fornecedores convidados</th>
+                  <th>Convidar</th>
+                </tr>
+              </thead>
+              <tbody id="itensBody"></tbody>
+            </table>
+          </div>
+          <div class="small" style="margin-top: 8px">Dica: voce pode convidar fornecedores diferentes para cada item.</div>
+        </article>
+
+        <article class="card" style="grid-column: 1 / -1">
+          <h3>Registrar Proposta por Fornecedor</h3>
+          <form id="propostaForm" style="display: grid; gap: 10px">
+            <div class="field" style="max-width: 360px">
+              <label class="field-label" for="propostaFornecedorSelect">Fornecedor</label>
+              <select class="select" id="propostaFornecedorSelect" required></select>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Quantidade</th>
+                    <th>Preco unitario</th>
+                    <th>Prazo (dias)</th>
+                  </tr>
+                </thead>
+                <tbody id="propostaItensBody"></tbody>
+              </table>
+            </div>
+            <div class="actions">
+              <button class="button primary" type="submit" id="propostaSubmitBtn">Salvar proposta</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="card">
+          <h3>Eventos da Cotacao</h3>
+          <div class="list" id="eventosCotacao"></div>
+        </article>
+
+        <article class="card">
+          <h3>Eventos da Decisao</h3>
+          <div class="list" id="eventosDecisao"></div>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const rfqId = Number({{ rfq_id }});
+
+      const cotacaoResumo = document.getElementById("cotacaoResumo");
+      const decisaoResumo = document.getElementById("decisaoResumo");
+      const decisaoHint = document.getElementById("decisaoHint");
+      const ocResumo = document.getElementById("ocResumo");
+      const ocAcoes = document.getElementById("ocAcoes");
+      const itensBody = document.getElementById("itensBody");
+      const propostaItensBody = document.getElementById("propostaItensBody");
+      const eventosCotacao = document.getElementById("eventosCotacao");
+      const eventosDecisao = document.getElementById("eventosDecisao");
+
+      const decisaoForm = document.getElementById("decisaoForm");
+      const fornecedorInput = document.getElementById("fornecedorInput");
+      const motivoInput = document.getElementById("motivoInput");
+      const decidirBtn = document.getElementById("decidirBtn");
+      const atualizarBtn = document.getElementById("atualizarBtn");
+
+      const propostaForm = document.getElementById("propostaForm");
+      const propostaFornecedorSelect = document.getElementById("propostaFornecedorSelect");
+      const propostaSubmitBtn = document.getElementById("propostaSubmitBtn");
+
+      const state = {
+        cotacao: null,
+        itens: [],
+        fornecedores: [],
+        decisao: null,
+        ordemCompra: null,
+      };
+
+      function escapeHtml(value) {
+        return String(value ?? "-")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function prettyStatus(status) {
+        const map = {
+          pending_rfq: "Pendente de cotacao",
+          in_rfq: "Em cotacao",
+          awarded: "Aprovada",
+          draft: "Rascunho",
+          open: "Aberta",
+          collecting_quotes: "Coletando cotacoes",
+          closed: "Encerrada",
+          approved: "Aprovada",
+          sent_to_erp: "Enviada ao ERP",
+          erp_accepted: "Aceita no ERP",
+          erp_error: "Erro no ERP",
+          converted_to_po: "Convertida em OC",
+          submitted: "Proposta enviada",
+        };
+        return map[status] || status || "-";
+      }
+
+      function renderKv(target, rows) {
+        target.innerHTML = rows
+          .map(([k, v]) => `<div class="k">${escapeHtml(k)}</div><div>${escapeHtml(v)}</div>`)
+          .join("");
+      }
+
+      function renderEventos(target, eventos, vazioLabel) {
+        if (!eventos || !eventos.length) {
+          target.innerHTML = `<div class="small">${escapeHtml(vazioLabel)}</div>`;
+          return;
+        }
+        target.innerHTML = eventos
+          .map(
+            (e) => `
+              <div class="list-item">
+                <div class="top">
+                  <div class="title">${escapeHtml(prettyStatus(e.to_status))}</div>
+                  <div class="meta-line">${escapeHtml(e.occurred_at)}</div>
+                </div>
+                <div class="meta-line">de: ${escapeHtml(e.from_status || "-")} | motivo: ${escapeHtml(e.reason || "-")}</div>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function formatMelhorProposta(melhor) {
+        if (!melhor) return "Sem proposta";
+        const preco = melhor.unit_price != null ? `R$ ${Number(melhor.unit_price).toFixed(2)}` : "-";
+        const prazo = melhor.lead_time_days != null ? `${melhor.lead_time_days} dias` : "-";
+        return `${melhor.supplier_name} | ${preco} | ${prazo}`;
+      }
+
+      function renderItens() {
+        if (!state.itens.length) {
+          itensBody.innerHTML = '<tr><td colspan="5" class="empty-row">Sem itens nesta cotacao.</td></tr>';
+          propostaItensBody.innerHTML = '';
+          return;
+        }
+
+        itensBody.innerHTML = state.itens
+          .map((item) => {
+            const fornecedores = item.fornecedores || [];
+            const fornecedoresTxt = fornecedores.length
+              ? fornecedores
+                  .map((f) => {
+                    const preco = f.unit_price != null ? `R$ ${Number(f.unit_price).toFixed(2)}` : "sem preco";
+                    const prazo = f.lead_time_days != null ? `${f.lead_time_days}d` : "-";
+                    return `${f.supplier_name} (${preco}, ${prazo})`;
+                  })
+                  .join(" | ")
+              : "Nenhum convidado";
+
+            const convidadosIds = new Set(fornecedores.map((f) => f.supplier_id));
+            const opcoes = state.fornecedores
+              .filter((f) => !convidadosIds.has(f.id))
+              .map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`)
+              .join("");
+
+            const convidarControl = opcoes
+              ? `
+                <div class="actions-cell">
+                  <select class="select" data-invite-select="${item.rfq_item_id}" style="min-width: 180px">${opcoes}</select>
+                  <button class="button small" data-invite-btn="${item.rfq_item_id}">Convidar</button>
+                </div>
+              `
+              : '<span class="small">Todos convidados</span>';
+
+            return `
+              <tr>
+                <td><strong>${escapeHtml(item.descricao)}</strong></td>
+                <td>${escapeHtml(item.quantidade)} ${escapeHtml(item.uom)}</td>
+                <td>${escapeHtml(formatMelhorProposta(item.melhor_proposta))}</td>
+                <td>${escapeHtml(fornecedoresTxt)}</td>
+                <td>${convidarControl}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        bindConvidar();
+        renderPropostaItens();
+      }
+
+      function renderPropostaItens() {
+        propostaItensBody.innerHTML = state.itens
+          .map(
+            (item) => `
+              <tr>
+                <td>${escapeHtml(item.descricao)}</td>
+                <td>${escapeHtml(item.quantidade)} ${escapeHtml(item.uom)}</td>
+                <td>
+                  <input class="input" type="number" step="0.01" min="0" data-preco-input="${item.rfq_item_id}" placeholder="0.00" />
+                </td>
+                <td>
+                  <input class="input" type="number" step="1" min="0" data-prazo-input="${item.rfq_item_id}" placeholder="dias" />
+                </td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
+      function bindConvidar() {
+        document.querySelectorAll("[data-invite-btn]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const itemId = Number(btn.getAttribute("data-invite-btn"));
+            const select = document.querySelector(`[data-invite-select="${itemId}"]`);
+            if (!select) return;
+            const supplierId = Number(select.value);
+            if (!supplierId) return;
+            await convidarFornecedor(itemId, supplierId);
+          });
+        });
+      }
+
+      function renderFornecedores() {
+        propostaFornecedorSelect.innerHTML = state.fornecedores
+          .map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`)
+          .join("");
+      }
+
+      function renderOc(oc) {
+        if (!oc) {
+          renderKv(ocResumo, [["Status", "Ainda nao gerada"], ["Proximo passo", "Registrar decisao"]]);
+          ocAcoes.innerHTML = "";
+          return;
+        }
+
+        renderKv(ocResumo, [
+          ["Numero", oc.numero || `OC-${oc.id}`],
+          ["Status", prettyStatus(oc.status)],
+          ["Fornecedor", oc.fornecedor || "-"],
+          ["ID externo", oc.external_id || "-"],
+        ]);
+
+        ocAcoes.innerHTML = `
+          <a class="button" href="/procurement/purchase-orders/${oc.id}">Abrir OC</a>
+          ${
+            oc.status !== "erp_accepted"
+              ? `<button class="button primary" id="pushOcBtn">Enviar ao ERP</button>`
+              : `<span class="meta-pill">ERP aceito</span>`
+          }
+        `;
+
+        const pushBtn = document.getElementById("pushOcBtn");
+        if (pushBtn) {
+          pushBtn.addEventListener("click", () => enviarOcAoErp(oc.id));
+        }
+      }
+
+      function renderDecisao(decisao, oc) {
+        if (!decisao) {
+          renderKv(decisaoResumo, [["Status", "Aguardando decisao"], ["Dica", "Preencha abaixo para decidir"]]);
+          decisaoHint.textContent = "Sem decisao registrada ainda.";
+          decisaoForm.style.display = "grid";
+          return;
+        }
+
+        renderKv(decisaoResumo, [
+          ["Status", prettyStatus(decisao.status)],
+          ["Fornecedor", decisao.fornecedor || "-"],
+          ["Motivo", decisao.motivo || "-"],
+          ["OC", decisao.purchase_order_id || (oc ? oc.id : "-")],
+        ]);
+
+        if (decisao.purchase_order_id) {
+          decisaoHint.textContent = "Decisao registrada e convertida em ordem de compra.";
+        } else {
+          decisaoHint.textContent = "Decisao registrada. Proximo passo: gerar a OC.";
+        }
+
+        if (decisao.purchase_order_id) {
+          decisaoForm.style.display = "none";
+        } else {
+          decisaoForm.style.display = "grid";
+          fornecedorInput.value = decisao.fornecedor || fornecedorInput.value;
+          motivoInput.value = decisao.motivo || motivoInput.value;
+        }
+      }
+
+      function renderCotacao(cotacao) {
+        renderKv(cotacaoResumo, [
+          ["Titulo", cotacao.titulo || "-"],
+          ["Status", prettyStatus(cotacao.status)],
+          ["Criada em", cotacao.criada_em || "-"],
+          ["Atualizada em", cotacao.atualizada_em || "-"],
+        ]);
+      }
+
+      async function carregar() {
+        const [cotacaoRes, fornecedoresRes] = await Promise.all([
+          fetch(`/api/procurement/cotacoes/${rfqId}`),
+          fetch("/api/procurement/fornecedores"),
+        ]);
+
+        const cotacaoData = await cotacaoRes.json();
+        const fornecedoresData = await fornecedoresRes.json().catch(() => ({ items: [] }));
+
+        if (!cotacaoRes.ok) {
+          cotacaoResumo.innerHTML = `<div class="small">Erro: ${escapeHtml(cotacaoData.message || cotacaoData.error || "desconhecido")}</div>`;
+          decisaoResumo.innerHTML = "";
+          ocResumo.innerHTML = "";
+          itensBody.innerHTML = "";
+          propostaItensBody.innerHTML = "";
+          eventosCotacao.innerHTML = "";
+          eventosDecisao.innerHTML = "";
+          decisaoForm.style.display = "none";
+          return;
+        }
+
+        state.cotacao = cotacaoData.cotacao;
+        state.itens = cotacaoData.itens || [];
+        state.decisao = cotacaoData.decisao;
+        state.ordemCompra = cotacaoData.ordem_compra;
+        state.fornecedores = fornecedoresData.items || [];
+
+        renderCotacao(state.cotacao);
+        renderFornecedores();
+        renderItens();
+        renderDecisao(state.decisao, state.ordemCompra);
+        renderOc(state.ordemCompra);
+        renderEventos(eventosCotacao, cotacaoData.eventos_cotacao, "Sem eventos da cotacao.");
+        renderEventos(eventosDecisao, cotacaoData.eventos_decisao, "Sem eventos da decisao.");
+      }
+
+      async function convidarFornecedor(rfqItemId, supplierId) {
+        await fetch(`/api/procurement/cotacoes/${rfqId}/itens/${rfqItemId}/fornecedores`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ supplier_ids: [supplierId] }),
+        });
+        await carregar();
+      }
+
+      async function registrarDecisao() {
+        const fornecedor = (fornecedorInput.value || "").trim();
+        const motivo = (motivoInput.value || "").trim();
+        if (!fornecedor || !motivo) return;
+
+        decidirBtn.disabled = true;
+        decidirBtn.textContent = "Registrando...";
+        try {
+          const res = await fetch(`/api/procurement/rfqs/${rfqId}/award`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ supplier_name: fornecedor, reason: motivo }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(`Nao foi possivel registrar a decisao: ${err.message || err.error || "erro"}`);
+            return;
+          }
+          await carregar();
+        } finally {
+          decidirBtn.disabled = false;
+          decidirBtn.textContent = "Registrar decisao";
+        }
+      }
+
+      async function enviarOcAoErp(ocId) {
+        const confirmar = window.confirm("Deseja enviar esta OC ao ERP agora?");
+        if (!confirmar) return;
+        await fetch(`/api/procurement/purchase-orders/${ocId}/push-to-erp`, { method: "POST" });
+        await carregar();
+      }
+
+      async function salvarProposta(event) {
+        event.preventDefault();
+        const supplierId = Number(propostaFornecedorSelect.value);
+        if (!supplierId) return;
+
+        const itemsPayload = state.itens
+          .map((item) => {
+            const precoInput = document.querySelector(`[data-preco-input="${item.rfq_item_id}"]`);
+            const prazoInput = document.querySelector(`[data-prazo-input="${item.rfq_item_id}"]`);
+            const unitPrice = precoInput && precoInput.value !== "" ? Number(precoInput.value) : null;
+            const leadTimeDays = prazoInput && prazoInput.value !== "" ? Number(prazoInput.value) : null;
+            return {
+              rfq_item_id: item.rfq_item_id,
+              unit_price: unitPrice,
+              lead_time_days: leadTimeDays,
+            };
+          })
+          .filter((item) => item.unit_price !== null && Number.isFinite(item.unit_price));
+
+        if (!itemsPayload.length) {
+          alert("Informe ao menos um preco unitario para salvar a proposta.");
+          return;
+        }
+
+        propostaSubmitBtn.disabled = true;
+        propostaSubmitBtn.textContent = "Salvando...";
+        try {
+          const res = await fetch(`/api/procurement/cotacoes/${rfqId}/propostas`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ supplier_id: supplierId, items: itemsPayload }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(`Erro ao salvar proposta: ${err.message || err.error || "erro"}`);
+            return;
+          }
+          await carregar();
+        } finally {
+          propostaSubmitBtn.disabled = false;
+          propostaSubmitBtn.textContent = "Salvar proposta";
+        }
+      }
+
+      decisaoForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        registrarDecisao();
+      });
+
+      propostaForm.addEventListener("submit", salvarProposta);
+      atualizarBtn.addEventListener("click", carregar);
+
+      carregar();
+    </script>
+  </body>
+</html>

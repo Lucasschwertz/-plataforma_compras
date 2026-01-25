@@ -1,0 +1,25 @@
+﻿<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Plataforma Compras</title>
+  <desc id="desc">Logotipo com um carrinho estilizado e grafico de crescimento.</desc>
+  <defs>
+    <linearGradient id="bg" x1="32" y1="24" x2="224" y2="232" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7c5cff" />
+      <stop offset="1" stop-color="#5dd4ff" />
+    </linearGradient>
+    <linearGradient id="stroke" x1="64" y1="48" x2="208" y2="208" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0b1020" stop-opacity="0.9" />
+      <stop offset="1" stop-color="#101a33" stop-opacity="0.9" />
+    </linearGradient>
+  </defs>
+
+  <rect x="20" y="20" width="216" height="216" rx="56" fill="url(#bg)" />
+
+  <path d="M78 92H182C187.523 92 192 96.4772 192 102V162C192 167.523 187.523 172 182 172H96C90.4772 172 86 167.523 86 162V100" stroke="url(#stroke)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+
+  <path d="M64 74H92L102 126" stroke="url(#stroke)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+
+  <circle cx="110" cy="188" r="12" fill="#0b1020" fill-opacity="0.85" />
+  <circle cx="174" cy="188" r="12" fill="#0b1020" fill-opacity="0.85" />
+
+  <path d="M116 142L142 118L158 134L186 104" stroke="#0b1020" stroke-opacity="0.85" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
