@@ -90,3 +90,11 @@ Exemplo canonico:
   "sla_breach": false
 }
 ```
+
+## Watermarks e Idempotencia (Fase 1)
+
+- integration_watermarks e o cursor incremental por tenant_id + system + entity.
+- Atualizar somente apos sync bem-sucedido (inbound ou outbound).
+- last_success_source_updated_at + last_success_source_id garantem ordenacao e desempate.
+- sync_runs e auditoria, nao watermark.
+- Reexecucoes devem ser idempotentes: nao criar novos sync_runs se o status final ja foi alcancado, nem regredir watermark.

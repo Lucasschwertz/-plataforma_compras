@@ -1,6 +1,7 @@
 ﻿
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Dict, List, Tuple
 
 from flask import Blueprint, jsonify, render_template, request
@@ -621,6 +622,13 @@ def push_purchase_order_to_erp(purchase_order_id: int):
     )
 
     _finish_sync_run(db, company_id, sync_run_id, status="succeeded", records_in=1, records_upserted=1)
+    _upsert_integration_watermark(
+        db,
+        company_id,
+        entity="purchase_order",
+        source_updated_at=None,
+        source_id=external_id,
+    )
 
     db.commit()
     return jsonify(
@@ -1090,6 +1098,38 @@ def _finish_sync_run(
         WHERE id = ? AND company_id = ?
         """,
         (status, records_in, records_upserted, sync_run_id, company_id),
+    )
+
+
+def _upsert_integration_watermark(
+    db,
+    company_id: int,
+    entity: str,
+    source_updated_at: str | None,
+    source_id: str | None,
+    cursor: str | None = None,
+) -> None:
+    if not source_updated_at:
+        source_updated_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+    db.execute(
+        """
+        INSERT INTO integration_watermarks (
+            company_id,
+            system,
+            entity,
+            last_success_source_updated_at,
+            last_success_source_id,
+            last_success_cursor,
+            last_success_at
+        ) VALUES (?, 'senior', ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(company_id, system, entity) DO UPDATE SET
+            last_success_source_updated_at = excluded.last_success_source_updated_at,
+            last_success_source_id = excluded.last_success_source_id,
+            last_success_cursor = excluded.last_success_cursor,
+            last_success_at = excluded.last_success_at
+        """,
+        (company_id, entity, source_updated_at, source_id, cursor),
     )
 
 
