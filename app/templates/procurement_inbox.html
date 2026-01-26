@@ -14,7 +14,7 @@
             <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
             <div class="brand-text">
               <div class="brand-title">Plataforma Compras</div>
-              <div class="brand-tagline">Inbox de Compras | Empresa #{{ company_id }}</div>
+              <div class="brand-tagline">Inbox de Compras | Empresa #{{ tenant_id }}</div>
             </div>
           </a>
         </div>
@@ -23,6 +23,7 @@
           <button class="button" id="refreshBtn">Atualizar</button>
           <button class="button" id="seedBtn">Popular Dados</button>
           <button class="button primary" id="createRfqBtn">Criar Cotacao</button>
+          <a class="button ghost" href="/logout">Sair</a>
         </div>
       </section>
 
@@ -103,6 +104,11 @@
             <div class="field">
               <label class="field-label" for="rfqTitleInput">Titulo</label>
               <input class="input" id="rfqTitleInput" name="title" required />
+            </div>
+            <div class="field">
+              <label class="field-label">Itens das solicitacoes em aberto</label>
+              <div class="small" id="rfqRequestsHint">Selecione os itens que entram nesta cotacao.</div>
+              <div class="list" id="rfqRequestsList"></div>
             </div>
           </div>
           <div class="modal-footer">
@@ -214,6 +220,8 @@
       const rfqForm = document.getElementById("rfqForm");
       const rfqTitleInput = document.getElementById("rfqTitleInput");
       const rfqSubmitBtn = document.getElementById("rfqSubmitBtn");
+      const rfqRequestsList = document.getElementById("rfqRequestsList");
+      const rfqRequestsHint = document.getElementById("rfqRequestsHint");
 
       const awardForm = document.getElementById("awardForm");
       const awardRfqIdInput = document.getElementById("awardRfqIdInput");
@@ -244,6 +252,7 @@
         },
         itemsByKey: new Map(),
         lastItems: [],
+        openRequestItems: [],
       };
 
       function initFromUrl() {
@@ -302,6 +311,72 @@
         closeModal(pushModalBackdrop);
       }
 
+      function getSelectedRequestItemIds() {
+        return Array.from(document.querySelectorAll("[data-pr-item-select]:checked")).map((el) =>
+          Number(el.getAttribute("data-pr-item-select"))
+        );
+      }
+
+      async function loadOpenRequestItems(preselectedRequestIds = []) {
+        rfqRequestsList.innerHTML = '<div class="small">Carregando itens...</div>';
+        rfqSubmitBtn.disabled = true;
+        try {
+          const res = await fetch("/api/procurement/purchase-request-items/open");
+          const data = await res.json().catch(() => ({ items: [] }));
+          state.openRequestItems = data.items || [];
+          renderOpenRequestItems(state.openRequestItems, preselectedRequestIds);
+        } catch (error) {
+          rfqRequestsList.innerHTML =
+            '<div class="small">Nao foi possivel carregar itens de solicitacao.</div>';
+          rfqRequestsHint.textContent = "Erro ao carregar itens.";
+          rfqSubmitBtn.disabled = false;
+        }
+      }
+
+      function renderOpenRequestItems(items, preselectedRequestIds = []) {
+        if (!items.length) {
+          rfqRequestsHint.textContent = "Sem itens de solicitacao em aberto no momento.";
+          rfqRequestsList.innerHTML = '<div class="small">Sem itens de solicitacao em aberto.</div>';
+          rfqSubmitBtn.disabled = true;
+          return;
+        }
+
+        rfqRequestsHint.textContent = `${items.length} itens em aberto. Selecione para criar a cotacao.`;
+        const selectedSet = new Set(preselectedRequestIds);
+        rfqRequestsList.innerHTML = items
+          .map((item) => {
+            const ref = item.number || `SR-${item.purchase_request_id}`;
+            const meta = [
+              item.department || "-",
+              item.requested_by || "-",
+              item.needed_at ? `necessidade: ${item.needed_at}` : "sem data",
+              item.priority ? `prioridade: ${item.priority}` : null,
+            ]
+              .filter(Boolean)
+              .join(" • ");
+            return `
+              <label class="list-item" style="display: flex; gap: 10px; align-items: flex-start">
+                <input
+                  type="checkbox"
+                  data-pr-item-select="${item.id}"
+                  ${selectedSet.has(item.purchase_request_id) ? "checked" : ""}
+                />
+                <div>
+                  <div class="title">${escapeHtml(ref)} • ${escapeHtml(item.description || "Item")}</div>
+                  <div class="meta-line">${escapeHtml(meta)}</div>
+                  <div class="meta-line">
+                    qtd: ${escapeHtml(item.quantity || "-")} ${escapeHtml(item.uom || "")} ${
+                  item.line_no ? `• linha ${item.line_no}` : ""
+                }
+                  </div>
+                </div>
+              </label>
+            `;
+          })
+          .join("");
+        rfqSubmitBtn.disabled = false;
+      }
+
       [rfqModalBackdrop, awardModalBackdrop, poModalBackdrop, pushModalBackdrop].forEach((backdrop) => {
         backdrop.addEventListener("click", (event) => {
           if (event.target === backdrop) closeModal(backdrop);
@@ -348,7 +423,6 @@
         for (const [key, value] of Object.entries(filters)) {
           if (value) pills.push(`<span class="meta-pill">${key}: ${escapeHtml(value)}</span>`);
         }
-        pills.push('<span class="meta-pill">Use header X-Company-Id para trocar empresa</span>');
         metaInfo.innerHTML = pills.join("");
       }
 
@@ -467,7 +541,12 @@
         });
 
         document.querySelectorAll("[data-action='new-rfq']").forEach((btn) => {
-          btn.addEventListener("click", () => openRfqModal());
+          btn.addEventListener("click", () => {
+            const requestId = Number(btn.getAttribute("data-id"));
+            const requestItem = state.itemsByKey.get(`purchase_request:${requestId}`);
+            const presetTitle = requestItem ? `Cotacao - ${requestItem.ref || requestId}` : "";
+            openRfqModal(presetTitle, Number.isFinite(requestId) ? [requestId] : []);
+          });
         });
 
         document.querySelectorAll("[data-action='create-po']").forEach((btn) => {
@@ -483,8 +562,9 @@
         });
       }
 
-      function openRfqModal(presetTitle = "") {
+      async function openRfqModal(presetTitle = "", preselectedRequestIds = []) {
         rfqTitleInput.value = presetTitle || "Cotacao - Nova cotacao";
+        await loadOpenRequestItems(preselectedRequestIds);
         openModal(rfqModalBackdrop);
         rfqTitleInput.focus();
       }
@@ -564,6 +644,11 @@
         event.preventDefault();
         const title = (rfqTitleInput.value || "").trim();
         if (!title) return;
+        const selectedIds = getSelectedRequestItemIds();
+        if (!selectedIds.length) {
+          alert("Selecione ao menos um item de solicitacao em aberto.");
+          return;
+        }
 
         rfqSubmitBtn.disabled = true;
         rfqSubmitBtn.textContent = "Criando...";
@@ -571,7 +656,7 @@
           const res = await fetch("/api/procurement/rfqs", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title }),
+            body: JSON.stringify({ title, purchase_request_item_ids: selectedIds }),
           });
           if (!res.ok) {
             alert("Nao foi possivel criar a cotacao.");

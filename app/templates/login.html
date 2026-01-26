@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Entrar - Plataforma Compras</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="page-grid" style="grid-template-columns: minmax(0, 420px); justify-content: center">
+        <article class="card">
+          <div class="brand" style="margin-bottom: 12px">
+            <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
+            <div class="brand-text">
+              <div class="brand-title">Plataforma Compras</div>
+              <div class="brand-tagline">Acesso seguro para sua operacao</div>
+            </div>
+          </div>
+          <h2 style="margin-top: 0">Entrar</h2>
+          <p class="small">Informe seu usuario e senha para acessar a plataforma.</p>
+          {% if error %}
+            <div class="small" style="color: var(--danger); margin-bottom: 8px">{{ error }}</div>
+          {% endif %}
+          <form method="post" class="modal-body">
+            <input type="hidden" name="next" value="{{ request.args.get('next', '') }}" />
+            <div class="field">
+              <label class="field-label" for="emailInput">Usuario</label>
+              <input class="input" id="emailInput" name="email" type="email" required />
+            </div>
+            <div class="field">
+              <label class="field-label" for="passwordInput">Senha</label>
+              <input class="input" id="passwordInput" name="password" type="password" required />
+            </div>
+            <div class="actions" style="margin-top: 8px">
+              <button class="button primary" type="submit">Entrar</button>
+            </div>
+          </form>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

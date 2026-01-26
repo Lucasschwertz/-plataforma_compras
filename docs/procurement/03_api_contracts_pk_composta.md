@@ -1,10 +1,10 @@
-# API Contracts (Fase 1) com PK composta
+﻿# API Contracts (Fase 1) com PK composta
 
-Regra obrigat�ria: `tenant_id` vem do contexto autenticado (token/sess�o) e NUNCA do cliente.
+Regra obrigatória: `tenant_id` vem do contexto autenticado (token/sessão) e NUNCA do cliente.
 
-Todas as opera��es devem filtrar por `(tenant_id, id)`.
+Todas as operações devem filtrar por `(tenant_id, id)`.
 
-Exemplo de padr�o de query segura:
+Exemplo de padrão de query segura:
 
 ```sql
 select *
@@ -49,6 +49,10 @@ Response:
 
 ## POST /api/rfqs
 
+RFQ é criada a partir de itens de solicitações de compra (purchase_request_items).
+Cada item selecionado vira um rfq_item com vínculo ao purchase_request_item_id.
+Uma RFQ pode agrupar múltiplas SRs; não há merge de itens.
+
 Request:
 
 ```json
@@ -63,20 +67,43 @@ Request:
 }
 ```
 
+Notas:
+- purchase_request_item_ids é obrigatório.
+- purchase_request_ids não é aceito.
+- supplier_ids é opcional no MVP (pode ser omitido).
+
+Comportamento (side effects):
+- SRs associadas aos itens selecionados são atualizadas para in_rfq.
+- status_events são gerados para SR e RFQ.
+- Operação é transacional (RFQ + rfq_items + updates + eventos).
+
 Response:
 
 ```json
 {
   "id": "8d9f0a0a-6d63-4c1e-b0a1-222222222222",
   "status": "open",
-  "created_at": "2026-01-25T14:10:00Z"
+  "title": "Compra emergencial - rolamentos",
+  "created_at": "2026-01-25T14:10:00Z",
+  "rfq_items": [
+    {
+      "rfq_item_id": "ri-1111",
+      "purchase_request_item_id": "pri-1111",
+      "description": "Rolamento XYZ",
+      "quantity": 10,
+      "uom": "UN"
+    }
+  ]
 }
 ```
+
+Decisão de design:
+RFQs nascem de itens de solicitações (e não das solicitações inteiras) para garantir granularidade, rastreabilidade e consolidação futura entre múltiplas SRs.
 
 ## GET /api/rfqs/{id}/comparison
 
 Notas:
-- `suggested_supplier_id` � opcional e deve ser baseado em regra simples e expl�cita.
+- `suggested_supplier_id` é opcional e deve ser baseado em regra simples e explícita.
 - Exemplo de regra Fase 1: menor `total` com desempate por menor `lead_time_days`.
 
 Response:
@@ -128,7 +155,7 @@ Request:
 ```json
 {
   "supplier_id": "2a6f2c70-1b8d-4a5d-9b8e-5f1111111111",
-  "reason": "Melhor prazo mantendo pre�o dentro da meta"
+  "reason": "Melhor prazo mantendo preço dentro da meta"
 }
 ```
 

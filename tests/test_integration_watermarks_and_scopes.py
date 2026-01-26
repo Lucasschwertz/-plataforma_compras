@@ -19,16 +19,40 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
 
         self.app = create_app(TempConfig)
         self.client = self.app.test_client()
-        self.headers = {"X-Company-Id": "1"}
+        self.tenant_id = "tenant-1"
+        self.headers = {"X-Tenant-Id": self.tenant_id}
 
     def tearDown(self) -> None:
         with self.app.app_context():
             close_db()
         self._tmpdir.cleanup()
 
+    def _create_purchase_request_item(self) -> int:
+        with self.app.app_context():
+            db = get_db()
+            cursor = db.execute(
+                """
+                INSERT INTO purchase_requests (
+                    number, status, priority, requested_by, department, needed_at, tenant_id
+                ) VALUES (?, 'pending_rfq', 'medium', 'Test', 'Compras', date('now', '+3 day'), ?)
+                """,
+                ("SR-TEST", self.tenant_id),
+            )
+            pr_id = cursor.lastrowid
+            cursor = db.execute(
+                """
+                INSERT INTO purchase_request_items (
+                    purchase_request_id, line_no, description, quantity, uom, tenant_id
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (pr_id, 1, "Item teste", 1, "UN", self.tenant_id),
+            )
+            db.commit()
+            return cursor.lastrowid
+
     def test_integration_watermarks_columns(self) -> None:
         expected_columns = {
-            "company_id",
+            "tenant_id",
             "system",
             "entity",
             "last_success_source_updated_at",
@@ -47,7 +71,7 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
             db.execute(
                 """
                 INSERT INTO integration_watermarks (
-                    company_id,
+                    tenant_id,
                     system,
                     entity,
                     last_success_source_updated_at,
@@ -56,7 +80,7 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
                 ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    1,
+                    self.tenant_id,
                     "senior",
                     "purchase_order",
                     "2026-01-01T00:00:00Z",
@@ -70,19 +94,20 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
                 """
                 SELECT *
                 FROM integration_watermarks
-                WHERE company_id = ? AND system = ? AND entity = ?
+                WHERE tenant_id = ? AND system = ? AND entity = ?
                 """,
-                (1, "senior", "purchase_order"),
+                (self.tenant_id, "senior", "purchase_order"),
             ).fetchone()
             self.assertIsNotNone(row)
             self.assertEqual(row["last_success_source_id"], "PO-1")
             self.assertIsNotNone(row["last_success_at"])
 
     def test_scope_aliases_accept_plural(self) -> None:
+        item_id = self._create_purchase_request_item()
         rfq_res = self.client.post(
             "/api/procurement/rfqs",
             headers=self.headers,
-            json={"title": "Alias RFQ"},
+            json={"title": "Alias RFQ", "purchase_request_item_ids": [item_id]},
         )
         self.assertEqual(rfq_res.status_code, 201)
         rfq_id = rfq_res.get_json()["id"]
@@ -136,7 +161,7 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
             db.execute(
                 """
                 INSERT INTO integration_watermarks (
-                    company_id,
+                    tenant_id,
                     system,
                     entity,
                     last_success_source_updated_at,
@@ -155,10 +180,11 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
             )
             db.commit()
 
+        item_id = self._create_purchase_request_item()
         rfq_res = self.client.post(
             "/api/procurement/rfqs",
             headers=self.headers,
-            json={"title": "Idempotency RFQ"},
+            json={"title": "Idempotency RFQ", "purchase_request_item_ids": [item_id]},
         )
         self.assertEqual(rfq_res.status_code, 201)
         rfq_id = rfq_res.get_json()["id"]
@@ -192,9 +218,9 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
                 """
                 SELECT *
                 FROM integration_watermarks
-                WHERE company_id = ? AND system = ? AND entity = ?
+                WHERE tenant_id = ? AND system = ? AND entity = ?
                 """,
-                (1, "senior", "purchase_order"),
+                (self.tenant_id, "senior", "purchase_order"),
             ).fetchone()
             self.assertIsNotNone(row)
             self.assertEqual(row["last_success_source_id"], external_id)
@@ -205,9 +231,9 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
                 """
                 SELECT COUNT(*) AS total
                 FROM sync_runs
-                WHERE company_id = ? AND scope IN ('purchase_order', 'purchase_orders')
+                WHERE tenant_id = ? AND scope IN ('purchase_order', 'purchase_orders')
                 """,
-                (1,),
+                (self.tenant_id,),
             ).fetchone()["total"]
             self.assertEqual(runs, 1)
 
@@ -224,9 +250,9 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
                 """
                 SELECT *
                 FROM integration_watermarks
-                WHERE company_id = ? AND system = ? AND entity = ?
+                WHERE tenant_id = ? AND system = ? AND entity = ?
                 """,
-                (1, "senior", "purchase_order"),
+                (self.tenant_id, "senior", "purchase_order"),
             ).fetchone()
             self.assertIsNotNone(row_after)
             self.assertEqual(row_after["last_success_source_id"], external_id)
@@ -235,12 +261,13 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
                 """
                 SELECT COUNT(*) AS total
                 FROM sync_runs
-                WHERE company_id = ? AND scope IN ('purchase_order', 'purchase_orders')
+                WHERE tenant_id = ? AND scope IN ('purchase_order', 'purchase_orders')
                 """,
-                (1,),
+                (self.tenant_id,),
             ).fetchone()["total"]
             self.assertEqual(runs_after, 1)
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -107,6 +107,8 @@ Endpoint:
 Scopes suportados neste MVP:
 - supplier
 - purchase_request
+- purchase_order
+- receipt
 
 Payload opcional:
 ```json

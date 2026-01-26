@@ -4,6 +4,9 @@ from typing import Iterable, List
 from flask import current_app, g
 
 
+DEFAULT_TENANT_ID = "tenant-demo"
+
+
 def get_db():
     if "db" not in g:
         db_path = current_app.config["DB_PATH"]
@@ -24,9 +27,9 @@ def init_db():
 
     db.execute(
         """
-        CREATE TABLE IF NOT EXISTS empresas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
+        CREATE TABLE IF NOT EXISTS tenants (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
             subdomain TEXT UNIQUE,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -41,7 +44,7 @@ def init_db():
             external_id TEXT,
             tax_id TEXT,
             risk_flags TEXT NOT NULL DEFAULT '{"no_supplier_response": false, "late_delivery": false, "sla_breach": false}',
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -63,7 +66,7 @@ def init_db():
             department TEXT,
             needed_at TEXT,
             external_id TEXT,
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -80,7 +83,7 @@ def init_db():
             quantity REAL NOT NULL DEFAULT 1,
             uom TEXT NOT NULL DEFAULT 'UN',
             category TEXT,
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -96,7 +99,7 @@ def init_db():
                 status IN ('draft','open','collecting_quotes','closed','awarded','cancelled')
             ),
             cancel_reason TEXT,
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -112,7 +115,7 @@ def init_db():
             description TEXT NOT NULL,
             quantity REAL NOT NULL DEFAULT 1,
             uom TEXT NOT NULL DEFAULT 'UN',
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -125,9 +128,9 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             rfq_item_id INTEGER NOT NULL,
             supplier_id INTEGER NOT NULL,
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (rfq_item_id, supplier_id, company_id)
+            UNIQUE (rfq_item_id, supplier_id, tenant_id)
         )
         """
     )
@@ -140,10 +143,10 @@ def init_db():
             supplier_id INTEGER NOT NULL,
             status TEXT NOT NULL DEFAULT 'submitted',
             currency TEXT NOT NULL DEFAULT 'BRL',
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (rfq_id, supplier_id, company_id)
+            UNIQUE (rfq_id, supplier_id, tenant_id)
         )
         """
     )
@@ -157,10 +160,10 @@ def init_db():
             unit_price REAL NOT NULL,
             lead_time_days INTEGER,
             notes TEXT,
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (quote_id, rfq_item_id, company_id)
+            UNIQUE (quote_id, rfq_item_id, tenant_id)
         )
         """
     )
@@ -176,7 +179,7 @@ def init_db():
             ),
             reason TEXT NOT NULL,
             purchase_order_id INTEGER,
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -197,7 +200,7 @@ def init_db():
             total_amount REAL,
             erp_last_error TEXT,
             external_id TEXT,
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -206,8 +209,25 @@ def init_db():
 
     db.execute(
         """
+        CREATE TABLE IF NOT EXISTS receipts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            external_id TEXT,
+            purchase_order_id INTEGER,
+            purchase_order_external_id TEXT,
+            status TEXT NOT NULL,
+            received_at TEXT,
+            tenant_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (tenant_id, external_id)
+        )
+        """
+    )
+
+    db.execute(
+        """
         CREATE TABLE IF NOT EXISTS integration_watermarks (
-            company_id INTEGER,
+            tenant_id TEXT NOT NULL,
             system TEXT NOT NULL DEFAULT 'senior',
             entity TEXT NOT NULL CHECK (
                 entity IN ('purchase_request','rfq','award','purchase_order','receipt','supplier','category')
@@ -217,7 +237,7 @@ def init_db():
             last_success_cursor TEXT,
             last_success_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (company_id, system, entity)
+            PRIMARY KEY (tenant_id, system, entity)
         )
         """
     )
@@ -243,7 +263,7 @@ def init_db():
             records_failed INTEGER NOT NULL DEFAULT 0,
             error_summary TEXT,
             error_details TEXT,
-            company_id INTEGER
+            tenant_id TEXT NOT NULL
         )
         """
     )
@@ -261,7 +281,7 @@ def init_db():
             reason TEXT,
             actor_user_id INTEGER,
             occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            company_id INTEGER
+            tenant_id TEXT NOT NULL
         )
         """
     )
@@ -272,9 +292,15 @@ def init_db():
     _ensure_column(db, "purchase_orders", "supplier_name", "TEXT")
     _ensure_column(db, "purchase_orders", "currency", "TEXT NOT NULL DEFAULT 'BRL'")
     _ensure_column(db, "purchase_orders", "total_amount", "REAL")
+    _ensure_column(db, "receipts", "external_id", "TEXT")
+    _ensure_column(db, "receipts", "purchase_order_id", "INTEGER")
+    _ensure_column(db, "receipts", "purchase_order_external_id", "TEXT")
+    _ensure_column(db, "receipts", "status", "TEXT")
+    _ensure_column(db, "receipts", "received_at", "TEXT")
     _ensure_column(db, "integration_watermarks", "last_success_source_updated_at", "TEXT")
     _ensure_column(db, "integration_watermarks", "last_success_source_id", "TEXT")
     _ensure_column(db, "integration_watermarks", "last_success_cursor", "TEXT")
+    _ensure_tenant_backfill(db)
 
     # Padroniza titulos antigos para PT-BR (RFQ -> Cotacao).
     db.execute(
@@ -352,13 +378,20 @@ def init_db():
             UPDATE purchase_orders SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
         END;
 
+        CREATE TRIGGER IF NOT EXISTS trg_receipts_updated_at
+        AFTER UPDATE ON receipts
+        FOR EACH ROW
+        BEGIN
+            UPDATE receipts SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+        END;
+
         CREATE TRIGGER IF NOT EXISTS trg_integration_watermarks_updated_at
         AFTER UPDATE ON integration_watermarks
         FOR EACH ROW
         BEGIN
             UPDATE integration_watermarks
             SET updated_at = CURRENT_TIMESTAMP
-            WHERE company_id IS NEW.company_id AND system = NEW.system AND entity = NEW.entity;
+            WHERE tenant_id = NEW.tenant_id AND system = NEW.system AND entity = NEW.entity;
         END;
         """
     )
@@ -373,6 +406,81 @@ def _ensure_column(db, table: str, column: str, definition: str) -> None:
         return
 
 
+def _table_exists(db, table: str) -> bool:
+    row = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _column_exists(db, table: str, column: str) -> bool:
+    if not _table_exists(db, table):
+        return False
+    rows = db.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row["name"] == column for row in rows)
+
+
+def _ensure_tenant_backfill(db) -> None:
+    tenant_tables = [
+        "suppliers",
+        "purchase_requests",
+        "purchase_request_items",
+        "rfqs",
+        "rfq_items",
+        "rfq_item_suppliers",
+        "quotes",
+        "quote_items",
+        "awards",
+        "purchase_orders",
+        "receipts",
+        "integration_watermarks",
+        "sync_runs",
+        "status_events",
+    ]
+
+    for table in tenant_tables:
+        if not _table_exists(db, table):
+            continue
+        _ensure_column(db, table, "tenant_id", "TEXT")
+
+        if _column_exists(db, table, "company_id"):
+            db.execute(
+                f"""
+                UPDATE {table}
+                SET tenant_id = COALESCE(tenant_id, 'tenant-' || company_id)
+                """
+            )
+
+        db.execute(
+            f"""
+            UPDATE {table}
+            SET tenant_id = COALESCE(tenant_id, '{DEFAULT_TENANT_ID}')
+            """
+        )
+
+    if _table_exists(db, "tenants"):
+        db.execute(
+            """
+            INSERT OR IGNORE INTO tenants (id, name, subdomain)
+            VALUES (?, ?, ?)
+            """,
+            (DEFAULT_TENANT_ID, "Tenant Demo", DEFAULT_TENANT_ID),
+        )
+
+    if _table_exists(db, "empresas") and _table_exists(db, "tenants"):
+        rows = db.execute("SELECT id, nome, subdomain FROM empresas").fetchall()
+        for row in rows:
+            tenant_id = f"tenant-{row['id']}"
+            db.execute(
+                """
+                INSERT OR IGNORE INTO tenants (id, name, subdomain)
+                VALUES (?, ?, ?)
+                """,
+                (tenant_id, row["nome"], row["subdomain"]),
+            )
+
+
 def _backfill_demo_items_and_quotes(db) -> None:
     """Cria itens, convites e propostas demo quando ainda nao existem."""
     suppliers = _ensure_demo_suppliers(db)
@@ -381,18 +489,20 @@ def _backfill_demo_items_and_quotes(db) -> None:
 
     rfqs_missing_items = db.execute(
         """
-        SELECT r.id, r.title, r.company_id
+        SELECT r.id, r.title, r.tenant_id
         FROM rfqs r
-        WHERE NOT EXISTS (
-            SELECT 1 FROM rfq_items ri WHERE ri.rfq_id = r.id
-        )
+        WHERE r.tenant_id = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM rfq_items ri WHERE ri.rfq_id = r.id
+          )
         ORDER BY r.id
-        """
+        """,
+        (DEFAULT_TENANT_ID,),
     ).fetchall()
 
     for rfq in rfqs_missing_items:
         rfq_id = int(rfq["id"])
-        company_id = rfq["company_id"]
+        tenant_id = rfq["tenant_id"]
         title = (rfq["title"] or f"Cotacao {rfq_id}").replace("RFQ - ", "Cotacao - ")
 
         item_ids = []
@@ -404,10 +514,10 @@ def _backfill_demo_items_and_quotes(db) -> None:
         for line_no, (description, quantity, uom) in enumerate(item_specs, start=1):
             cursor = db.execute(
                 """
-                INSERT INTO rfq_items (rfq_id, description, quantity, uom, company_id)
+                INSERT INTO rfq_items (rfq_id, description, quantity, uom, tenant_id)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (rfq_id, description, quantity, uom, company_id),
+                (rfq_id, description, quantity, uom, tenant_id),
             )
             item_ids.append(int(cursor.lastrowid))
 
@@ -423,13 +533,13 @@ def _backfill_demo_items_and_quotes(db) -> None:
             for supplier_id in invited_supplier_ids:
                 db.execute(
                     """
-                    INSERT OR IGNORE INTO rfq_item_suppliers (rfq_item_id, supplier_id, company_id)
+                    INSERT OR IGNORE INTO rfq_item_suppliers (rfq_item_id, supplier_id, tenant_id)
                     VALUES (?, ?, ?)
                     """,
-                    (rfq_item_id, supplier_id, company_id),
+                    (rfq_item_id, supplier_id, tenant_id),
                 )
 
-                quote_id = _get_or_create_quote(db, rfq_id, supplier_id, company_id)
+                quote_id = _get_or_create_quote(db, rfq_id, supplier_id, tenant_id)
                 base_price = 90 + (item_index * 15)
                 supplier_offset = (supplier_id % 3) * 4
                 unit_price = float(base_price + supplier_offset)
@@ -437,45 +547,65 @@ def _backfill_demo_items_and_quotes(db) -> None:
 
                 db.execute(
                     """
-                    INSERT OR REPLACE INTO quote_items (quote_id, rfq_item_id, unit_price, lead_time_days, company_id)
+                    INSERT OR REPLACE INTO quote_items (quote_id, rfq_item_id, unit_price, lead_time_days, tenant_id)
                     VALUES (?, ?, ?, ?, ?)
                     """,
-                    (quote_id, rfq_item_id, unit_price, lead_time_days, company_id),
+                    (quote_id, rfq_item_id, unit_price, lead_time_days, tenant_id),
                 )
 
 
 def _ensure_demo_suppliers(db):
-    existing = db.execute("SELECT id, name, company_id FROM suppliers ORDER BY id LIMIT 3").fetchall()
+    existing = db.execute(
+        """
+        SELECT id, name, tenant_id
+        FROM suppliers
+        WHERE tenant_id = ?
+        ORDER BY id
+        LIMIT 3
+        """,
+        (DEFAULT_TENANT_ID,),
+    ).fetchall()
     if existing:
         return existing
 
     demo_names = ["Fornecedor Atlas", "Fornecedor Nexo", "Fornecedor Prisma"]
     for name in demo_names:
         db.execute(
-            "INSERT INTO suppliers (name, company_id) VALUES (?, NULL)",
-            (name,),
+            "INSERT INTO suppliers (name, tenant_id) VALUES (?, ?)",
+            (name, DEFAULT_TENANT_ID),
         )
-    return db.execute("SELECT id, name, company_id FROM suppliers ORDER BY id LIMIT 3").fetchall()
+    return db.execute(
+        """
+        SELECT id, name, tenant_id
+        FROM suppliers
+        WHERE tenant_id = ?
+        ORDER BY id
+        LIMIT 3
+        """,
+        (DEFAULT_TENANT_ID,),
+    ).fetchall()
 
 
-def _get_or_create_quote(db, rfq_id: int, supplier_id: int, company_id: int | None) -> int:
+def _get_or_create_quote(db, rfq_id: int, supplier_id: int, tenant_id: str) -> int:
     row = db.execute(
         """
         SELECT id
         FROM quotes
-        WHERE rfq_id = ? AND supplier_id = ? AND (company_id IS NULL OR company_id = ?)
+        WHERE rfq_id = ? AND supplier_id = ? AND tenant_id = ?
         LIMIT 1
         """,
-        (rfq_id, supplier_id, company_id),
+        (rfq_id, supplier_id, tenant_id),
     ).fetchone()
     if row:
         return int(row["id"])
 
     cursor = db.execute(
         """
-        INSERT INTO quotes (rfq_id, supplier_id, status, currency, company_id)
+        INSERT INTO quotes (rfq_id, supplier_id, status, currency, tenant_id)
         VALUES (?, ?, 'submitted', 'BRL', ?)
         """,
-        (rfq_id, supplier_id, company_id),
+        (rfq_id, supplier_id, tenant_id),
     )
     return int(cursor.lastrowid)
+
+

@@ -1,4 +1,4 @@
-import os
+﻿import os
 import tempfile
 import unittest
 
@@ -20,7 +20,8 @@ class ErpMockSyncTest(unittest.TestCase):
 
         self.app = create_app(TempConfig)
         self.client = self.app.test_client()
-        self.headers = {"X-Company-Id": "1"}
+        self.tenant_id = "tenant-1"
+        self.headers = {"X-Tenant-Id": self.tenant_id}
 
     def tearDown(self) -> None:
         with self.app.app_context():
@@ -43,8 +44,8 @@ class ErpMockSyncTest(unittest.TestCase):
         with self.app.app_context():
             db = get_db()
             total = db.execute(
-                "SELECT COUNT(*) AS total FROM suppliers WHERE company_id = ?",
-                (1,),
+                "SELECT COUNT(*) AS total FROM suppliers WHERE tenant_id = ?",
+                (self.tenant_id,),
             ).fetchone()["total"]
             self.assertEqual(total, len(records))
 
@@ -52,9 +53,9 @@ class ErpMockSyncTest(unittest.TestCase):
                 """
                 SELECT last_success_source_updated_at, last_success_source_id
                 FROM integration_watermarks
-                WHERE company_id = ? AND system = 'senior' AND entity = ?
+                WHERE tenant_id = ? AND system = 'senior' AND entity = ?
                 """,
-                (1, "supplier"),
+                (self.tenant_id, "supplier"),
             ).fetchone()
             self.assertIsNotNone(watermark)
             self.assertEqual(watermark["last_success_source_updated_at"], last_record["updated_at"])
@@ -84,11 +85,80 @@ class ErpMockSyncTest(unittest.TestCase):
         with self.app.app_context():
             db = get_db()
             total = db.execute(
-                "SELECT COUNT(*) AS total FROM purchase_requests WHERE company_id = ?",
-                (1,),
+                "SELECT COUNT(*) AS total FROM purchase_requests WHERE tenant_id = ?",
+                (self.tenant_id,),
             ).fetchone()["total"]
             self.assertEqual(total, len(records))
+
+    def test_sync_purchase_orders_updates_status(self) -> None:
+        records = fetch_erp_records("purchase_order", None, None, limit=100)
+
+        res = self.client.post(
+            "/api/procurement/integrations/sync?scope=purchase_order",
+            headers=self.headers,
+            json={"limit": 100},
+        )
+        self.assertEqual(res.status_code, 200)
+        payload = res.get_json()
+        self.assertEqual(payload["result"]["records_in"], len(records))
+
+        with self.app.app_context():
+            db = get_db()
+            total = db.execute(
+                "SELECT COUNT(*) AS total FROM purchase_orders WHERE tenant_id = ?",
+                (self.tenant_id,),
+            ).fetchone()["total"]
+            self.assertEqual(total, len(records))
+
+            row = db.execute(
+                """
+                SELECT status
+                FROM purchase_orders
+                WHERE tenant_id = ? AND external_id = ?
+                """,
+                (self.tenant_id, "SENIOR-OC-000002"),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["status"], "partially_received")
+
+    def test_sync_receipts_updates_purchase_order(self) -> None:
+        self.client.post(
+            "/api/procurement/integrations/sync?scope=purchase_order",
+            headers=self.headers,
+            json={"limit": 100},
+        )
+
+        receipts = fetch_erp_records("receipt", None, None, limit=100)
+
+        res = self.client.post(
+            "/api/procurement/integrations/sync?scope=receipt",
+            headers=self.headers,
+            json={"limit": 100},
+        )
+        self.assertEqual(res.status_code, 200)
+        payload = res.get_json()
+        self.assertEqual(payload["result"]["records_in"], len(receipts))
+
+        with self.app.app_context():
+            db = get_db()
+            total = db.execute(
+                "SELECT COUNT(*) AS total FROM receipts WHERE tenant_id = ?",
+                (self.tenant_id,),
+            ).fetchone()["total"]
+            self.assertEqual(total, len(receipts))
+
+            row = db.execute(
+                """
+                SELECT status
+                FROM purchase_orders
+                WHERE tenant_id = ? AND external_id = ?
+                """,
+                (self.tenant_id, "SENIOR-OC-000003"),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["status"], "received")
 
 
 if __name__ == "__main__":
     unittest.main()
+

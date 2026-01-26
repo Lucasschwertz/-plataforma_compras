@@ -1,19 +1,18 @@
-﻿:root {
-  --bg: #101a33;
-  --panel: #18264a;
-  --panel-2: #162244;
-  --text: #f2f5fb;
-  --muted: #b7c3dc;
+:root {
+  --bg: #2a3a68;
+  --panel: #34467a;
+  --panel-2: #2f4072;
+  --text: #f8fbff;
+  --muted: #d2def5;
   --accent: #5dd4ff;
   --accent-2: #7c5cff;
   --danger: #ff6b6b;
   --warning: #ffcc66;
   --ok: #4cd08a;
-  --border: #33467a;
-  --border-strong: #4660a8;
-  --overlay: rgba(10, 16, 36, 0.55);
+  --border: #6a86c0;
+  --border-strong: #7b97d6;
+  --overlay: rgba(22, 32, 60, 0.35);
 }
-
 * {
   box-sizing: border-box;
 }
@@ -21,7 +20,7 @@
 body {
   margin: 0;
   font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
-  background: radial-gradient(1200px 800px at 10% -10%, #18244a 0%, var(--bg) 55%);
+  background: radial-gradient(1200px 800px at 10% -10%, #2f4174 0%, var(--bg) 55%);
   color: var(--text);
 }
 
@@ -60,22 +59,22 @@ body {
 
 .button {
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(28, 44, 88, 0.95) 0%, rgba(22, 36, 74, 0.98) 100%);
+  background: linear-gradient(180deg, rgba(60, 82, 132, 0.95) 0%, rgba(48, 66, 112, 0.98) 100%);
   color: var(--text);
   padding: 10px 16px;
   border-radius: 12px;
   cursor: pointer;
   font-weight: 700;
   letter-spacing: 0.2px;
-  box-shadow: 0 10px 24px rgba(12, 22, 54, 0.35);
+  box-shadow: 0 10px 24px rgba(12, 22, 54, 0.25);
   transition: transform 120ms ease, border-color 120ms ease, filter 120ms ease, box-shadow 160ms ease;
 }
 
 .button:hover {
   transform: translateY(-1px);
   border-color: var(--border-strong);
-  filter: brightness(1.03);
-  box-shadow: 0 14px 28px rgba(14, 26, 64, 0.45);
+  filter: brightness(1.04);
+  box-shadow: 0 14px 28px rgba(14, 26, 64, 0.4);
 }
 
 .button:disabled {
@@ -88,12 +87,12 @@ body {
   border-color: transparent;
   background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 100%);
   color: #051022;
-  box-shadow: 0 14px 32px rgba(93, 212, 255, 0.28);
+  box-shadow: 0 14px 32px rgba(93, 212, 255, 0.34);
 }
 
 .button.ghost {
-  background: rgba(19, 34, 72, 0.35);
-  border-color: rgba(93, 212, 255, 0.35);
+  background: rgba(60, 84, 136, 0.3);
+  border-color: rgba(93, 212, 255, 0.45);
 }
 
 .button.danger {
@@ -119,7 +118,7 @@ body {
 .textarea {
   width: 100%;
   border: 1px solid var(--border);
-  background: rgba(18, 26, 51, 0.9);
+  background: rgba(52, 70, 116, 0.9);
   color: var(--text);
   padding: 10px 12px;
   border-radius: 10px;
@@ -199,7 +198,7 @@ thead th {
 
 tbody td {
   padding: 12px 14px;
-  border-bottom: 1px solid rgba(36, 48, 86, 0.7);
+  border-bottom: 1px solid rgba(92, 110, 154, 0.5);
   font-size: 14px;
   vertical-align: middle;
 }
@@ -311,11 +310,11 @@ tbody tr:hover {
 
 .modal {
   width: min(560px, 100%);
-  background: linear-gradient(180deg, #131c3a 0%, #0f1730 100%);
+  background: linear-gradient(180deg, #22305f 0%, #1c2753 100%);
   border: 1px solid var(--border-strong);
   border-radius: 16px;
   padding: 16px;
-  box-shadow: 0 20px 60px rgba(5, 10, 28, 0.6);
+  box-shadow: 0 20px 60px rgba(5, 10, 28, 0.45);
 }
 
 .modal-header {
@@ -434,7 +433,7 @@ tbody tr:hover {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px;
-  background: rgba(18, 26, 51, 0.5);
+  background: rgba(52, 70, 116, 0.45);
 }
 
 .list-item .top {
@@ -541,3 +540,4 @@ a.list-item:hover {
   transform: translateY(-1px);
   box-shadow: 0 14px 28px rgba(14, 26, 64, 0.35);
 }
+

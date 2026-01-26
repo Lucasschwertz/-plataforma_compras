@@ -9,12 +9,14 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
 
     _ensure_database_dir(app)
+    _register_auth(app)
     _register_tenant(app)
     _register_blueprints(app)
 
     with app.app_context():
         init_db()
 
+    _register_scheduler(app)
     app.teardown_appcontext(close_db)
     return app
 
@@ -35,15 +37,30 @@ def _register_blueprints(app: Flask) -> None:
     app.register_blueprint(procurement_bp)
 
 
+def _register_auth(app: Flask) -> None:
+    from app.auth import register_auth
+
+    register_auth(app)
+
+
+def _register_scheduler(app: Flask) -> None:
+    from app.scheduler import start_sync_scheduler
+
+    start_sync_scheduler(app)
+
+
 def _register_tenant(app: Flask) -> None:
     @app.before_request
     def load_company() -> None:
-        # Prototype: allow overriding company via header for testing.
-        header_company = request.headers.get("X-Company-Id")
+        # Prototype: allow overriding tenant via header for testing.
+        header_tenant = (request.headers.get("X-Tenant-Id") or "").strip()
+        if header_tenant:
+            g.tenant_id = header_tenant
+            return
+
+        header_company = (request.headers.get("X-Company-Id") or "").strip()
         if header_company:
-            try:
-                g.company_id = int(header_company)
-                return
-            except ValueError:
-                pass
-        g.company_id = None
+            g.tenant_id = f"tenant-{header_company}"
+            return
+
+        g.tenant_id = None

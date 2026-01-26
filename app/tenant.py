@@ -1,5 +1,8 @@
 from flask import session, g
 
 
-def current_company_id():
-    return session.get("company_id") or getattr(g, "company_id", None)
+DEFAULT_TENANT_ID = "tenant-demo"
+
+
+def current_tenant_id() -> str | None:
+    return session.get("tenant_id") or getattr(g, "tenant_id", None)

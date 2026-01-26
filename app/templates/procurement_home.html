@@ -14,13 +14,14 @@
             <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
             <div class="brand-text">
               <div class="brand-title">Plataforma Compras</div>
-              <div class="brand-tagline">Operacao + analise no mesmo lugar. Empresa #{{ company_id }}</div>
+              <div class="brand-tagline">Operacao + analise no mesmo lugar. Empresa #{{ tenant_id }}</div>
             </div>
           </a>
         </div>
         <div class="actions">
           <a class="button primary" href="/procurement/inbox">Abrir Inbox</a>
           <a class="button ghost" href="/procurement/integrations/logs">Ver Logs</a>
+          <a class="button ghost" href="/logout">Sair</a>
         </div>
       </section>
 
@@ -66,21 +67,6 @@
           </div>
         </article>
 
-        <article class="card">
-          <h3>Atalhos Rapidos</h3>
-          <div class="actions" style="margin-bottom: 8px">
-            <a class="button" href="/procurement/inbox?type=rfq">Ver Cotacoes</a>
-            <a class="button" href="/procurement/inbox?type=purchase_order">Ver OCs</a>
-          </div>
-          <div class="actions" style="margin-bottom: 8px">
-            <a class="button ghost" href="/procurement/inbox?priority=urgent">Prioridade urgente</a>
-            <a class="button ghost" href="/procurement/inbox?status=sent_to_erp">Enviadas ao ERP</a>
-          </div>
-          <div class="actions">
-            <a class="button ghost" href="/api/procurement/inbox">API da Inbox</a>
-            <a class="button ghost" href="/api/procurement/integrations/logs">API de Logs</a>
-          </div>
-        </article>
       </section>
     </main>
   </body>

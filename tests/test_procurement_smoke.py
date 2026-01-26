@@ -19,7 +19,8 @@ class ProcurementSmokeTest(unittest.TestCase):
 
         self.app = create_app(TempConfig)
         self.client = self.app.test_client()
-        self.headers = {"X-Company-Id": "1"}
+        self.tenant_id = "tenant-1"
+        self.headers = {"X-Tenant-Id": self.tenant_id}
 
     def tearDown(self) -> None:
         with self.app.app_context():
@@ -39,13 +40,25 @@ class ProcurementSmokeTest(unittest.TestCase):
         inbox = self._json(inbox_res)
         self.assertTrue(inbox["items"], "expected seeded inbox items")
 
+        items_res = self.client.get(
+            "/api/procurement/purchase-request-items/open",
+            headers=self.headers,
+        )
+        self.assertEqual(items_res.status_code, 200)
+        items_payload = self._json(items_res)
+        item_ids = [item["id"] for item in items_payload.get("items", [])]
+        self.assertTrue(item_ids, "expected purchase request items for rfq creation")
+
         rfq_res = self.client.post(
             "/api/procurement/rfqs",
             headers=self.headers,
-            json={"title": "Smoke RFQ"},
+            json={"title": "Smoke RFQ", "purchase_request_item_ids": item_ids[:2]},
         )
         self.assertEqual(rfq_res.status_code, 201)
-        rfq_id = self._json(rfq_res)["id"]
+        rfq_payload = self._json(rfq_res)
+        rfq_id = rfq_payload["id"]
+        self.assertTrue(rfq_payload.get("created_at"))
+        self.assertEqual(len(rfq_payload.get("rfq_items", [])), 2)
 
         award_res = self.client.post(
             f"/api/procurement/rfqs/{rfq_id}/award",
@@ -92,3 +105,4 @@ class ProcurementSmokeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
