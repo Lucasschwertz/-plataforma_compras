@@ -38,6 +38,20 @@ def init_db():
 
     db.execute(
         """
+        CREATE TABLE IF NOT EXISTS auth_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            display_name TEXT,
+            tenant_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    db.execute(
+        """
         CREATE TABLE IF NOT EXISTS suppliers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -383,6 +397,13 @@ def init_db():
         FOR EACH ROW
         BEGIN
             UPDATE receipts SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_auth_users_updated_at
+        AFTER UPDATE ON auth_users
+        FOR EACH ROW
+        BEGIN
+            UPDATE auth_users SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
         END;
 
         CREATE TRIGGER IF NOT EXISTS trg_integration_watermarks_updated_at

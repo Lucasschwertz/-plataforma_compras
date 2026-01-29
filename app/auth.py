@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Iterable
 
+import re
+
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from app.db import get_db
+from app.tenant import DEFAULT_TENANT_ID
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -58,6 +64,35 @@ def login():
     return render_template("login.html", error=error)
 
 
+@auth_bp.route("/register", methods=["GET", "POST"])
+def register():
+    if session.get("user_email"):
+        return redirect(url_for("home.home"))
+
+    error = None
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        password = request.form.get("password") or ""
+        display_name = (request.form.get("display_name") or "").strip() or None
+        company_name = (request.form.get("company_name") or "").strip()
+
+        if not email or not password:
+            error = "Informe email e senha."
+        else:
+            tenant_id = _resolve_tenant_id(company_name)
+            try:
+                user = _create_user(email, password, display_name, tenant_id, company_name or None)
+            except ValueError as exc:
+                error = str(exc)
+            else:
+                session["user_email"] = user["email"]
+                session["display_name"] = user["display_name"]
+                session["tenant_id"] = user["tenant_id"]
+                return redirect(url_for("home.home"))
+
+    return render_template("register.html", error=error)
+
+
 @auth_bp.route("/logout", methods=["GET"])
 def logout():
     session.clear()
@@ -76,10 +111,93 @@ def _safe_next_url() -> str | None:
 
 
 def _find_user(email: str, password: str, raw_users: object) -> dict | None:
+    db_user = _find_user_in_db(email)
+    if db_user and check_password_hash(db_user["password_hash"], password):
+        return {
+            "email": db_user["email"],
+            "display_name": db_user["display_name"] or db_user["email"].split("@")[0],
+            "tenant_id": db_user["tenant_id"],
+        }
+
     for user in _parse_users(raw_users):
         if user["email"] == email and user["password"] == password:
             return user
     return None
+
+
+def _find_user_in_db(email: str) -> dict | None:
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT email, password_hash, display_name, tenant_id
+        FROM auth_users
+        WHERE email = ?
+        """,
+        (email,),
+    ).fetchone()
+    if not row:
+        return None
+    return dict(row)
+
+
+def _create_user(
+    email: str,
+    password: str,
+    display_name: str | None,
+    tenant_id: str,
+    company_name: str | None,
+) -> dict:
+    db = get_db()
+    existing = db.execute(
+        "SELECT 1 FROM auth_users WHERE email = ?",
+        (email,),
+    ).fetchone()
+    if existing:
+        raise ValueError("Email ja cadastrado. Use outro email ou faca login.")
+
+    _ensure_tenant(db, tenant_id, company_name or f"Tenant {tenant_id}")
+
+    password_hash = generate_password_hash(password)
+    db.execute(
+        """
+        INSERT INTO auth_users (email, password_hash, display_name, tenant_id)
+        VALUES (?, ?, ?, ?)
+        """,
+        (email, password_hash, display_name, tenant_id),
+    )
+    db.commit()
+
+    return {
+        "email": email,
+        "display_name": display_name or email.split("@")[0],
+        "tenant_id": tenant_id,
+    }
+
+
+def _ensure_tenant(db, tenant_id: str, name: str) -> None:
+    db.execute(
+        """
+        INSERT OR IGNORE INTO tenants (id, name, subdomain)
+        VALUES (?, ?, ?)
+        """,
+        (tenant_id, name, tenant_id),
+    )
+
+
+def _resolve_tenant_id(company_name: str) -> str:
+    if not company_name:
+        return DEFAULT_TENANT_ID
+    slug = _slugify(company_name)
+    if not slug:
+        return DEFAULT_TENANT_ID
+    return f"tenant-{slug}"
+
+
+def _slugify(value: str) -> str:
+    value = value.strip().lower()
+    value = re.sub(r"[^\w\s-]", "", value)
+    value = re.sub(r"[\s_-]+", "-", value)
+    return value.strip("-")
 
 
 def _parse_users(raw_users: object) -> Iterable[dict]:
