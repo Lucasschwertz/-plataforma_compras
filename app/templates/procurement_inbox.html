@@ -567,11 +567,11 @@
         rfqTitleInput.focus();
       }
 
-      function openAwardModal(rfqId) {
+      async function openAwardModal(rfqId) {
         const rfqItem = state.itemsByKey.get(`rfq:${rfqId}`);
         awardRfqIdInput.value = String(rfqId);
-        awardSupplierInput.value = "Fornecedor A";
-        awardReasonInput.value = "Melhor prazo com preco competitivo";
+        awardSupplierInput.value = "";
+        awardReasonInput.value = "";
 
         awardMeta.innerHTML = rfqItem
           ? `<span class="meta-pill">Cotacao #${rfqId}</span><span class="meta-pill">${escapeHtml(
@@ -581,6 +581,21 @@
 
         openModal(awardModalBackdrop);
         awardSupplierInput.focus();
+
+        try {
+          const res = await fetch(`/api/procurement/rfqs/${rfqId}/comparison`);
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            const suggestion = getSuggestedSupplierFromComparison(data);
+            if (suggestion) {
+              awardSupplierInput.value = suggestion.name;
+              awardReasonInput.value = `Menor total (${suggestion.reason})`;
+              awardMeta.innerHTML += `<span class="meta-pill">Sugestao: ${escapeHtml(suggestion.name)}</span>`;
+            }
+          }
+        } catch (error) {
+          // ignore - suggestion is optional
+        }
       }
 
       function openPoModal(awardId, rfqId) {
@@ -806,6 +821,19 @@
           default:
             return type || "-";
         }
+      }
+
+      function getSuggestedSupplierFromComparison(data) {
+        if (!data || !data.summary || !data.summary.totals) return null;
+        const suggestedId = data.summary.suggested_supplier_id;
+        if (!suggestedId) return null;
+        const total = data.summary.totals.find((t) => t.supplier_id === suggestedId);
+        if (!total) return null;
+        return {
+          id: suggestedId,
+          name: total.supplier_name || `Fornecedor #${suggestedId}`,
+          reason: data.summary.suggestion_reason || "menor total",
+        };
       }
 
       function escapeHtml(value) {

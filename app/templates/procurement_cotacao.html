@@ -169,6 +169,7 @@
         fornecedores: [],
         decisao: null,
         ordemCompra: null,
+        comparacao: null,
       };
 
       function escapeHtml(value) {
@@ -433,8 +434,15 @@
 
       function renderDecisao(decisao, oc) {
         if (!decisao) {
+          const suggestion = getSuggestedSupplier(state.comparacao);
+          if (suggestion) {
+            fornecedorInput.value = suggestion.name;
+            motivoInput.value = suggestion.reason;
+            decisaoHint.textContent = `Sugestao: ${suggestion.name} (${suggestion.reason}).`;
+          } else {
+            decisaoHint.textContent = "Sem decisao registrada ainda.";
+          }
           renderKv(decisaoResumo, [["Status", "Aguardando decisao"], ["Dica", "Preencha abaixo para decidir"]]);
-          decisaoHint.textContent = "Sem decisao registrada ainda.";
           decisaoForm.style.display = "grid";
           return;
         }
@@ -470,6 +478,21 @@
         ]);
       }
 
+      function getSuggestedSupplier(data) {
+        if (!data || !data.summary) return null;
+        const summary = data.summary;
+        const suggestedId = summary.suggested_supplier_id;
+        if (!suggestedId || !summary.totals) return null;
+        const total = summary.totals.find((t) => t.supplier_id === suggestedId);
+        if (!total) return null;
+        const reason = summary.suggestion_reason || "menor total";
+        return {
+          id: suggestedId,
+          name: total.supplier_name || `Fornecedor #${suggestedId}`,
+          reason,
+        };
+      }
+
       async function carregar() {
         const [cotacaoRes, fornecedoresRes, comparacaoRes] = await Promise.all([
           fetch(`/api/procurement/cotacoes/${rfqId}`),
@@ -498,6 +521,7 @@
         state.decisao = cotacaoData.decisao;
         state.ordemCompra = cotacaoData.ordem_compra;
         state.fornecedores = fornecedoresData.items || [];
+        state.comparacao = comparacaoRes.ok ? comparacaoData : null;
 
         renderCotacao(state.cotacao);
         renderFornecedores();
@@ -506,7 +530,7 @@
         renderOc(state.ordemCompra);
         renderEventos(eventosCotacao, cotacaoData.eventos_cotacao, "Sem eventos da cotacao.");
         renderEventos(eventosDecisao, cotacaoData.eventos_decisao, "Sem eventos da decisao.");
-        renderComparacao(comparacaoRes.ok ? comparacaoData : {});
+        renderComparacao(state.comparacao || {});
       }
 
       async function convidarFornecedor(rfqItemId, supplierId) {

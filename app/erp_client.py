@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import time
 import urllib.parse
 import urllib.request
 from typing import List
@@ -52,7 +53,7 @@ def _fetch_senior_records(
         "limit": str(limit),
     }
     url = f"{endpoint}?{urllib.parse.urlencode({k: v for k, v in query.items() if v})}"
-    payload = _request_json("GET", url)
+    payload = _request_json("GET", url, allow_retry=True)
     return _normalize_records(payload)
 
 
@@ -67,7 +68,12 @@ def _push_senior_purchase_order(purchase_order: dict) -> dict:
         "source": "plataforma_compras",
     }
     payload = {k: v for k, v in payload.items() if v is not None}
-    response = _request_json("POST", endpoint, payload=payload)
+    response = _request_json(
+        "POST",
+        endpoint,
+        payload=payload,
+        allow_retry=_bool_config("ERP_RETRY_ON_POST", False),
+    )
     if not isinstance(response, dict):
         raise ErpError("Resposta inesperada do ERP (JSON nao-objeto).")
 
@@ -92,8 +98,15 @@ def _entity_endpoint(entity: str) -> str:
     return f"{base_url}/{path.lstrip('/')}"
 
 
-def _request_json(method: str, url: str, payload: dict | None = None) -> object:
+def _request_json(
+    method: str,
+    url: str,
+    payload: dict | None = None,
+    allow_retry: bool = False,
+) -> object:
     timeout = _int_config("ERP_TIMEOUT_SECONDS", 20)
+    attempts = _int_config("ERP_RETRY_ATTEMPTS", 2) if allow_retry else 1
+    backoff_ms = _int_config("ERP_RETRY_BACKOFF_MS", 300)
     headers = {"Accept": "application/json"}
 
     token = _get_config("ERP_TOKEN")
@@ -115,19 +128,30 @@ def _request_json(method: str, url: str, payload: dict | None = None) -> object:
     if not _bool_config("ERP_VERIFY_SSL", True):
         context = ssl._create_unverified_context()
 
-    try:
-        with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
-            body = response.read().decode("utf-8")
-            if not body:
-                return {}
-            return json.loads(body)
-    except urllib.error.HTTPError as exc:  # noqa: PERF203
-        error_body = exc.read().decode("utf-8") if exc.fp else ""
-        raise ErpError(f"ERP HTTP {exc.code}: {error_body[:200]}") from exc
-    except urllib.error.URLError as exc:
-        raise ErpError(f"Erro de conexao ERP: {exc.reason}") from exc
-    except json.JSONDecodeError as exc:
-        raise ErpError("ERP retornou JSON invalido.") from exc
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+                body = response.read().decode("utf-8")
+                if not body:
+                    return {}
+                return json.loads(body)
+        except urllib.error.HTTPError as exc:  # noqa: PERF203
+            error_body = exc.read().decode("utf-8") if exc.fp else ""
+            should_retry = allow_retry and attempt < attempts - 1 and exc.code >= 500
+            if should_retry:
+                time.sleep(backoff_ms / 1000)
+                continue
+            raise ErpError(f"ERP HTTP {exc.code}: {error_body[:200]}") from exc
+        except urllib.error.URLError as exc:
+            should_retry = allow_retry and attempt < attempts - 1
+            if should_retry:
+                time.sleep(backoff_ms / 1000)
+                continue
+            raise ErpError(f"Erro de conexao ERP: {exc.reason}") from exc
+        except json.JSONDecodeError as exc:
+            raise ErpError("ERP retornou JSON invalido.") from exc
+
+    raise ErpError("Falha ao chamar ERP.")
 
 
 def _normalize_records(payload: object) -> List[dict]:

@@ -42,3 +42,6 @@ class Config:
     ERP_ENTITY_ENDPOINTS = os.environ.get("ERP_ENTITY_ENDPOINTS")
     ERP_TIMEOUT_SECONDS = _int_env("ERP_TIMEOUT_SECONDS", 20)
     ERP_VERIFY_SSL = _bool_env("ERP_VERIFY_SSL", True)
+    ERP_RETRY_ATTEMPTS = _int_env("ERP_RETRY_ATTEMPTS", 2)
+    ERP_RETRY_BACKOFF_MS = _int_env("ERP_RETRY_BACKOFF_MS", 300)
+    ERP_RETRY_ON_POST = _bool_env("ERP_RETRY_ON_POST", False)
