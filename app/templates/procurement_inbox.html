@@ -252,6 +252,7 @@
         },
         itemsByKey: new Map(),
         lastItems: [],
+        rfqSuggestions: new Map(),
         openRequestItems: [],
       };
 
@@ -400,6 +401,7 @@
 
         state.lastItems = data.items || [];
         state.itemsByKey = new Map(state.lastItems.map((item) => [keyFor(item), item]));
+        state.rfqSuggestions = new Map();
 
         updateKpis(data.kpis || {});
         renderMeta(data);
@@ -412,6 +414,8 @@
 
         const filtersLabel = activeFilters ? ` | filtros: ${activeFilters}` : "";
         summary.textContent = `${state.lastItems.length} itens na inbox${filtersLabel}`;
+
+        await loadRfqSuggestions(state.lastItems);
       }
 
       function renderMeta(data) {
@@ -472,6 +476,12 @@
           pills.push(`<span class="meta-pill">decisao #${item.award_id}</span>`);
           if (item.award_purchase_order_id) {
             pills.push(`<span class="meta-pill">oc #${item.award_purchase_order_id}</span>`);
+          }
+        }
+        if (item.type === "rfq" && !item.award_id) {
+          const suggestion = state.rfqSuggestions.get(item.id);
+          if (suggestion) {
+            pills.push(`<span class="meta-pill">Sugestao: ${escapeHtml(suggestion.name)}</span>`);
           }
         }
         if (item.type === "purchase_order" && item.status === "erp_accepted") {
@@ -834,6 +844,44 @@
           name: total.supplier_name || `Fornecedor #${suggestedId}`,
           reason: data.summary.suggestion_reason || "menor total",
         };
+      }
+
+      async function loadRfqSuggestions(items) {
+        const rfqIds = Array.from(
+          new Set(
+            items
+              .filter((item) => item.type === "rfq" && !item.award_id)
+              .map((item) => item.id)
+          )
+        );
+
+        if (!rfqIds.length) return;
+
+        const results = await Promise.all(
+          rfqIds.map(async (rfqId) => {
+            try {
+              const res = await fetch(`/api/procurement/rfqs/${rfqId}/comparison`);
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) return null;
+              const suggestion = getSuggestedSupplierFromComparison(data);
+              if (!suggestion) return null;
+              return { rfqId, suggestion };
+            } catch (error) {
+              return null;
+            }
+          })
+        );
+
+        let changed = false;
+        results.forEach((result) => {
+          if (!result) return;
+          state.rfqSuggestions.set(result.rfqId, result.suggestion);
+          changed = true;
+        });
+
+        if (changed) {
+          renderRows(state.lastItems);
+        }
       }
 
       function escapeHtml(value) {
