@@ -687,6 +687,7 @@ def rfq_comparison(rfq_id: int):
             404,
         )
 
+    comparison = _build_rfq_comparison(db, tenant_id, rfq_id)
     return jsonify(
         {
             "rfq_id": rfq["id"],
@@ -695,10 +696,7 @@ def rfq_comparison(rfq_id: int):
                 "status": rfq["status"],
                 "updated_at": rfq["updated_at"],
             },
-            "items": [],
-            "suppliers": [],
-            "suggested_supplier_id": None,
-            "suggestion_reason": "comparacao_indisponivel_no_mvp",
+            **comparison,
         }
     )
 
@@ -1172,6 +1170,176 @@ def _load_rfq_items_with_quotes(db, tenant_id: str | None, rfq_id: int) -> List[
         item["melhor_proposta"] = melhores[0] if melhores else None
 
     return list(items.values())
+
+
+def _build_rfq_comparison(db, tenant_id: str | None, rfq_id: int) -> dict:
+    effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
+
+    items_rows = db.execute(
+        """
+        SELECT id, description, quantity, uom
+        FROM rfq_items
+        WHERE rfq_id = ? AND tenant_id = ?
+        ORDER BY id
+        """,
+        (rfq_id, effective_tenant_id),
+    ).fetchall()
+
+    items: Dict[int, dict] = {
+        int(row["id"]): {
+            "rfq_item_id": int(row["id"]),
+            "description": row["description"],
+            "quantity": row["quantity"],
+            "uom": row["uom"],
+            "quotes": [],
+            "suggested_supplier_id": None,
+            "suggestion_reason": None,
+        }
+        for row in items_rows
+    }
+
+    quote_rows = db.execute(
+        """
+        SELECT
+            qi.rfq_item_id,
+            s.id AS supplier_id,
+            s.name AS supplier_name,
+            s.risk_flags,
+            qi.unit_price,
+            qi.lead_time_days
+        FROM quote_items qi
+        JOIN quotes q
+          ON q.id = qi.quote_id AND q.tenant_id = qi.tenant_id
+        JOIN suppliers s
+          ON s.id = q.supplier_id AND s.tenant_id = q.tenant_id
+        WHERE q.rfq_id = ? AND qi.tenant_id = ?
+        ORDER BY qi.rfq_item_id, s.name
+        """,
+        (rfq_id, effective_tenant_id),
+    ).fetchall()
+
+    suppliers: Dict[int, dict] = {}
+    totals: Dict[int, dict] = {}
+    total_items = len(items_rows)
+
+    for row in quote_rows:
+        item_id = int(row["rfq_item_id"])
+        item = items.get(item_id)
+        if not item:
+            continue
+
+        unit_price = row["unit_price"]
+        quantity = item["quantity"] or 0
+        total_value = None
+        if unit_price is not None:
+            total_value = float(unit_price) * float(quantity or 0)
+
+        quote = {
+            "supplier_id": row["supplier_id"],
+            "supplier_name": row["supplier_name"],
+            "unit_price": unit_price,
+            "lead_time_days": row["lead_time_days"],
+            "total": total_value,
+        }
+        item["quotes"].append(quote)
+
+        supplier_id = row["supplier_id"]
+        if supplier_id not in suppliers:
+            suppliers[supplier_id] = {
+                "supplier_id": supplier_id,
+                "name": row["supplier_name"],
+                "risk_flags": _parse_risk_flags(row["risk_flags"]),
+            }
+
+        if supplier_id not in totals:
+            totals[supplier_id] = {
+                "supplier_id": supplier_id,
+                "supplier_name": row["supplier_name"],
+                "total_amount": 0.0,
+                "lead_times": [],
+                "items_quoted": set(),
+            }
+
+        if total_value is not None:
+            totals[supplier_id]["total_amount"] += total_value
+            totals[supplier_id]["items_quoted"].add(item_id)
+        if row["lead_time_days"] is not None:
+            totals[supplier_id]["lead_times"].append(int(row["lead_time_days"]))
+
+    for item in items.values():
+        quotes = [q for q in item["quotes"] if q.get("total") is not None]
+        if not quotes:
+            continue
+        quotes.sort(
+            key=lambda q: (
+                q["total"],
+                q["lead_time_days"] if q["lead_time_days"] is not None else 9_999,
+            )
+        )
+        best = quotes[0]
+        item["suggested_supplier_id"] = best["supplier_id"]
+        item["suggestion_reason"] = "menor total, desempate por prazo" if len(quotes) > 1 else "menor total"
+
+    totals_list = []
+    for data in totals.values():
+        items_quoted = len(data["items_quoted"])
+        lead_times = data["lead_times"]
+        avg_lead_time = None
+        if lead_times:
+            avg_lead_time = sum(lead_times) / len(lead_times)
+        totals_list.append(
+            {
+                "supplier_id": data["supplier_id"],
+                "supplier_name": data["supplier_name"],
+                "total_amount": data["total_amount"],
+                "avg_lead_time_days": avg_lead_time,
+                "items_quoted": items_quoted,
+                "items_total": total_items,
+            }
+        )
+
+    suggested_supplier_id = None
+    suggestion_reason = None
+    if totals_list:
+        full_cover = [t for t in totals_list if t["items_quoted"] == total_items]
+        if full_cover:
+            candidates = full_cover
+            suggestion_reason = "menor total (cobertura completa)"
+        else:
+            max_cover = max(t["items_quoted"] for t in totals_list)
+            candidates = [t for t in totals_list if t["items_quoted"] == max_cover]
+            suggestion_reason = "maior cobertura, menor total"
+
+        candidates.sort(
+            key=lambda t: (
+                t["total_amount"],
+                t["avg_lead_time_days"] if t["avg_lead_time_days"] is not None else 9_999,
+            )
+        )
+        suggested_supplier_id = candidates[0]["supplier_id"]
+
+    return {
+        "items": list(items.values()),
+        "suppliers": list(suppliers.values()),
+        "summary": {
+            "total_items": total_items,
+            "totals": totals_list,
+            "suggested_supplier_id": suggested_supplier_id,
+            "suggestion_reason": suggestion_reason,
+        },
+    }
+
+
+def _parse_risk_flags(raw_value: str | None) -> dict:
+    if not raw_value:
+        return DEFAULT_RISK_FLAGS
+    try:
+        parsed = json.loads(raw_value)
+    except (TypeError, json.JSONDecodeError):
+        return DEFAULT_RISK_FLAGS
+    if isinstance(parsed, dict):
+        return parsed
+    return DEFAULT_RISK_FLAGS
 
 
 def _load_latest_award_for_rfq(db, tenant_id: str | None, rfq_id: int) -> dict | None:

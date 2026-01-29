@@ -79,6 +79,26 @@
           <div class="small" style="margin-top: 8px">Dica: voce pode convidar fornecedores diferentes para cada item.</div>
         </article>
 
+        <article class="card" style="grid-column: 1 / -1" id="comparacao">
+          <h3>Comparacao por fornecedor</h3>
+          <div class="small" id="comparacaoResumo"></div>
+          <div class="table-wrap" style="margin-top: 10px">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fornecedor</th>
+                  <th>Total</th>
+                  <th>Prazo medio</th>
+                  <th>Cobertura</th>
+                  <th>Destaque</th>
+                </tr>
+              </thead>
+              <tbody id="comparacaoTabela"></tbody>
+            </table>
+          </div>
+          <div class="list" id="comparacaoItens" style="margin-top: 12px"></div>
+        </article>
+
         <article class="card" style="grid-column: 1 / -1">
           <h3>Registrar Proposta por Fornecedor</h3>
           <form id="propostaForm" style="display: grid; gap: 10px">
@@ -129,6 +149,9 @@
       const propostaItensBody = document.getElementById("propostaItensBody");
       const eventosCotacao = document.getElementById("eventosCotacao");
       const eventosDecisao = document.getElementById("eventosDecisao");
+      const comparacaoResumo = document.getElementById("comparacaoResumo");
+      const comparacaoTabela = document.getElementById("comparacaoTabela");
+      const comparacaoItens = document.getElementById("comparacaoItens");
 
       const decisaoForm = document.getElementById("decisaoForm");
       const fornecedorInput = document.getElementById("fornecedorInput");
@@ -207,6 +230,87 @@
         const preco = melhor.unit_price != null ? `R$ ${Number(melhor.unit_price).toFixed(2)}` : "-";
         const prazo = melhor.lead_time_days != null ? `${melhor.lead_time_days} dias` : "-";
         return `${melhor.supplier_name} | ${preco} | ${prazo}`;
+      }
+
+      function formatCurrency(value) {
+        if (value == null || Number.isNaN(Number(value))) return "-";
+        return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
+      }
+
+      function renderComparacao(data) {
+        if (!data || !data.items || !data.items.length) {
+          comparacaoResumo.textContent = "Sem itens para comparar.";
+          comparacaoTabela.innerHTML = '<tr><td colspan="5" class="empty-row">Sem propostas.</td></tr>';
+          comparacaoItens.innerHTML = "";
+          return;
+        }
+
+        const summary = data.summary || {};
+        const totals = summary.totals || [];
+        const suggestedSupplierId = summary.suggested_supplier_id;
+        const suggestionReason = summary.suggestion_reason || "Sem sugestao";
+
+        comparacaoResumo.textContent = totals.length
+          ? `Sugestao: fornecedor #${suggestedSupplierId || "-"} (${suggestionReason}).`
+          : "Sem propostas cadastradas para comparar.";
+
+        if (!totals.length) {
+          comparacaoTabela.innerHTML = '<tr><td colspan="5" class="empty-row">Sem propostas.</td></tr>';
+        } else {
+          comparacaoTabela.innerHTML = totals
+            .map((t) => {
+              const destaque = t.supplier_id === suggestedSupplierId ? "Melhor total" : "-";
+              const prazo = t.avg_lead_time_days != null ? `${t.avg_lead_time_days.toFixed(1)} dias` : "-";
+              const cobertura = `${t.items_quoted}/${t.items_total}`;
+              return `
+                <tr>
+                  <td><strong>${escapeHtml(t.supplier_name || `Fornecedor #${t.supplier_id}`)}</strong></td>
+                  <td>${formatCurrency(t.total_amount)}</td>
+                  <td>${escapeHtml(prazo)}</td>
+                  <td>${escapeHtml(cobertura)}</td>
+                  <td>${escapeHtml(destaque)}</td>
+                </tr>
+              `;
+            })
+            .join("");
+        }
+
+        comparacaoItens.innerHTML = data.items
+          .map((item) => {
+            const quotes = item.quotes || [];
+            if (!quotes.length) {
+              return `
+                <div class="list-item">
+                  <div class="top">
+                    <div class="title">${escapeHtml(item.description || "Item")}</div>
+                    <div class="meta-line">Sem propostas registradas</div>
+                  </div>
+                </div>
+              `;
+            }
+            const lines = quotes
+              .map((q) => {
+                const destaque = q.supplier_id === item.suggested_supplier_id;
+                const label = `${q.supplier_name} | ${formatCurrency(q.total)} | ${
+                  q.lead_time_days != null ? `${q.lead_time_days} dias` : "prazo -"
+                }`;
+                return `<div class="meta-line">${destaque ? "<strong>" : ""}${escapeHtml(label)}${
+                  destaque ? "</strong>" : ""
+                }</div>`;
+              })
+              .join("");
+
+            return `
+              <div class="list-item">
+                <div class="top">
+                  <div class="title">${escapeHtml(item.description || "Item")}</div>
+                  <div class="meta-line">Sugestao: ${escapeHtml(item.suggestion_reason || "-")}</div>
+                </div>
+                ${lines}
+              </div>
+            `;
+          })
+          .join("");
       }
 
       function renderItens() {
@@ -367,13 +471,15 @@
       }
 
       async function carregar() {
-        const [cotacaoRes, fornecedoresRes] = await Promise.all([
+        const [cotacaoRes, fornecedoresRes, comparacaoRes] = await Promise.all([
           fetch(`/api/procurement/cotacoes/${rfqId}`),
           fetch("/api/procurement/fornecedores"),
+          fetch(`/api/procurement/rfqs/${rfqId}/comparison`),
         ]);
 
         const cotacaoData = await cotacaoRes.json();
         const fornecedoresData = await fornecedoresRes.json().catch(() => ({ items: [] }));
+        const comparacaoData = await comparacaoRes.json().catch(() => ({}));
 
         if (!cotacaoRes.ok) {
           cotacaoResumo.innerHTML = `<div class="small">Erro: ${escapeHtml(cotacaoData.message || cotacaoData.error || "desconhecido")}</div>`;
@@ -400,6 +506,7 @@
         renderOc(state.ordemCompra);
         renderEventos(eventosCotacao, cotacaoData.eventos_cotacao, "Sem eventos da cotacao.");
         renderEventos(eventosDecisao, cotacaoData.eventos_decisao, "Sem eventos da decisao.");
+        renderComparacao(comparacaoRes.ok ? comparacaoData : {});
       }
 
       async function convidarFornecedor(rfqItemId, supplierId) {

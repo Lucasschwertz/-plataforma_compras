@@ -528,11 +528,9 @@
 
       function bindRowActions() {
         document.querySelectorAll("[data-action='comparison']").forEach((btn) => {
-          btn.addEventListener("click", async () => {
+          btn.addEventListener("click", () => {
             const id = btn.getAttribute("data-id");
-            const res = await fetch(`/api/procurement/rfqs/${id}/comparison`);
-            const data = await res.json();
-            alert(`Cotacao ${data.rfq_id}: ${data.suggestion_reason}`);
+            window.location.href = `/procurement/cotacoes/${id}#comparacao`;
           });
         });
 
