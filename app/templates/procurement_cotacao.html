@@ -88,7 +88,7 @@
                 <tr>
                   <th>Fornecedor</th>
                   <th>Total</th>
-                  <th>Prazo medio</th>
+                  <th>Prazo medio / pior</th>
                   <th>Cobertura</th>
                   <th>Destaque</th>
                 </tr>
@@ -238,6 +238,24 @@
         return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
       }
 
+      function renderSlaResumo(summary) {
+        const sla = summary?.sla || {};
+        const rfqAge = sla.rfq_age_days != null ? `${sla.rfq_age_days} dias desde abertura` : "idade indisponivel";
+        const lastQuote =
+          sla.last_quote_days_ago != null
+            ? `${sla.last_quote_days_ago} dias desde ultima proposta`
+            : "sem propostas registradas";
+        const slaLimit = sla.sla_limit_days > 0 ? `limite ${sla.sla_limit_days}d` : "SLA desativado";
+        const slaPill =
+          sla.sla_limit_days > 0
+            ? sla.sla_risk
+              ? '<span class="pill danger">Risco SLA</span>'
+              : '<span class="pill ok">SLA OK</span>'
+            : '<span class="pill">SLA desativado</span>';
+
+        return `${rfqAge} • ${lastQuote} • ${slaLimit} ${slaPill}`;
+      }
+
       function renderComparacao(data) {
         if (!data || !data.items || !data.items.length) {
           comparacaoResumo.textContent = "Sem itens para comparar.";
@@ -251,9 +269,19 @@
         const suggestedSupplierId = summary.suggested_supplier_id;
         const suggestionReason = summary.suggestion_reason || "Sem sugestao";
 
-        comparacaoResumo.textContent = totals.length
-          ? `Sugestao: fornecedor #${suggestedSupplierId || "-"} (${suggestionReason}).`
-          : "Sem propostas cadastradas para comparar.";
+        let suggestionLabel = "Sem propostas cadastradas para comparar.";
+        if (totals.length) {
+          const suggestedSupplier = totals.find((t) => t.supplier_id === suggestedSupplierId);
+          const suggestedName = suggestedSupplier?.supplier_name
+            ? suggestedSupplier.supplier_name
+            : `fornecedor #${suggestedSupplierId || "-"}`;
+          suggestionLabel = `Sugestao: ${suggestedName} (${suggestionReason}).`;
+        }
+
+        comparacaoResumo.innerHTML = `
+          <div class="meta-line">${escapeHtml(suggestionLabel)}</div>
+          <div class="meta-line">${renderSlaResumo(summary)}</div>
+        `;
 
         if (!totals.length) {
           comparacaoTabela.innerHTML = '<tr><td colspan="5" class="empty-row">Sem propostas.</td></tr>';
@@ -261,13 +289,22 @@
           comparacaoTabela.innerHTML = totals
             .map((t) => {
               const destaque = t.supplier_id === suggestedSupplierId ? "Melhor total" : "-";
-              const prazo = t.avg_lead_time_days != null ? `${t.avg_lead_time_days.toFixed(1)} dias` : "-";
+              const prazoMedio = t.avg_lead_time_days != null ? `${t.avg_lead_time_days.toFixed(1)} dias` : "-";
+              const prazoPior = t.max_lead_time_days != null ? `pior ${t.max_lead_time_days}d` : "";
               const cobertura = `${t.items_quoted}/${t.items_total}`;
+              const flags = [];
+              if (t.flags?.late_delivery) flags.push('<span class="flag warning">Atraso historico</span>');
+              if (t.flags?.no_supplier_response) flags.push('<span class="flag danger">Sem resposta</span>');
+              const flagsHtml = flags.length ? `<div class="flags">${flags.join("")}</div>` : "";
+              const rowClass = t.supplier_id === suggestedSupplierId ? "suggested" : "";
               return `
-                <tr>
-                  <td><strong>${escapeHtml(t.supplier_name || `Fornecedor #${t.supplier_id}`)}</strong></td>
-                  <td>${formatCurrency(t.total_amount)}</td>
-                  <td>${escapeHtml(prazo)}</td>
+                <tr class="${rowClass}">
+                  <td>
+                    <strong>${escapeHtml(t.supplier_name || `Fornecedor #${t.supplier_id}`)}</strong>
+                    ${flagsHtml}
+                  </td>
+                  <td><strong class="total-strong">${formatCurrency(t.total_amount)}</strong></td>
+                  <td>${escapeHtml(prazoMedio)}${prazoPior ? ` <span class="muted">• ${escapeHtml(prazoPior)}</span>` : ""}</td>
                   <td>${escapeHtml(cobertura)}</td>
                   <td>${escapeHtml(destaque)}</td>
                 </tr>
@@ -291,13 +328,25 @@
             }
             const lines = quotes
               .map((q) => {
-                const destaque = q.supplier_id === item.suggested_supplier_id;
-                const label = `${q.supplier_name} | ${formatCurrency(q.total)} | ${
-                  q.lead_time_days != null ? `${q.lead_time_days} dias` : "prazo -"
-                }`;
-                return `<div class="meta-line">${destaque ? "<strong>" : ""}${escapeHtml(label)}${
-                  destaque ? "</strong>" : ""
-                }</div>`;
+                const classes = ["quote-line"];
+                if (q.best_price) classes.push("best-price");
+                if (q.best_lead_time) classes.push("best-time");
+                const price = q.unit_price != null ? formatCurrency(q.unit_price) : "-";
+                const total = q.item_total != null ? formatCurrency(q.item_total) : "-";
+                const prazo = q.lead_time_days != null ? `${q.lead_time_days} dias` : "-";
+                const badges = [];
+                if (q.best_price) badges.push("menor preco");
+                if (q.best_lead_time) badges.push("menor prazo");
+                const badgeHtml = badges.length ? `<span class="highlight-label">${escapeHtml(badges.join(" • "))}</span>` : "";
+                return `
+                  <div class="${classes.join(" ")}">
+                    <strong>${escapeHtml(q.supplier_name)}</strong>
+                    <span>Preco: ${escapeHtml(price)}</span>
+                    <span>Total: ${escapeHtml(total)}</span>
+                    <span>Prazo: ${escapeHtml(prazo)}</span>
+                    ${badgeHtml}
+                  </div>
+                `;
               })
               .join("");
 

@@ -48,22 +48,22 @@
       </section>
 
       <section class="kpis" id="kpis">
-        <div class="kpi-card">
+        <a class="kpi-card kpi-link" href="/procurement/inbox?type=purchase_request&status=pending_rfq">
           <div class="kpi-label">Pendentes de Cotacao</div>
           <div class="kpi-value" data-kpi="pending_rfq">0</div>
-        </div>
-        <div class="kpi-card">
+        </a>
+        <a class="kpi-card kpi-link" href="/procurement/inbox?type=rfq&status=open,collecting_quotes">
           <div class="kpi-label">Aguardando Cotacoes</div>
           <div class="kpi-value" data-kpi="awaiting_quotes">0</div>
-        </div>
-        <div class="kpi-card">
+        </a>
+        <a class="kpi-card kpi-link" href="/procurement/inbox?type=rfq&awaiting_po=1">
           <div class="kpi-label">Decisao sem OC</div>
           <div class="kpi-value" data-kpi="awarded_waiting_po">0</div>
-        </div>
-        <div class="kpi-card">
+        </a>
+        <a class="kpi-card kpi-link" href="/procurement/inbox?type=purchase_order&status=draft,approved,sent_to_erp,erp_error">
           <div class="kpi-label">OC pendente ERP</div>
           <div class="kpi-value" data-kpi="awaiting_erp_push">0</div>
-        </div>
+        </a>
       </section>
 
       <section class="panel">
@@ -425,7 +425,19 @@
         pills.push(`<span class="meta-pill">limit=${data.paging?.limit ?? state.limit}</span>`);
         pills.push(`<span class="meta-pill">offset=${data.paging?.offset ?? state.offset}</span>`);
         for (const [key, value] of Object.entries(filters)) {
-          if (value) pills.push(`<span class="meta-pill">${key}: ${escapeHtml(value)}</span>`);
+          if (!value) continue;
+          if (key === "awaiting_po") {
+            pills.push(`<span class="meta-pill">decisao sem OC</span>`);
+            continue;
+          }
+          const labelMap = {
+            type: "tipo",
+            status: "status",
+            priority: "prioridade",
+            search: "busca",
+          };
+          const label = labelMap[key] || key;
+          pills.push(`<span class="meta-pill">${label}: ${escapeHtml(value)}</span>`);
         }
         metaInfo.innerHTML = pills.join("");
       }

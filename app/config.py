@@ -45,3 +45,4 @@ class Config:
     ERP_RETRY_ATTEMPTS = _int_env("ERP_RETRY_ATTEMPTS", 2)
     ERP_RETRY_BACKOFF_MS = _int_env("ERP_RETRY_BACKOFF_MS", 300)
     ERP_RETRY_ON_POST = _bool_env("ERP_RETRY_ON_POST", False)
+    RFQ_SLA_DAYS = _int_env("RFQ_SLA_DAYS", 5)

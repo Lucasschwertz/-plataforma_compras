@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 from app.db import get_db
 from app.erp_client import DEFAULT_RISK_FLAGS, ErpError, fetch_erp_records, push_purchase_order
@@ -37,6 +37,8 @@ ALLOWED_PO_STATUSES = {
     "erp_error",
 }
 ALLOWED_RECEIPT_STATUSES = {"pending", "partially_received", "received"}
+ALLOWED_RFQ_STATUSES = {"draft", "open", "collecting_quotes", "closed", "awarded", "cancelled"}
+ALLOWED_INBOX_STATUSES = ALLOWED_PR_STATUSES | ALLOWED_PO_STATUSES | ALLOWED_RFQ_STATUSES
 
 # Compatibilidade: aceitar scopes antigos (plural) nos filtros de logs.
 SCOPE_ALIASES = {
@@ -1175,6 +1177,39 @@ def _load_rfq_items_with_quotes(db, tenant_id: str | None, rfq_id: int) -> List[
 def _build_rfq_comparison(db, tenant_id: str | None, rfq_id: int) -> dict:
     effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
 
+    rfq_row = db.execute(
+        """
+        SELECT created_at
+        FROM rfqs
+        WHERE id = ? AND tenant_id = ?
+        """,
+        (rfq_id, effective_tenant_id),
+    ).fetchone()
+    rfq_created_at = rfq_row["created_at"] if rfq_row else None
+
+    last_quote_row = db.execute(
+        """
+        SELECT MAX(qi.updated_at) AS last_quote_at
+        FROM quote_items qi
+        JOIN quotes q
+          ON q.id = qi.quote_id AND q.tenant_id = qi.tenant_id
+        WHERE q.rfq_id = ? AND qi.tenant_id = ?
+        """,
+        (rfq_id, effective_tenant_id),
+    ).fetchone()
+    last_quote_at = last_quote_row["last_quote_at"] if last_quote_row else None
+
+    now = datetime.now(timezone.utc)
+    rfq_age_days = _days_since(rfq_created_at, now)
+    last_quote_days = _days_since(last_quote_at, now)
+    sla_limit_days = _sla_threshold_days()
+    sla_risk = False
+    if sla_limit_days > 0:
+        if last_quote_days is not None:
+            sla_risk = last_quote_days >= sla_limit_days
+        elif rfq_age_days is not None:
+            sla_risk = rfq_age_days >= sla_limit_days
+
     items_rows = db.execute(
         """
         SELECT id, description, quantity, uom
@@ -1240,6 +1275,9 @@ def _build_rfq_comparison(db, tenant_id: str | None, rfq_id: int) -> dict:
             "unit_price": unit_price,
             "lead_time_days": row["lead_time_days"],
             "total": total_value,
+            "item_total": total_value,
+            "best_price": False,
+            "best_lead_time": False,
         }
         item["quotes"].append(quote)
 
@@ -1267,34 +1305,56 @@ def _build_rfq_comparison(db, tenant_id: str | None, rfq_id: int) -> dict:
             totals[supplier_id]["lead_times"].append(int(row["lead_time_days"]))
 
     for item in items.values():
-        quotes = [q for q in item["quotes"] if q.get("total") is not None]
-        if not quotes:
+        quotes = item["quotes"]
+        priced_quotes = [q for q in quotes if q.get("unit_price") is not None]
+        lead_quotes = [q for q in quotes if q.get("lead_time_days") is not None]
+
+        best_price = min((q["unit_price"] for q in priced_quotes), default=None)
+        best_lead = min((q["lead_time_days"] for q in lead_quotes), default=None)
+
+        for quote in quotes:
+            if best_price is not None and quote.get("unit_price") == best_price:
+                quote["best_price"] = True
+            if best_lead is not None and quote.get("lead_time_days") == best_lead:
+                quote["best_lead_time"] = True
+
+        quotes_with_total = [q for q in quotes if q.get("total") is not None]
+        if not quotes_with_total:
             continue
-        quotes.sort(
+        quotes_with_total.sort(
             key=lambda q: (
                 q["total"],
                 q["lead_time_days"] if q["lead_time_days"] is not None else 9_999,
             )
         )
-        best = quotes[0]
+        best = quotes_with_total[0]
         item["suggested_supplier_id"] = best["supplier_id"]
-        item["suggestion_reason"] = "menor total, desempate por prazo" if len(quotes) > 1 else "menor total"
+        item["suggestion_reason"] = "menor total, desempate por prazo" if len(quotes_with_total) > 1 else "menor total"
 
     totals_list = []
     for data in totals.values():
         items_quoted = len(data["items_quoted"])
         lead_times = data["lead_times"]
         avg_lead_time = None
+        max_lead_time = None
         if lead_times:
             avg_lead_time = sum(lead_times) / len(lead_times)
+            max_lead_time = max(lead_times)
+        supplier_flags = suppliers.get(data["supplier_id"], {}).get("risk_flags") or DEFAULT_RISK_FLAGS
+        flags = {
+            "late_delivery": bool(supplier_flags.get("late_delivery") or supplier_flags.get("sla_breach")),
+            "no_supplier_response": bool(supplier_flags.get("no_supplier_response")),
+        }
         totals_list.append(
             {
                 "supplier_id": data["supplier_id"],
                 "supplier_name": data["supplier_name"],
                 "total_amount": data["total_amount"],
                 "avg_lead_time_days": avg_lead_time,
+                "max_lead_time_days": max_lead_time,
                 "items_quoted": items_quoted,
                 "items_total": total_items,
+                "flags": flags,
             }
         )
 
@@ -1326,6 +1386,14 @@ def _build_rfq_comparison(db, tenant_id: str | None, rfq_id: int) -> dict:
             "totals": totals_list,
             "suggested_supplier_id": suggested_supplier_id,
             "suggestion_reason": suggestion_reason,
+            "sla": {
+                "rfq_created_at": rfq_created_at,
+                "rfq_age_days": rfq_age_days,
+                "last_quote_at": last_quote_at,
+                "last_quote_days_ago": last_quote_days,
+                "sla_limit_days": sla_limit_days,
+                "sla_risk": sla_risk,
+            },
         },
     }
 
@@ -1340,6 +1408,46 @@ def _parse_risk_flags(raw_value: str | None) -> dict:
     if isinstance(parsed, dict):
         return parsed
     return DEFAULT_RISK_FLAGS
+
+
+def _sla_threshold_days() -> int:
+    try:
+        raw = current_app.config.get("RFQ_SLA_DAYS", 5)
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 5
+    return max(0, value)
+
+
+def _days_since(raw_value: str | None, now: datetime) -> int | None:
+    dt = _parse_datetime(raw_value)
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    delta = now - dt.astimezone(timezone.utc)
+    return max(0, int(delta.total_seconds() // 86_400))
+
+
+def _parse_datetime(raw_value: str | None) -> datetime | None:
+    if not raw_value:
+        return None
+    value = str(raw_value).strip()
+    if not value:
+        return None
+    try:
+        if value.endswith("Z"):
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(value)
+    except ValueError:
+        pass
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _load_latest_award_for_rfq(db, tenant_id: str | None, rfq_id: int) -> dict | None:
@@ -1446,7 +1554,15 @@ def _load_inbox_cards(db, tenant_id: str | None) -> dict:
             (
                 SELECT COUNT(*)
                 FROM rfqs
-                WHERE status = 'awarded' AND {tenant_filter}
+                WHERE status = 'awarded'
+                  AND {tenant_filter}
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM awards a
+                      WHERE a.rfq_id = rfqs.id
+                        AND a.tenant_id = rfqs.tenant_id
+                        AND a.purchase_order_id IS NOT NULL
+                  )
             ) AS awarded_waiting_po,
             (
                 SELECT COUNT(*)
@@ -1482,8 +1598,14 @@ def _load_inbox_items(
 
     status_filter = filters.get("status")
     if status_filter:
-        outer_conditions.append("status = ?")
-        outer_params.append(status_filter)
+        statuses = [value for value in status_filter.split(",") if value]
+        if len(statuses) == 1:
+            outer_conditions.append("status = ?")
+            outer_params.append(statuses[0])
+        else:
+            placeholders = ",".join(["?"] * len(statuses))
+            outer_conditions.append(f"status IN ({placeholders})")
+            outer_params.extend(statuses)
 
     priority_filter = filters.get("priority")
     if priority_filter:
@@ -1494,6 +1616,12 @@ def _load_inbox_items(
     if search_filter:
         outer_conditions.append("ref LIKE ?")
         outer_params.append(f"%{search_filter}%")
+
+    awaiting_po_filter = filters.get("awaiting_po")
+    if awaiting_po_filter:
+        outer_conditions.append(
+            "(type = 'rfq' AND status = 'awarded' AND award_id IS NOT NULL AND award_purchase_order_id IS NULL)"
+        )
 
     outer_where = ""
     if outer_conditions:
@@ -1622,7 +1750,10 @@ def _parse_inbox_filters(args) -> Dict[str, str]:
 
     status_value = (args.get("status") or "").strip()
     if status_value:
-        filters["status"] = status_value[:40]
+        raw_statuses = [value.strip().lower() for value in status_value.split(",") if value.strip()]
+        allowed_statuses = [value for value in raw_statuses if value in ALLOWED_INBOX_STATUSES]
+        if allowed_statuses:
+            filters["status"] = ",".join(allowed_statuses)[:120]
 
     priority_value = (args.get("priority") or "").strip()
     if priority_value in ALLOWED_PRIORITIES:
@@ -1631,6 +1762,10 @@ def _parse_inbox_filters(args) -> Dict[str, str]:
     search_value = (args.get("search") or "").strip()
     if search_value:
         filters["search"] = search_value[:80]
+
+    awaiting_po_value = (args.get("awaiting_po") or "").strip().lower()
+    if awaiting_po_value in {"1", "true", "yes", "sim"}:
+        filters["awaiting_po"] = "1"
 
     return filters
 
