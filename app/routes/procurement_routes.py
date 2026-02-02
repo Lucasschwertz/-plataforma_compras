@@ -1202,6 +1202,7 @@ def _build_rfq_comparison(db, tenant_id: str | None, rfq_id: int) -> dict:
     now = datetime.now(timezone.utc)
     rfq_age_days = _days_since(rfq_created_at, now)
     last_quote_days = _days_since(last_quote_at, now)
+    # SLA conforme docs/domain/sla.md
     sla_limit_days = _sla_threshold_days()
     sla_risk = False
     if sla_limit_days > 0:
