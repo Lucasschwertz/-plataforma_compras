@@ -431,6 +431,8 @@ def procurement_seed():
         (tenant_id,),
     ).fetchone()["total"]
     if existing:
+        _ensure_demo_suppliers(db, tenant_id)
+        db.commit()
         cards = _load_inbox_cards(db, tenant_id)
         return jsonify(
             {
@@ -514,6 +516,7 @@ def procurement_seed():
         ("OC-2002", "erp_error", tenant_id, "Fornecedor B", "Fornecedor sem codigo no ERP", 9870.00),
     )
 
+    _ensure_demo_suppliers(db, tenant_id)
     db.commit()
 
     cards = _load_inbox_cards(db, tenant_id)
@@ -1078,6 +1081,22 @@ def _load_suppliers(db, tenant_id: str | None) -> List[dict]:
         }
         for row in rows
     ]
+
+
+def _ensure_demo_suppliers(db, tenant_id: str) -> None:
+    existing = db.execute(
+        "SELECT COUNT(*) AS total FROM suppliers WHERE tenant_id = ?",
+        (tenant_id,),
+    ).fetchone()["total"]
+    if existing:
+        return
+
+    demo_names = ["Fornecedor Atlas", "Fornecedor Nexo", "Fornecedor Prisma"]
+    for name in demo_names:
+        db.execute(
+            "INSERT INTO suppliers (name, tenant_id) VALUES (?, ?)",
+            (name, tenant_id),
+        )
 
 
 def _load_rfq(db, tenant_id: str | None, rfq_id: int):
