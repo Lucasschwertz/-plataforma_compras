@@ -288,7 +288,8 @@
         } else {
           comparacaoTabela.innerHTML = totals
             .map((t) => {
-              const destaque = t.supplier_id === suggestedSupplierId ? "Melhor total" : "-";
+              const destaque =
+                t.supplier_id === suggestedSupplierId ? '<span class="pill ok">Melhor opcao geral</span>' : "-";
               const prazoMedio = t.avg_lead_time_days != null ? `${t.avg_lead_time_days.toFixed(1)} dias` : "-";
               const prazoPior = t.max_lead_time_days != null ? `pior ${t.max_lead_time_days}d` : "";
               const cobertura = `${t.items_quoted}/${t.items_total}`;
@@ -296,7 +297,7 @@
               if (t.flags?.late_delivery) flags.push('<span class="flag warning">Atraso historico</span>');
               if (t.flags?.no_supplier_response) flags.push('<span class="flag danger">Sem resposta</span>');
               const flagsHtml = flags.length ? `<div class="flags">${flags.join("")}</div>` : "";
-              const rowClass = t.supplier_id === suggestedSupplierId ? "suggested" : "";
+              const rowClass = t.supplier_id === suggestedSupplierId ? "best-overall" : "";
               return `
                 <tr class="${rowClass}">
                   <td>
@@ -306,7 +307,7 @@
                   <td><strong class="total-strong">${formatCurrency(t.total_amount)}</strong></td>
                   <td>${escapeHtml(prazoMedio)}${prazoPior ? ` <span class="muted">• ${escapeHtml(prazoPior)}</span>` : ""}</td>
                   <td>${escapeHtml(cobertura)}</td>
-                  <td>${escapeHtml(destaque)}</td>
+                  <td>${destaque}</td>
                 </tr>
               `;
             })
@@ -329,8 +330,7 @@
             const lines = quotes
               .map((q) => {
                 const classes = ["quote-line"];
-                if (q.best_price) classes.push("best-price");
-                if (q.best_lead_time) classes.push("best-time");
+                if (q.best_price || q.best_lead_time) classes.push("best-highlight");
                 const price = q.unit_price != null ? formatCurrency(q.unit_price) : "-";
                 const total = q.item_total != null ? formatCurrency(q.item_total) : "-";
                 const prazo = q.lead_time_days != null ? `${q.lead_time_days} dias` : "-";
@@ -341,9 +341,9 @@
                 return `
                   <div class="${classes.join(" ")}">
                     <strong>${escapeHtml(q.supplier_name)}</strong>
-                    <span>Preco: ${escapeHtml(price)}</span>
-                    <span>Total: ${escapeHtml(total)}</span>
-                    <span>Prazo: ${escapeHtml(prazo)}</span>
+                    <span class="value-strong">Total: ${escapeHtml(total)}</span>
+                    <span class="value-muted">Preco unitario: ${escapeHtml(price)}</span>
+                    <span class="value-muted">Prazo: ${escapeHtml(prazo)}</span>
                     ${badgeHtml}
                   </div>
                 `;

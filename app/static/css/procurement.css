@@ -533,19 +533,9 @@ tbody tr:hover {
   color: var(--muted);
 }
 
-.quote-line.best-price {
-  background: rgba(76, 208, 138, 0.18);
-  border-color: rgba(76, 208, 138, 0.45);
-}
-
-.quote-line.best-time {
-  background: rgba(93, 212, 255, 0.16);
-  border-color: rgba(93, 212, 255, 0.45);
-}
-
-.quote-line.best-price.best-time {
-  background: rgba(124, 92, 255, 0.2);
-  border-color: rgba(124, 92, 255, 0.6);
+.quote-line.best-highlight {
+  background: rgba(255, 204, 102, 0.16);
+  border-color: rgba(255, 204, 102, 0.6);
 }
 
 .highlight-label {
@@ -558,11 +548,22 @@ tbody tr:hover {
 }
 
 .total-strong {
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: 800;
 }
 
-tr.suggested td {
-  background: rgba(93, 212, 255, 0.08);
+tr.best-overall td {
+  background: rgba(76, 208, 138, 0.14);
+}
+
+.value-strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.value-muted {
+  color: var(--muted);
+  opacity: 0.85;
 }
 
 @media (max-width: 1000px) {
