@@ -177,8 +177,9 @@ def _create_user(
 def _ensure_tenant(db, tenant_id: str, name: str) -> None:
     db.execute(
         """
-        INSERT OR IGNORE INTO tenants (id, name, subdomain)
+        INSERT INTO tenants (id, name, subdomain)
         VALUES (?, ?, ?)
+        ON CONFLICT DO NOTHING
         """,
         (tenant_id, name, tenant_id),
     )

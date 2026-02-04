@@ -20,8 +20,9 @@ def _int_env(name: str, default: int) -> int:
 
 class Config:
     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-    DATABASE_DIR = os.path.join(BASE_DIR, "database")
-    DB_PATH = os.path.join(DATABASE_DIR, "plataforma_compras.db")
+    DATABASE_URL = os.environ.get("DATABASE_URL")
+    DATABASE_DIR = None if DATABASE_URL else os.path.join(BASE_DIR, "database")
+    DB_PATH = DATABASE_URL or os.path.join(DATABASE_DIR, "plataforma_compras.db")
 
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-plataforma-compras")
     AUTH_ENABLED = _bool_env("AUTH_ENABLED", True)
@@ -33,7 +34,7 @@ class Config:
     SYNC_SCHEDULER_LIMIT = _int_env("SYNC_SCHEDULER_LIMIT", 200)
     SYNC_SCHEDULER_SCOPES = os.environ.get(
         "SYNC_SCHEDULER_SCOPES",
-        "supplier,purchase_request,purchase_order,receipt",
+        "supplier,purchase_request,purchase_order,receipt,quote,quote_process,quote_supplier",
     )
     ERP_MODE = os.environ.get("ERP_MODE", "mock")
     ERP_BASE_URL = os.environ.get("ERP_BASE_URL")

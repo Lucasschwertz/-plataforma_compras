@@ -240,12 +240,17 @@
 
       function renderSlaResumo(summary) {
         const sla = summary?.sla || {};
-        const rfqAge = sla.rfq_age_days != null ? `${sla.rfq_age_days} dias desde abertura` : "idade indisponivel";
+        const startLabel = sla.sla_start_label || "dias desde abertura";
+        const rfqAge = sla.rfq_age_days != null ? `${sla.rfq_age_days} ${startLabel}` : "idade indisponivel";
         const lastQuote =
           sla.last_quote_days_ago != null
             ? `${sla.last_quote_days_ago} dias desde ultima proposta`
             : "sem propostas registradas";
         const slaLimit = sla.sla_limit_days > 0 ? `limite ${sla.sla_limit_days}d` : "SLA desativado";
+        const startSource = sla.sla_source_start === "erp" ? "ERP" : "local";
+        let lastSource = "local";
+        if (sla.sla_source_last_quote === "erp") lastSource = "ERP";
+        if (sla.sla_source_last_quote === "none") lastSource = "sem dados";
         const slaPill =
           sla.sla_limit_days > 0
             ? sla.sla_risk
@@ -253,7 +258,7 @@
               : '<span class="pill ok">SLA OK</span>'
             : '<span class="pill">SLA desativado</span>';
 
-        return `${rfqAge} • ${lastQuote} • ${slaLimit} ${slaPill}`;
+        return `${rfqAge} (${startSource}) • ${lastQuote} (${lastSource}) • ${slaLimit} ${slaPill}`;
       }
 
       function renderComparacao(data) {

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
 
 from flask import Blueprint, current_app, jsonify, render_template, request
@@ -54,9 +54,23 @@ SCOPE_ALIASES = {
     "categories": ("category", "categories"),
     "receipt": ("receipt", "receipts"),
     "receipts": ("receipt", "receipts"),
+    "quote": ("quote", "quotes"),
+    "quotes": ("quote", "quotes"),
+    "quote_process": ("quote_process", "quote_processes"),
+    "quote_processes": ("quote_process", "quote_processes"),
+    "quote_supplier": ("quote_supplier", "quote_suppliers"),
+    "quote_suppliers": ("quote_supplier", "quote_suppliers"),
 }
 
-SYNC_SUPPORTED_SCOPES = {"supplier", "purchase_request", "purchase_order", "receipt"}
+SYNC_SUPPORTED_SCOPES = {
+    "supplier",
+    "purchase_request",
+    "purchase_order",
+    "receipt",
+    "quote",
+    "quote_process",
+    "quote_supplier",
+}
 
 
 @procurement_bp.route("/procurement/inbox", methods=["GET"])
@@ -214,8 +228,9 @@ def cotacao_item_fornecedores_api(rfq_id: int, rfq_item_id: int):
             continue
         db.execute(
             """
-            INSERT OR IGNORE INTO rfq_item_suppliers (rfq_item_id, supplier_id, tenant_id)
+            INSERT INTO rfq_item_suppliers (rfq_item_id, supplier_id, tenant_id)
             VALUES (?, ?, ?)
+            ON CONFLICT DO NOTHING
             """,
             (rfq_item_id, supplier_id, tenant_id),
         )
@@ -263,16 +278,21 @@ def cotacao_propostas_api(rfq_id: int):
 
         db.execute(
             """
-            INSERT OR IGNORE INTO rfq_item_suppliers (rfq_item_id, supplier_id, tenant_id)
+            INSERT INTO rfq_item_suppliers (rfq_item_id, supplier_id, tenant_id)
             VALUES (?, ?, ?)
+            ON CONFLICT DO NOTHING
             """,
             (rfq_item_id, supplier_id, tenant_id),
         )
 
         db.execute(
             """
-            INSERT OR REPLACE INTO quote_items (quote_id, rfq_item_id, unit_price, lead_time_days, tenant_id)
+            INSERT INTO quote_items (quote_id, rfq_item_id, unit_price, lead_time_days, tenant_id)
             VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (quote_id, rfq_item_id, tenant_id) DO UPDATE SET
+                unit_price = excluded.unit_price,
+                lead_time_days = excluded.lead_time_days,
+                updated_at = CURRENT_TIMESTAMP
             """,
             (quote_id, rfq_item_id, float(unit_price), lead_time_days, tenant_id),
         )
@@ -422,7 +442,7 @@ def procurement_seed():
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
 
     db.execute(
-        "INSERT OR IGNORE INTO tenants (id, name, subdomain) VALUES (?, ?, ?)",
+        "INSERT INTO tenants (id, name, subdomain) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
         (tenant_id, f"Tenant {tenant_id}", tenant_id),
     )
 
@@ -443,22 +463,30 @@ def procurement_seed():
             }
         )
 
+    needed_at_pr1 = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
+    needed_at_pr2 = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
+
     cursor = db.execute(
         """
         INSERT INTO purchase_requests (number, status, priority, requested_by, department, needed_at, tenant_id)
-        VALUES (?, ?, ?, ?, ?, date('now', '+3 day'), ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        RETURNING id
         """,
-        ("SR-1001", "pending_rfq", "high", "Joao", "Manutencao", tenant_id),
+        ("SR-1001", "pending_rfq", "high", "Joao", "Manutencao", needed_at_pr1, tenant_id),
     )
-    pr1_id = cursor.lastrowid
+    pr1_row = cursor.fetchone()
+    pr1_id = pr1_row["id"] if isinstance(pr1_row, dict) else pr1_row[0]
+
     cursor = db.execute(
         """
         INSERT INTO purchase_requests (number, status, priority, requested_by, department, needed_at, tenant_id)
-        VALUES (?, ?, ?, ?, ?, date('now', '+1 day'), ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        RETURNING id
         """,
-        ("SR-1002", "in_rfq", "urgent", "Maria", "Operacoes", tenant_id),
+        ("SR-1002", "in_rfq", "urgent", "Maria", "Operacoes", needed_at_pr2, tenant_id),
     )
-    pr2_id = cursor.lastrowid
+    pr2_row = cursor.fetchone()
+    pr2_id = pr2_row["id"] if isinstance(pr2_row, dict) else pr2_row[0]
 
     if pr1_id:
         db.execute(
@@ -612,10 +640,11 @@ def create_rfq():
     status = "open"
 
     cursor = db.execute(
-        "INSERT INTO rfqs (title, status, tenant_id) VALUES (?, ?, ?)",
+        "INSERT INTO rfqs (title, status, tenant_id) VALUES (?, ?, ?) RETURNING id",
         (title, status, tenant_id),
     )
-    rfq_id = cursor.lastrowid
+    rfq_row = cursor.fetchone()
+    rfq_id = rfq_row["id"] if isinstance(rfq_row, dict) else rfq_row[0]
 
     db.execute(
         """
@@ -637,6 +666,7 @@ def create_rfq():
                 uom,
                 tenant_id
             ) VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id
             """,
             (
                 rfq_id,
@@ -647,9 +677,10 @@ def create_rfq():
                 tenant_id,
             ),
         )
+        rfq_item_row = cursor.fetchone()
         rfq_items_payload.append(
             {
-                "rfq_item_id": cursor.lastrowid,
+                "rfq_item_id": rfq_item_row["id"] if isinstance(rfq_item_row, dict) else rfq_item_row[0],
                 "purchase_request_item_id": item["id"],
                 "description": item["description"],
                 "quantity": item["quantity"],
@@ -729,10 +760,12 @@ def rfq_award(rfq_id: int):
         """
         INSERT INTO awards (rfq_id, supplier_name, status, reason, tenant_id)
         VALUES (?, ?, 'awarded', ?, ?)
+        RETURNING id
         """,
         (rfq_id, supplier_name, reason, tenant_id),
     )
-    award_id = cursor.lastrowid
+    award_row = cursor.fetchone()
+    award_id = award_row["id"] if isinstance(award_row, dict) else award_row[0]
 
     db.execute(
         "UPDATE rfqs SET status = 'awarded' WHERE id = ? AND tenant_id = ?",
@@ -785,10 +818,12 @@ def create_purchase_order_from_award(award_id: int):
         """
         INSERT INTO purchase_orders (number, award_id, supplier_name, status, total_amount, tenant_id)
         VALUES (?, ?, ?, 'approved', ?, ?)
+        RETURNING id
         """,
         (po_number, award_id, supplier_name, 0.0, tenant_id),
     )
-    purchase_order_id = cursor.lastrowid
+    po_row = cursor.fetchone()
+    purchase_order_id = po_row["id"] if isinstance(po_row, dict) else po_row[0]
 
     db.execute(
         "UPDATE awards SET status = 'converted_to_po', purchase_order_id = ? WHERE id = ? AND tenant_id = ?",
@@ -1206,7 +1241,57 @@ def _build_rfq_comparison(db, tenant_id: str | None, rfq_id: int) -> dict:
     ).fetchone()
     rfq_created_at = rfq_row["created_at"] if rfq_row else None
 
-    last_quote_row = db.execute(
+    erp_context_rows = db.execute(
+        """
+        SELECT DISTINCT pr.erp_sent_at, pr.erp_num_cot, pr.erp_num_pct
+        FROM rfq_items ri
+        JOIN purchase_request_items pri
+            ON pri.id = ri.purchase_request_item_id AND pri.tenant_id = ri.tenant_id
+        JOIN purchase_requests pr
+            ON pr.id = pri.purchase_request_id AND pr.tenant_id = pri.tenant_id
+        WHERE ri.rfq_id = ? AND ri.tenant_id = ?
+        """,
+        (rfq_id, effective_tenant_id),
+    ).fetchall()
+
+    erp_sent_candidates = [row["erp_sent_at"] for row in erp_context_rows if row["erp_sent_at"]]
+    erp_num_cot_values = sorted({row["erp_num_cot"] for row in erp_context_rows if row["erp_num_cot"]})
+    erp_num_pct_values = sorted({row["erp_num_pct"] for row in erp_context_rows if row["erp_num_pct"]})
+
+    sla_start_at = None
+    if erp_sent_candidates:
+        parsed: List[datetime] = []
+        for value in erp_sent_candidates:
+            dt = _parse_datetime(value)
+            if dt:
+                parsed.append(dt)
+        if parsed:
+            sla_start_at = _format_datetime(min(parsed))
+
+    erp_last_quote_at = None
+    if erp_num_cot_values or erp_num_pct_values:
+        clauses = []
+        params = [effective_tenant_id]
+        if erp_num_cot_values:
+            placeholders = ",".join("?" for _ in erp_num_cot_values)
+            clauses.append(f"erp_num_cot IN ({placeholders})")
+            params.extend(erp_num_cot_values)
+        if erp_num_pct_values:
+            placeholders = ",".join("?" for _ in erp_num_pct_values)
+            clauses.append(f"erp_num_pct IN ({placeholders})")
+            params.extend(erp_num_pct_values)
+        where_clause = " OR ".join(clauses)
+        last_quote_row = db.execute(
+            f"""
+            SELECT MAX(quote_datetime) AS last_quote_at
+            FROM erp_supplier_quotes
+            WHERE tenant_id = ? AND ({where_clause})
+            """,
+            params,
+        ).fetchone()
+        erp_last_quote_at = last_quote_row["last_quote_at"] if last_quote_row else None
+
+    local_last_quote_row = db.execute(
         """
         SELECT MAX(qi.updated_at) AS last_quote_at
         FROM quote_items qi
@@ -1216,10 +1301,20 @@ def _build_rfq_comparison(db, tenant_id: str | None, rfq_id: int) -> dict:
         """,
         (rfq_id, effective_tenant_id),
     ).fetchone()
-    last_quote_at = last_quote_row["last_quote_at"] if last_quote_row else None
+    local_last_quote_at = local_last_quote_row["last_quote_at"] if local_last_quote_row else None
+
+    last_quote_at = erp_last_quote_at or local_last_quote_at
+    sla_start_label = "dias desde abertura"
+    sla_source_start = "local"
+    sla_source_last_quote = "local"
+    if sla_start_at:
+        sla_start_label = "dias desde envio ao fornecedor"
+        sla_source_start = "erp"
+    if erp_last_quote_at:
+        sla_source_last_quote = "erp"
 
     now = datetime.now(timezone.utc)
-    rfq_age_days = _days_since(rfq_created_at, now)
+    rfq_age_days = _days_since(sla_start_at or rfq_created_at, now)
     last_quote_days = _days_since(last_quote_at, now)
     # SLA conforme docs/domain/sla.md
     sla_limit_days = _sla_threshold_days()
@@ -1408,6 +1503,10 @@ def _build_rfq_comparison(db, tenant_id: str | None, rfq_id: int) -> dict:
             "suggestion_reason": suggestion_reason,
             "sla": {
                 "rfq_created_at": rfq_created_at,
+                "sla_start_at": sla_start_at or rfq_created_at,
+                "sla_start_label": sla_start_label,
+                "sla_source_start": sla_source_start,
+                "sla_source_last_quote": sla_source_last_quote if last_quote_at else "none",
                 "rfq_age_days": rfq_age_days,
                 "last_quote_at": last_quote_at,
                 "last_quote_days_ago": last_quote_days,
@@ -1439,6 +1538,34 @@ def _sla_threshold_days() -> int:
     return max(0, value)
 
 
+def _format_datetime(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _combine_erp_datetime(date_value: str | None, time_value: str | None) -> str | None:
+    date_value = str(date_value).strip() if date_value is not None else ""
+    time_value = str(time_value).strip() if time_value is not None else ""
+    if not date_value and not time_value:
+        return None
+
+    if time_value and time_value.isdigit() and len(time_value) in (3, 4):
+        padded = time_value.zfill(4)
+        time_value = f"{padded[:2]}:{padded[2:]}"
+
+    if date_value and time_value:
+        combined = _parse_datetime(f"{date_value} {time_value}")
+    elif date_value:
+        combined = _parse_datetime(date_value)
+    else:
+        combined = None
+
+    if not combined:
+        return None
+    return _format_datetime(combined)
+
+
 def _days_since(raw_value: str | None, now: datetime) -> int | None:
     dt = _parse_datetime(raw_value)
     if not dt:
@@ -1455,6 +1582,8 @@ def _parse_datetime(raw_value: str | None) -> datetime | None:
     value = str(raw_value).strip()
     if not value:
         return None
+    if value.startswith("1900-12-31"):
+        return None
     try:
         if value.endswith("Z"):
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -1462,7 +1591,17 @@ def _parse_datetime(raw_value: str | None) -> datetime | None:
     except ValueError:
         pass
 
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y"):
         try:
             return datetime.strptime(value, fmt)
         except ValueError:
@@ -1552,10 +1691,12 @@ def _get_or_create_quote(db, rfq_id: int, supplier_id: int, tenant_id: str) -> i
         """
         INSERT INTO quotes (rfq_id, supplier_id, status, currency, tenant_id)
         VALUES (?, ?, 'submitted', 'BRL', ?)
+        RETURNING id
         """,
         (rfq_id, supplier_id, tenant_id),
     )
-    return int(cursor.lastrowid)
+    row = cursor.fetchone()
+    return int(row["id"] if isinstance(row, dict) else row[0])
 
 def _load_inbox_cards(db, tenant_id: str | None) -> dict:
     tenant_filter, tenant_params = _tenant_filter(tenant_id, occurrences=4)
@@ -1647,6 +1788,10 @@ def _load_inbox_items(
     if outer_conditions:
         outer_where = "WHERE " + " AND ".join(outer_conditions)
 
+    age_pr_expr = _age_days_expr(db, "created_at")
+    age_rfq_expr = _age_days_expr(db, "r.created_at")
+    age_po_expr = _age_days_expr(db, "created_at")
+
     sql = f"""
         WITH pr_pending AS (
             SELECT
@@ -1657,7 +1802,7 @@ def _load_inbox_items(
                 priority,
                 needed_at,
                 updated_at,
-                CAST(MAX(0, julianday('now') - julianday(created_at)) AS INTEGER) AS age_days,
+                {age_pr_expr} AS age_days,
                 NULL AS award_id,
                 NULL AS award_status,
                 NULL AS award_purchase_order_id
@@ -1673,7 +1818,7 @@ def _load_inbox_items(
                 NULL AS priority,
                 NULL AS needed_at,
                 r.updated_at,
-                CAST(MAX(0, julianday('now') - julianday(r.created_at)) AS INTEGER) AS age_days,
+                {age_rfq_expr} AS age_days,
                 (
                     SELECT a.id
                     FROM awards a
@@ -1707,7 +1852,7 @@ def _load_inbox_items(
                 NULL AS priority,
                 NULL AS needed_at,
                 updated_at,
-                CAST(MAX(0, julianday('now') - julianday(created_at)) AS INTEGER) AS age_days,
+                {age_po_expr} AS age_days,
                 NULL AS award_id,
                 NULL AS award_status,
                 NULL AS award_purchase_order_id
@@ -1810,6 +1955,12 @@ def _parse_int(value: str | None, default: int, min_value: int, max_value: int) 
     return max(min_value, min(parsed, max_value))
 
 
+def _age_days_expr(db, column: str) -> str:
+    if getattr(db, "backend", "sqlite") == "postgres":
+        return f"CAST(GREATEST(0, DATE_PART('day', CURRENT_TIMESTAMP - {column})) AS INTEGER)"
+    return f"CAST(MAX(0, julianday('now') - julianday({column})) AS INTEGER)"
+
+
 def _normalize_po_status(value: str | None) -> str:
     if not value:
         return "erp_accepted"
@@ -1825,6 +1976,32 @@ def _normalize_po_status(value: str | None) -> str:
     return "erp_accepted"
 
 
+def _normalize_erp_key(value: str) -> str:
+    return "".join(ch for ch in value.lower() if ch.isalnum())
+
+
+def _extract_erp_field(record: dict, keys: Tuple[str, ...]) -> str | None:
+    for key in keys:
+        value = record.get(key)
+        if value is None:
+            continue
+        value_str = str(value).strip()
+        if value_str:
+            return value_str
+
+    normalized_record = {_normalize_erp_key(k): v for k, v in record.items()}
+    for key in keys:
+        normalized = _normalize_erp_key(key)
+        if normalized in normalized_record:
+            value = normalized_record.get(normalized)
+            if value is None:
+                continue
+            value_str = str(value).strip()
+            if value_str:
+                return value_str
+    return None
+
+
 def _start_sync_run(
     db,
     tenant_id: str,
@@ -1836,10 +2013,12 @@ def _start_sync_run(
         """
         INSERT INTO sync_runs (system, scope, status, attempt, parent_sync_run_id, started_at, tenant_id)
         VALUES ('senior', ?, 'running', ?, ?, CURRENT_TIMESTAMP, ?)
+        RETURNING id
         """,
         (scope, attempt, parent_sync_run_id, tenant_id),
     )
-    return cursor.lastrowid
+    row = cursor.fetchone()
+    return int(row["id"] if isinstance(row, dict) else row[0])
 
 
 def _finish_sync_run(
@@ -1850,12 +2029,15 @@ def _finish_sync_run(
     records_in: int,
     records_upserted: int,
 ) -> None:
+    duration_expr = "CAST((julianday(CURRENT_TIMESTAMP) - julianday(started_at)) * 86400000 AS INTEGER)"
+    if getattr(db, "backend", "sqlite") == "postgres":
+        duration_expr = "CAST(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - started_at)) * 1000 AS INTEGER)"
     db.execute(
-        """
+        f"""
         UPDATE sync_runs
         SET status = ?,
             finished_at = CURRENT_TIMESTAMP,
-            duration_ms = CAST((julianday(CURRENT_TIMESTAMP) - julianday(started_at)) * 86400000 AS INTEGER),
+            duration_ms = {duration_expr},
             records_in = ?,
             records_upserted = ?
         WHERE id = ? AND tenant_id = ?
@@ -1901,6 +2083,12 @@ def _sync_from_erp(db, tenant_id: str, entity: str, limit: int) -> dict:
             records_upserted += _upsert_purchase_order(db, tenant_id, record)
         elif entity == "receipt":
             records_upserted += _upsert_receipt(db, tenant_id, record)
+        elif entity == "quote":
+            records_upserted += _upsert_erp_supplier_quote(db, tenant_id, record)
+        elif entity == "quote_process":
+            records_upserted += _upsert_erp_quote_process(db, tenant_id, record)
+        elif entity == "quote_supplier":
+            records_upserted += _upsert_erp_quote_supplier(db, tenant_id, record)
 
     if records:
         last = records[-1]
@@ -1917,9 +2105,9 @@ def _sync_from_erp(db, tenant_id: str, entity: str, limit: int) -> dict:
 
 
 def _upsert_supplier(db, tenant_id: str, record: dict) -> int:
-    external_id = record.get("external_id")
-    name = record.get("name") or external_id or "Fornecedor"
-    tax_id = record.get("tax_id")
+    external_id = record.get("external_id") or _extract_erp_field(record, ("CodFor", "cod_for", "codigo_fornecedor"))
+    name = record.get("name") or _extract_erp_field(record, ("NomFor", "nome_fornecedor")) or external_id or "Fornecedor"
+    tax_id = record.get("tax_id") or _extract_erp_field(record, ("CgcFor", "CnpjFor", "CpfCgc", "tax_id"))
     risk_flags = record.get("risk_flags") or DEFAULT_RISK_FLAGS
     risk_flags_json = json.dumps(risk_flags, separators=(",", ":"), ensure_ascii=True)
     updated_at = record.get("updated_at") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -1956,13 +2144,16 @@ def _upsert_supplier(db, tenant_id: str, record: dict) -> int:
 
 
 def _upsert_purchase_request(db, tenant_id: str, record: dict) -> int:
-    external_id = record.get("external_id")
-    number = record.get("number") or external_id
+    external_id = record.get("external_id") or _extract_erp_field(record, ("NumSol", "num_sol", "numero_solicitacao"))
+    number = record.get("number") or _extract_erp_field(record, ("NumSol", "num_sol", "numero_solicitacao")) or external_id
     status = record.get("status") or "pending_rfq"
     priority = record.get("priority") or "medium"
-    requested_by = record.get("requested_by")
-    department = record.get("department")
-    needed_at = record.get("needed_at")
+    requested_by = record.get("requested_by") or _extract_erp_field(record, ("NomSol", "nom_sol", "solicitante"))
+    department = record.get("department") or _extract_erp_field(record, ("CodDep", "cod_dep", "departamento"))
+    needed_at = record.get("needed_at") or _extract_erp_field(record, ("DatPrv", "dat_prv", "data_prevista"))
+    erp_num_cot = _extract_erp_field(record, ("num_cot", "numcot", "NumCot", "numero_cotacao", "numero_cot"))
+    erp_num_pct = _extract_erp_field(record, ("num_pct", "numpct", "NumPct", "numero_processo", "numero_pct"))
+    erp_sent_at = _extract_erp_field(record, ("dat_efc", "datEfc", "DatEfc", "data_envio_fornecedor", "sent_at"))
     updated_at = record.get("updated_at") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     if status not in ALLOWED_PR_STATUSES:
@@ -1984,37 +2175,77 @@ def _upsert_purchase_request(db, tenant_id: str, record: dict) -> int:
         db.execute(
             """
             UPDATE purchase_requests
-            SET number = ?, status = ?, priority = ?, requested_by = ?, department = ?, needed_at = ?, updated_at = ?
+            SET number = ?, status = ?, priority = ?, requested_by = ?, department = ?, needed_at = ?,
+                erp_num_cot = ?, erp_num_pct = ?, erp_sent_at = ?, updated_at = ?
             WHERE id = ? AND tenant_id = ?
             """,
-            (number, status, priority, requested_by, department, needed_at, updated_at, existing["id"], tenant_id),
+            (
+                number,
+                status,
+                priority,
+                requested_by,
+                department,
+                needed_at,
+                erp_num_cot,
+                erp_num_pct,
+                erp_sent_at,
+                updated_at,
+                existing["id"],
+                tenant_id,
+            ),
         )
         return 1
 
     db.execute(
         """
         INSERT INTO purchase_requests (
-            number, status, priority, requested_by, department, needed_at, external_id, tenant_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            number,
+            status,
+            priority,
+            requested_by,
+            department,
+            needed_at,
+            erp_num_cot,
+            erp_num_pct,
+            erp_sent_at,
+            external_id,
+            tenant_id,
+            created_at,
+            updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (number, status, priority, requested_by, department, needed_at, external_id, tenant_id, updated_at, updated_at),
+        (
+            number,
+            status,
+            priority,
+            requested_by,
+            department,
+            needed_at,
+            erp_num_cot,
+            erp_num_pct,
+            erp_sent_at,
+            external_id,
+            tenant_id,
+            updated_at,
+            updated_at,
+        ),
     )
     return 1
 
 
 def _upsert_purchase_order(db, tenant_id: str, record: dict) -> int:
-    external_id = record.get("external_id")
+    external_id = record.get("external_id") or _extract_erp_field(record, ("NumOcp", "num_ocp", "numero_ocp", "numero_oc"))
     if not external_id:
         return 0
 
-    number = record.get("number") or external_id
+    number = record.get("number") or _extract_erp_field(record, ("NumOcp", "num_ocp", "numero_ocp", "numero_oc")) or external_id
     status = record.get("status") or "draft"
     if status not in ALLOWED_PO_STATUSES:
         status = "draft"
 
-    supplier_name = record.get("supplier_name")
-    currency = record.get("currency") or "BRL"
-    total_amount = record.get("total_amount")
+    supplier_name = record.get("supplier_name") or _extract_erp_field(record, ("NomFor", "nom_for", "fornecedor"))
+    currency = record.get("currency") or _extract_erp_field(record, ("CodMoe", "cod_moe", "moeda")) or "BRL"
+    total_amount = record.get("total_amount") or _extract_erp_field(record, ("VlrOcp", "vlr_ocp", "valor_total"))
     updated_at = record.get("updated_at") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     existing = db.execute(
@@ -2050,16 +2281,19 @@ def _upsert_purchase_order(db, tenant_id: str, record: dict) -> int:
 
 
 def _upsert_receipt(db, tenant_id: str, record: dict) -> int:
-    external_id = record.get("external_id")
+    external_id = record.get("external_id") or _extract_erp_field(record, ("NumNfc", "num_nfc", "numero_nf"))
     if not external_id:
         return 0
 
-    purchase_order_external_id = record.get("purchase_order_external_id")
+    purchase_order_external_id = record.get("purchase_order_external_id") or _extract_erp_field(
+        record,
+        ("NumOcp", "num_ocp", "numero_ocp", "numero_oc"),
+    )
     status = record.get("status") or "received"
     if status not in ALLOWED_RECEIPT_STATUSES:
         status = "received"
 
-    received_at = record.get("received_at")
+    received_at = record.get("received_at") or _extract_erp_field(record, ("DatRec", "dat_rec", "data_recebimento"))
     updated_at = record.get("updated_at") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     purchase_order_id = None
@@ -2130,6 +2364,126 @@ def _upsert_receipt(db, tenant_id: str, record: dict) -> int:
             updated_at,
             updated_at,
         ),
+    )
+    return 1
+
+
+def _upsert_erp_supplier_quote(db, tenant_id: str, record: dict) -> int:
+    erp_num_cot = _extract_erp_field(record, ("num_cot", "numcot", "NumCot"))
+    erp_num_pct = _extract_erp_field(record, ("num_pct", "numpct", "NumPct"))
+    supplier_external_id = _extract_erp_field(
+        record,
+        ("cod_for", "codfor", "CodFor", "supplier_external_id", "supplier_id"),
+    )
+    quote_date = _extract_erp_field(record, ("dat_cot", "datcot", "DatCot", "data_cotacao"))
+    quote_time = _extract_erp_field(record, ("hor_cot", "horcot", "HorCot", "hora_cotacao"))
+    source_table = record.get("source_table") or "E410COT"
+    external_id = record.get("external_id") or _extract_erp_field(record, ("id", "codigo"))
+    quote_datetime = _combine_erp_datetime(quote_date, quote_time)
+    updated_at = record.get("updated_at") or quote_datetime or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    if not (erp_num_cot or erp_num_pct):
+        return 0
+
+    db.execute(
+        """
+        INSERT INTO erp_supplier_quotes (
+            tenant_id,
+            erp_num_cot,
+            erp_num_pct,
+            supplier_external_id,
+            quote_date,
+            quote_time,
+            quote_datetime,
+            source_table,
+            external_id,
+            created_at,
+            updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+        ON CONFLICT(
+            tenant_id,
+            erp_num_cot,
+            erp_num_pct,
+            supplier_external_id,
+            quote_datetime,
+            source_table
+        ) DO UPDATE SET
+            quote_date = excluded.quote_date,
+            quote_time = excluded.quote_time,
+            quote_datetime = excluded.quote_datetime,
+            external_id = excluded.external_id,
+            updated_at = excluded.updated_at
+        """,
+        (
+            tenant_id,
+            erp_num_cot,
+            erp_num_pct,
+            supplier_external_id,
+            quote_date,
+            quote_time,
+            quote_datetime,
+            source_table,
+            external_id,
+            updated_at,
+        ),
+    )
+    return 1
+
+
+def _upsert_erp_quote_process(db, tenant_id: str, record: dict) -> int:
+    erp_num_pct = _extract_erp_field(record, ("NumPct", "num_pct", "numpct"))
+    if not erp_num_pct:
+        return 0
+    opened_at = _extract_erp_field(record, ("DatAbe", "dat_abe", "data_abertura"))
+    opened_at = _combine_erp_datetime(opened_at, None)
+    external_id = record.get("external_id") or _extract_erp_field(record, ("id", "codigo"))
+    updated_at = record.get("updated_at") or opened_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    db.execute(
+        """
+        INSERT INTO erp_quote_processes (
+            tenant_id,
+            erp_num_pct,
+            opened_at,
+            source_table,
+            external_id,
+            created_at,
+            updated_at
+        ) VALUES (?, ?, ?, 'E410PCT', ?, CURRENT_TIMESTAMP, ?)
+        ON CONFLICT(tenant_id, erp_num_pct, source_table) DO UPDATE SET
+            opened_at = excluded.opened_at,
+            external_id = excluded.external_id,
+            updated_at = excluded.updated_at
+        """,
+        (tenant_id, erp_num_pct, opened_at, external_id, updated_at),
+    )
+    return 1
+
+
+def _upsert_erp_quote_supplier(db, tenant_id: str, record: dict) -> int:
+    erp_num_pct = _extract_erp_field(record, ("NumPct", "num_pct", "numpct"))
+    supplier_external_id = _extract_erp_field(record, ("CodFor", "cod_for", "codfor"))
+    if not erp_num_pct or not supplier_external_id:
+        return 0
+    external_id = record.get("external_id") or _extract_erp_field(record, ("id", "codigo"))
+    updated_at = record.get("updated_at") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    db.execute(
+        """
+        INSERT INTO erp_quote_suppliers (
+            tenant_id,
+            erp_num_pct,
+            supplier_external_id,
+            source_table,
+            external_id,
+            created_at,
+            updated_at
+        ) VALUES (?, ?, ?, 'E410FPC', ?, CURRENT_TIMESTAMP, ?)
+        ON CONFLICT(tenant_id, erp_num_pct, supplier_external_id, source_table) DO UPDATE SET
+            external_id = excluded.external_id,
+            updated_at = excluded.updated_at
+        """,
+        (tenant_id, erp_num_pct, supplier_external_id, external_id, updated_at),
     )
     return 1
 

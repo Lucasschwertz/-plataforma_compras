@@ -1,30 +1,30 @@
-# RFQ SLA – Service Level Agreement
+﻿# RFQ SLA - Service Level Agreement
 
 ## Objetivo
-Garantir tempo máximo de resposta dos fornecedores em RFQs ativas.
+Garantir tempo maximo de resposta dos fornecedores em RFQs ativas.
 
 ## Escopo
 Entidade: RFQ  
 Isolamento: por tenant_id
 
-## Início do SLA
+## Inicio do SLA
 Evento: rfq_created  
 Timestamp: rfq.created_at
 
-## Atualização de atividade
+## Atualizacao de atividade
 Evento: supplier_quote_received  
 Timestamp: supplier_quote.created_at
 
-## Regra de violação
+## Regra de violacao
 Se (now - last_supplier_activity_at) > RFQ_SLA_DAYS
 
-## Configuração
+## Configuracao
 RFQ_SLA_DAYS:
 - default: 5
 - 0: SLA desativado
 
-## Observações
-- SLA é informativo (não bloqueante)
-- Não gera automação nem penalidade
-- Em modo mock, timestamps são locais
-- Em modo ERP, timestamps serão mapeados futuramente
+## Observacoes
+- SLA e informativo (nao bloqueante)
+- Nao gera automacao nem penalidade
+- Em modo mock, timestamps sao locais
+- Em modo ERP, inicio usa E405SOL.DatEfc e ultima proposta usa E410COT.DatCot + E410COT.HorCot
