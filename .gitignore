@@ -4,3 +4,5 @@ database/*.db
 *.csv
 *.sqlite
 *.sqlite3
+.env
+postgres_data/

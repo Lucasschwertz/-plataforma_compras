@@ -47,3 +47,10 @@ class Config:
     ERP_RETRY_BACKOFF_MS = _int_env("ERP_RETRY_BACKOFF_MS", 300)
     ERP_RETRY_ON_POST = _bool_env("ERP_RETRY_ON_POST", False)
     RFQ_SLA_DAYS = _int_env("RFQ_SLA_DAYS", 5)
+
+    def __init__(self):
+        env = os.environ.get("FLASK_ENV", "development").lower()
+        if env == "production" and not self.DATABASE_URL:
+            raise RuntimeError("DATABASE_URL nao definida para ambiente de producao.")
+        if env == "production" and self.SECRET_KEY == "dev-secret-plataforma-compras":
+            raise RuntimeError("SECRET_KEY insegura para producao.")

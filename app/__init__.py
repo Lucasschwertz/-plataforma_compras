@@ -12,6 +12,7 @@ def create_app(config_class=Config):
     _register_auth(app)
     _register_tenant(app)
     _register_blueprints(app)
+    _register_health(app)
 
     with app.app_context():
         init_db()
@@ -64,3 +65,11 @@ def _register_tenant(app: Flask) -> None:
             return
 
         g.tenant_id = None
+
+
+def _register_health(app: Flask) -> None:
+    @app.route("/health")
+    def health():
+        db_path = app.config.get("DB_PATH") or "unknown"
+        backend = "postgres" if str(db_path).startswith("postgres") else "sqlite"
+        return {"status": "ok", "db": backend, "env": app.config.get("ENV", "unknown")}, 200
