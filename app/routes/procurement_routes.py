@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 
 from flask import Blueprint, current_app, jsonify, render_template, request
 
-from app.db import get_db
+from app.db import get_db, get_read_db
 from app.erp_client import DEFAULT_RISK_FLAGS, ErpError, fetch_erp_records, push_purchase_order
 from app.tenant import DEFAULT_TENANT_ID, current_tenant_id
 
@@ -103,7 +103,7 @@ def integration_logs_page():
 
 @procurement_bp.route("/api/procurement/inbox", methods=["GET"])
 def procurement_inbox():
-    db = get_db()
+    db = get_read_db()
     tenant_id = current_tenant_id()
 
     limit = _parse_int(request.args.get("limit"), default=50, min_value=1, max_value=200)
@@ -130,7 +130,7 @@ def procurement_inbox():
 
 @procurement_bp.route("/api/procurement/purchase-requests/open", methods=["GET"])
 def purchase_requests_open():
-    db = get_db()
+    db = get_read_db()
     tenant_id = current_tenant_id()
     limit = _parse_int(request.args.get("limit"), default=80, min_value=1, max_value=200)
     items = _load_open_purchase_requests(db, tenant_id, limit)
@@ -139,7 +139,7 @@ def purchase_requests_open():
 
 @procurement_bp.route("/api/procurement/purchase-request-items/open", methods=["GET"])
 def purchase_request_items_open():
-    db = get_db()
+    db = get_read_db()
     tenant_id = current_tenant_id()
     limit = _parse_int(request.args.get("limit"), default=120, min_value=1, max_value=300)
     items = _load_open_purchase_request_items(db, tenant_id, limit)
@@ -148,7 +148,7 @@ def purchase_request_items_open():
 
 @procurement_bp.route("/api/procurement/fornecedores", methods=["GET"])
 def fornecedores_api():
-    db = get_db()
+    db = get_read_db()
     tenant_id = current_tenant_id()
     suppliers = _load_suppliers(db, tenant_id)
     return jsonify({"items": suppliers})
@@ -156,7 +156,7 @@ def fornecedores_api():
 
 @procurement_bp.route("/api/procurement/cotacoes/<int:rfq_id>", methods=["GET"])
 def cotacao_detail_api(rfq_id: int):
-    db = get_db()
+    db = get_read_db()
     tenant_id = current_tenant_id()
 
     rfq = _load_rfq(db, tenant_id, rfq_id)
@@ -304,7 +304,7 @@ def cotacao_propostas_api(rfq_id: int):
 
 @procurement_bp.route("/api/procurement/purchase-orders/<int:purchase_order_id>", methods=["GET"])
 def purchase_order_detail_api(purchase_order_id: int):
-    db = get_db()
+    db = get_read_db()
     tenant_id = current_tenant_id()
 
     po = _load_purchase_order(db, tenant_id, purchase_order_id)
@@ -346,7 +346,7 @@ def purchase_order_detail_api(purchase_order_id: int):
 
 @procurement_bp.route("/api/procurement/integrations/logs", methods=["GET"])
 def integration_logs_api():
-    db = get_db()
+    db = get_read_db()
     tenant_id = current_tenant_id()
 
     scope = (request.args.get("scope") or "").strip() or None
@@ -560,7 +560,7 @@ def procurement_seed():
 
 @procurement_bp.route("/api/procurement/rfqs", methods=["GET"])
 def list_rfqs():
-    db = get_db()
+    db = get_read_db()
     tenant_id = current_tenant_id()
     clause, params = _tenant_clause(tenant_id)
 
@@ -713,7 +713,7 @@ def create_rfq():
 
 @procurement_bp.route("/api/procurement/rfqs/<int:rfq_id>/comparison", methods=["GET"])
 def rfq_comparison(rfq_id: int):
-    db = get_db()
+    db = get_read_db()
     tenant_id = current_tenant_id()
 
     rfq = _load_rfq(db, tenant_id, rfq_id)

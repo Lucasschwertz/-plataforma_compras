@@ -109,10 +109,20 @@ def get_db():
     return g.db
 
 
+def get_read_db():
+    if "db_read" not in g:
+        db_path = current_app.config.get("DATABASE_READ_URL") or current_app.config["DB_PATH"]
+        g.db_read = _connect_database(db_path)
+    return g.db_read
+
+
 def close_db(_error=None):
     db = g.pop("db", None)
     if db is not None:
         db.close()
+    db_read = g.pop("db_read", None)
+    if db_read is not None:
+        db_read.close()
 
 
 def init_db():

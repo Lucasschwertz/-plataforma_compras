@@ -21,6 +21,7 @@ def _int_env(name: str, default: int) -> int:
 class Config:
     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
     DATABASE_URL = os.environ.get("DATABASE_URL")
+    DATABASE_READ_URL = os.environ.get("DATABASE_READ_URL")
     DATABASE_DIR = None if DATABASE_URL else os.path.join(BASE_DIR, "database")
     DB_PATH = DATABASE_URL or os.path.join(DATABASE_DIR, "plataforma_compras.db")
 

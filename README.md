@@ -37,3 +37,27 @@ python database\import_erp_csv.py --schema tabelas.csv `
   --e410pct "C:\plataforma_compras\lista solicitações e410pct.csv" `
   --e410fpc "C:\plataforma_compras\lista solicitações e410fpc.csv"
 ```
+
+## Production
+
+Variaveis obrigatorias:
+- DATABASE_URL
+- SECRET_KEY
+- ERP_MODE
+- ERP_BASE_URL
+- ERP_TOKEN
+
+Variaveis recomendadas:
+- ERP_TIMEOUT_SECONDS
+- ERP_RETRY_ATTEMPTS
+- ERP_RETRY_BACKOFF_MS
+- RFQ_SLA_DAYS
+- LOG_LEVEL
+- DATABASE_READ_URL
+
+Deploy (Docker Compose):
+- docs/deploy/docker-compose.md
+
+Operacao:
+- docs/ops/backups.md
+- docs/ops/read_replica.md
