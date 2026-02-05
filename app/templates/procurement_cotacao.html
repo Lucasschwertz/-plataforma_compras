@@ -3,7 +3,7 @@
 {% set active_nav = "rfq" %}
 {% block title %}Cotacao {{ rfq_id }} | Plataforma Compras{% endblock %}
 {% block page_title %}Mesa de cotacao{% endblock %}
-{% block breadcrumbs %}Workspace {{ workspace_name }}, Cotacao {{ rfq_id }}{% endblock %}
+{% block breadcrumb_tail %} / Cotacao {{ rfq_id }}{% endblock %}
 {% block page_actions %}
   <a class="btn btn-ghost" href="/procurement/inbox?type=rfq">Voltar para cotacoes</a>
   <a class="btn btn-primary" href="#decisao">Fazer award</a>

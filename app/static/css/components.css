@@ -122,6 +122,9 @@
 .breadcrumbs {
   font-size: 12px;
   color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .page-title {
@@ -508,6 +511,9 @@ tr.best-overall td {
   .sidebar {
     flex-direction: row;
     flex-wrap: wrap;
+    position: sticky;
+    top: 0;
+    z-index: 9;
   }
 
   .grid-2,
@@ -515,8 +521,34 @@ tr.best-overall td {
     grid-template-columns: 1fr;
   }
 
+  .grid-4 {
+    grid-template-columns: 1fr;
+  }
+
   .page-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .topbar-right {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .content {
+    padding: var(--space-4);
+  }
+
+  table {
+    min-width: 720px;
   }
 }

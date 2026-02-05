@@ -40,11 +40,12 @@
           <div class="topbar-left">
             <div class="workspace-select">
               <label for="workspaceSelect">Workspace</label>
-              <select class="select" id="workspaceSelect">
-                <option value="{{ workspace_id }}">{{ workspace_name }}</option>
+              <select class="select" id="workspaceSelect" data-workspace-current="{{ workspace_id }}">
+                <option value="{{ workspace_id }}">{{ workspace_name }} | {{ workspace_id }}</option>
               </select>
             </div>
             <span class="badge">Role {{ ui_role }}</span>
+            <span class="badge">Workspace {{ workspace_id }}</span>
           </div>
           <div class="topbar-right">
             <button class="btn btn-ghost" id="themeToggle">Alternar tema</button>
@@ -56,9 +57,12 @@
         <main class="content">
           <div class="page-head">
             <div>
-              <div class="breadcrumbs">{% block breadcrumbs %}Workspace {{ workspace_name }}{% endblock %}</div>
-              <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
+            <div class="breadcrumbs">
+              Workspace {{ workspace_name }}
+              {% block breadcrumb_tail %}{% endblock %}
             </div>
+            <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
+          </div>
             <div class="page-actions">
               {% block page_actions %}{% endblock %}
             </div>
@@ -86,6 +90,25 @@
             localStorage.setItem("theme", next);
           });
         }
+
+        const params = new URLSearchParams(window.location.search);
+        const workspaceFromUrl = params.get("workspace_id");
+        const workspaceSelect = document.getElementById("workspaceSelect");
+        if (workspaceSelect && workspaceFromUrl) {
+          const option = document.createElement("option");
+          option.value = workspaceFromUrl;
+          option.textContent = `Empresa ${workspaceFromUrl} | ${workspaceFromUrl}`;
+          workspaceSelect.insertBefore(option, workspaceSelect.firstChild);
+          workspaceSelect.value = workspaceFromUrl;
+        }
+
+        const links = document.querySelectorAll(".nav a");
+        links.forEach((link) => {
+          if (!workspaceFromUrl) return;
+          const url = new URL(link.href);
+          url.searchParams.set("workspace_id", workspaceFromUrl);
+          link.href = url.toString();
+        });
 
         window.showToast = function (type, message) {
           const root = document.getElementById("toastRoot");

@@ -3,7 +3,7 @@
 {% set active_nav = "award" %}
 {% block title %}OC {{ purchase_order_id }} | Plataforma Compras{% endblock %}
 {% block page_title %}Detalhe da OC{% endblock %}
-{% block breadcrumbs %}Workspace {{ workspace_name }}, OC {{ purchase_order_id }}{% endblock %}
+{% block breadcrumb_tail %} / OC {{ purchase_order_id }}{% endblock %}
 {% block page_actions %}
   <a class="btn btn-ghost" href="/procurement/inbox">Voltar para inbox</a>
   <button class="btn btn-primary" id="pushErpBtn">Enviar ao ERP</button>
