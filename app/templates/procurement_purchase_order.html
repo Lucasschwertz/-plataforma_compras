@@ -1,57 +1,51 @@
-﻿<!doctype html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OC {{ purchase_order_id }} - Plataforma Compras</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
-  </head>
-  <body class="ui-minimal">
-    <main class="container">
-      <section class="page-header">
-        <div>
-          <h1 class="page-title">Detalhe da OC #{{ purchase_order_id }}</h1>
-          <p class="page-subtitle">Empresa #{{ tenant_id }} | Detalhes da ordem</p>
-        </div>
-        <div class="actions">
-          <a class="button ghost" href="/procurement/inbox">Voltar para Inbox</a>
-          <a class="button ghost" href="/procurement/integrations/logs">Logs de integracao</a>
-          <a class="button ghost" href="/logout">Sair</a>
-        </div>
-      </section>
+﻿
+{% extends "_layout.html" %}
+{% set active_nav = "award" %}
+{% block title %}OC {{ purchase_order_id }} | Plataforma Compras{% endblock %}
+{% block page_title %}Detalhe da OC{% endblock %}
+{% block breadcrumbs %}Workspace {{ workspace_name }}, OC {{ purchase_order_id }}{% endblock %}
+{% block page_actions %}
+  <a class="btn btn-ghost" href="/procurement/inbox">Voltar para inbox</a>
+  <button class="btn btn-primary" id="pushErpBtn">Enviar ao ERP</button>
+{% endblock %}
+{% block content %}
+  <section class="grid grid-2">
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Resumo</h2>
+        <span class="badge" id="poStatusBadge">Status</span>
+      </div>
+      <div class="stack" id="poSummary"></div>
+    </article>
 
-      <section class="page-grid">
-        <article class="card">
-          <h3>Resumo</h3>
-          <div class="kv" id="poSummary"></div>
-          <div class="actions" style="margin-top: 12px">
-            <button class="button primary" id="pushErpBtn">Enviar ao ERP</button>
-            <a class="button" id="openInboxBtn" href="/procurement/inbox">Abrir Inbox</a>
-          </div>
-        </article>
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Eventos</h2>
+      </div>
+      <div class="list" id="eventsList"></div>
+    </article>
 
-        <article class="card">
-          <h3>Eventos</h3>
-          <div class="list" id="eventsList"></div>
-        </article>
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Execucoes de integracao</h2>
+      </div>
+      <div class="list" id="syncRunsList"></div>
+    </article>
+  </section>
+{% endblock %}
 
-        <article class="card">
-          <h3>Execucoes de Integracao</h3>
-          <div class="list" id="syncRunsList"></div>
-        </article>
-      </section>
-    </main>
-
-    <script>
+{% block page_scripts %}
+  <script>
       const purchaseOrderId = Number({{ purchase_order_id }});
 
       const poSummary = document.getElementById("poSummary");
       const eventsList = document.getElementById("eventsList");
       const syncRunsList = document.getElementById("syncRunsList");
       const pushErpBtn = document.getElementById("pushErpBtn");
+      const poStatusBadge = document.getElementById("poStatusBadge");
 
       function escapeHtml(value) {
-        return String(value ?? "-")
+        return String(value ?? "n/a")
           .replaceAll("&", "&amp;")
           .replaceAll("<", "&lt;")
           .replaceAll(">", "&gt;")
@@ -81,7 +75,7 @@
           succeeded: "Sucesso",
           failed: "Falha",
         };
-        return map[status] || status || "-";
+        return map[status] || status || "n/a";
       }
       function prettyScope(scope) {
         const map = {
@@ -91,46 +85,43 @@
           supplier: "Fornecedores",
           receipt: "Recebimentos",
         };
-        return map[scope] || scope || "-";
+        return map[scope] || scope || "n/a";
       }
       function renderSummary(po) {
         const rows = [
-          ["Numero", po.number || `OC-${po.id}`],
+          ["Numero", po.number || `OC ${po.id}`],
           ["Status", prettyStatus(po.status)],
-          ["Fornecedor", po.supplier_name || "-"],
-          ["Decisao", po.award_id ?? "-"],
+          ["Fornecedor", po.supplier_name || "n/a"],
+          ["Decisao", po.award_id ?? "n/a"],
           ["Moeda", po.currency || "BRL"],
-          ["Total", po.total_amount ?? "-"],
-          ["ID externo", po.external_id || "-"],
-          ["Erro ERP", po.erp_last_error || "-"],
-          ["Criada em", po.created_at],
-          ["Atualizada em", po.updated_at],
+          ["Total", po.total_amount ?? "n/a"],
+          ["ID externo", po.external_id || "n/a"],
+          ["Erro ERP", po.erp_last_error || "n/a"],
+          ["Criada em", po.created_at || "n/a"],
+          ["Atualizada em", po.updated_at || "n/a"],
         ];
 
         poSummary.innerHTML = rows
-          .map(([k, v]) => `<div class="k">${escapeHtml(k)}</div><div>${escapeHtml(v)}</div>`)
+          .map(([k, v]) => `<div class="meta">${escapeHtml(k)}</div><div>${escapeHtml(v)}</div>`)
           .join("");
 
         pushErpBtn.disabled = po.status === "erp_accepted";
-        pushErpBtn.textContent = po.status === "erp_accepted" ? "ERP OK" : "Enviar ao ERP";
+        pushErpBtn.textContent = po.status === "erp_accepted" ? "ERP ok" : "Enviar ao ERP";
+        poStatusBadge.textContent = prettyStatus(po.status);
       }
 
       function renderEvents(events) {
         if (!events.length) {
-          eventsList.innerHTML = '<div class="small">Sem eventos ainda.</div>';
+          eventsList.innerHTML = '<div class="meta">Sem eventos ainda.</div>';
           return;
         }
         eventsList.innerHTML = events
           .map(
             (e) => `
               <div class="list-item">
-                <div class="top">
-                  <div class="title">${escapeHtml(prettyStatus(e.to_status))}</div>
-                  <div class="meta-line">${escapeHtml(e.occurred_at)}</div>
-                </div>
-                <div class="meta-line">de: ${escapeHtml(e.from_status || "-")} | motivo: ${escapeHtml(
-              e.reason || "-"
-            )}</div>
+                <div class="meta">${escapeHtml(prettyStatus(e.to_status))}</div>
+                <div>${escapeHtml(e.occurred_at)}</div>
+                <div class="meta">de ${escapeHtml(e.from_status || "n/a")}, motivo ${escapeHtml(e.reason || "n/a")}</div>
               </div>
             `
           )
@@ -139,25 +130,19 @@
 
       function renderSyncRuns(syncRuns) {
         if (!syncRuns.length) {
-          syncRunsList.innerHTML = '<div class="small">Sem execucoes de integracao ainda.</div>';
+          syncRunsList.innerHTML = '<div class="meta">Sem execucoes de integracao ainda.</div>';
           return;
         }
         syncRunsList.innerHTML = syncRuns
           .map(
             (s) => `
               <div class="list-item">
-                <div class="top">
-                  <div class="title">execucao #${escapeHtml(s.id)} | ${escapeHtml(prettyStatus(s.status))}</div>
-                  <div class="meta-line">${escapeHtml(s.started_at)}</div>
-                </div>
-                <div class="meta-line">
-                  escopo: ${escapeHtml(prettyScope(s.scope))} | duracao (ms): ${escapeHtml(s.duration_ms || "-")}
-                </div>
-                <div class="meta-line">
-                  registros: in=${escapeHtml(s.records_in)} upserted=${escapeHtml(s.records_upserted)} failed=${escapeHtml(
+                <div class="meta">execucao ${escapeHtml(s.id)} | ${escapeHtml(prettyStatus(s.status))}</div>
+                <div>${escapeHtml(s.started_at)}</div>
+                <div class="meta">escopo ${escapeHtml(prettyScope(s.scope))} | duracao ${escapeHtml(s.duration_ms || "n/a")}</div>
+                <div class="meta">registros in ${escapeHtml(s.records_in)} upserted ${escapeHtml(s.records_upserted)} failed ${escapeHtml(
               s.records_failed
-            )}
-                </div>
+            )}</div>
               </div>
             `
           )
@@ -168,7 +153,7 @@
         const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}`);
         const data = await res.json();
         if (!res.ok) {
-          poSummary.innerHTML = `<div class="small">Erro: ${escapeHtml(
+          poSummary.innerHTML = `<div class="meta">Erro: ${escapeHtml(
             data.message || data.error || "desconhecido"
           )}</div>`;
           eventsList.innerHTML = "";
@@ -183,11 +168,12 @@
 
       pushErpBtn.addEventListener("click", async () => {
         pushErpBtn.disabled = true;
-        pushErpBtn.textContent = "Enviando...";
+        pushErpBtn.textContent = "Enviando";
         try {
           await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, {
             method: "POST",
           });
+          window.showToast("success", "OC enviada ao ERP");
         } finally {
           await loadDetail();
         }
@@ -195,5 +181,4 @@
 
       loadDetail();
     </script>
-  </body>
-</html>
+{% endblock %}
