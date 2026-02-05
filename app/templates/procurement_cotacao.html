@@ -458,6 +458,11 @@
       }
 
       function renderFornecedores() {
+        const invitedIds = new Set();
+        state.itens.forEach((item) => {
+          (item.fornecedores || []).forEach((f) => invitedIds.add(f.supplier_id));
+        });
+
         if (!state.fornecedores.length) {
           propostaFornecedorSelect.innerHTML = '<option value="">Sem fornecedores cadastrados</option>';
           propostaFornecedorSelect.disabled = true;
@@ -465,10 +470,24 @@
           propostaSubmitBtn.textContent = "Sem fornecedores";
           return;
         }
+
+        const fornecedoresDisponiveis =
+          invitedIds.size > 0
+            ? state.fornecedores.filter((f) => invitedIds.has(f.id))
+            : state.fornecedores;
+
+        if (!fornecedoresDisponiveis.length) {
+          propostaFornecedorSelect.innerHTML = '<option value="">Convide um fornecedor primeiro</option>';
+          propostaFornecedorSelect.disabled = true;
+          propostaSubmitBtn.disabled = true;
+          propostaSubmitBtn.textContent = "Convide fornecedores";
+          return;
+        }
+
         propostaFornecedorSelect.disabled = false;
         propostaSubmitBtn.disabled = false;
         propostaSubmitBtn.textContent = "Salvar proposta";
-        propostaFornecedorSelect.innerHTML = state.fornecedores
+        propostaFornecedorSelect.innerHTML = fornecedoresDisponiveis
           .map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`)
           .join("");
       }
@@ -648,6 +667,15 @@
         event.preventDefault();
         const supplierId = Number(propostaFornecedorSelect.value);
         if (!supplierId) return;
+
+        const invitedIds = new Set();
+        state.itens.forEach((item) => {
+          (item.fornecedores || []).forEach((f) => invitedIds.add(f.supplier_id));
+        });
+        if (invitedIds.size > 0 && !invitedIds.has(supplierId)) {
+          alert("Fornecedor nao convidado para esta cotacao.");
+          return;
+        }
 
         const itemsPayload = state.itens
           .map((item) => {
