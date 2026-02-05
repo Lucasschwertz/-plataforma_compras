@@ -1,0 +1,54 @@
+:root {
+  --bg: #f2f4f8;
+  --surface: #ffffff;
+  --surface-2: #eef1f6;
+  --text: #1c2430;
+  --muted: #64748b;
+  --border: rgba(30, 41, 59, 0.12);
+  --primary: #4c6fff;
+  --primary-contrast: #ffffff;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --shadow-1: 0 6px 18px rgba(15, 23, 42, 0.08);
+  --shadow-2: 0 14px 32px rgba(15, 23, 42, 0.14);
+  --shadow-3: 0 24px 48px rgba(15, 23, 42, 0.2);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --font-base: "Inter", "Segoe UI", Arial, sans-serif;
+}
+
+html[data-theme="dark"] {
+  --bg: #0f1624;
+  --surface: #151e2f;
+  --surface-2: #101826;
+  --text: #e5ecff;
+  --muted: #9aa6c4;
+  --border: rgba(226, 232, 240, 0.12);
+  --primary: #7b92ff;
+  --primary-contrast: #0b1220;
+  --shadow-1: 0 8px 20px rgba(5, 8, 16, 0.3);
+  --shadow-2: 0 16px 36px rgba(5, 8, 16, 0.4);
+  --shadow-3: 0 26px 54px rgba(5, 8, 16, 0.5);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-base);
+  color: var(--text);
+  background: radial-gradient(900px 600px at 12% -10%, #ffffff 0%, var(--bg) 55%);
+}
+
+html[data-theme="dark"] body {
+  background: radial-gradient(900px 600px at 12% -10%, #1a2234 0%, var(--bg) 55%);
+}

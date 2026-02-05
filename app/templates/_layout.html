@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Plataforma Compras{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/design_tokens.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}" />
+    {% block head %}{% endblock %}
+  </head>
+  <body>
+    {% set ui_role = role | default("buyer") %}
+    {% set workspace_id = workspace_id | default(tenant_id | default("default")) %}
+    {% set workspace_name = workspace_name | default("Empresa " ~ workspace_id) %}
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="/procurement/inbox">
+          <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
+          <div>
+            <div class="brand-title">Plataforma Compras</div>
+            <div class="brand-subtitle">Workspace ativo</div>
+          </div>
+        </a>
+        <nav class="nav">
+          <a class="{% if active_nav == 'inbox' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
+          <a class="{% if active_nav == 'rfq' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
+          <a class="{% if active_nav == 'award' %}active{% endif %}" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">Awards</a>
+          {% if ui_role == "admin" %}
+            <a href="/procurement/integrations/logs">Automacao</a>
+            <a href="/procurement/integrations/logs">Configuracoes</a>
+          {% endif %}
+          {% if ui_role == "approver" %}
+            <a href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Aprovacoes</a>
+          {% endif %}
+        </nav>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <div class="workspace-select">
+              <label for="workspaceSelect">Workspace</label>
+              <select class="select" id="workspaceSelect">
+                <option value="{{ workspace_id }}">{{ workspace_name }}</option>
+              </select>
+            </div>
+            <span class="badge">Role {{ ui_role }}</span>
+          </div>
+          <div class="topbar-right">
+            <button class="btn btn-ghost" id="themeToggle">Alternar tema</button>
+            <a class="btn btn-ghost" href="/procurement/integrations/logs">Logs</a>
+            <a class="btn btn-ghost" href="/logout">Sair</a>
+          </div>
+        </header>
+
+        <main class="content">
+          <div class="page-head">
+            <div>
+              <div class="breadcrumbs">{% block breadcrumbs %}Workspace {{ workspace_name }}{% endblock %}</div>
+              <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
+            </div>
+            <div class="page-actions">
+              {% block page_actions %}{% endblock %}
+            </div>
+          </div>
+          {% block content %}{% endblock %}
+        </main>
+      </div>
+    </div>
+
+    <div class="toast-root" id="toastRoot"></div>
+
+    <script>
+      (function () {
+        const stored = localStorage.getItem("theme");
+        const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const startTheme = stored || (prefersDark ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", startTheme);
+
+        const toggleBtn = document.getElementById("themeToggle");
+        if (toggleBtn) {
+          toggleBtn.addEventListener("click", () => {
+            const current = document.documentElement.getAttribute("data-theme") || "light";
+            const next = current === "dark" ? "light" : "dark";
+            document.documentElement.setAttribute("data-theme", next);
+            localStorage.setItem("theme", next);
+          });
+        }
+
+        window.showToast = function (type, message) {
+          const root = document.getElementById("toastRoot");
+          if (!root) return;
+          const toast = document.createElement("div");
+          toast.className = `toast ${type || ""}`;
+          toast.textContent = message;
+          root.appendChild(toast);
+          setTimeout(() => toast.remove(), 3200);
+        };
+      })();
+    </script>
+    {% block page_scripts %}{% endblock %}
+  </body>
+</html>
