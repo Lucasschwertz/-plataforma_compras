@@ -1,41 +1,30 @@
-﻿<!doctype html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Plataforma Compras - Inbox</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
-  </head>
-  <body class="ui-minimal">
-    <main class="container">
-      <section class="header">
-        <div class="brand">
-          <a class="brand-link" href="/">
-            <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
-            <div class="brand-text">
-              <div class="brand-title">Plataforma Compras</div>
-              <div class="brand-tagline">Inbox de Compras | Empresa #{{ tenant_id }}</div>
-            </div>
-          </a>
-        </div>
-        <div class="actions">
-          <a class="button ghost" href="/procurement/integrations/logs">Logs</a>
-          <button class="button" id="refreshBtn">Atualizar</button>
-          <button class="button" id="seedBtn">Popular Dados</button>
-          <button class="button primary" id="createRfqBtn">Criar Cotacao</button>
-          <a class="button ghost" href="/logout">Sair</a>
-        </div>
-      </section>
-
-      <section class="toolbar" aria-label="Filtros da inbox">
-        <input class="input" id="searchInput" placeholder="Buscar por referencia..." />
+﻿
+{% extends "_layout.html" %}
+{% set active_nav = "inbox" %}
+{% block title %}Inbox | Plataforma Compras{% endblock %}
+{% block page_title %}Inbox{% endblock %}
+{% block breadcrumbs %}Workspace {{ workspace_name }}, Inbox{% endblock %}
+{% block page_actions %}
+  <button class="btn" id="refreshBtn">Atualizar</button>
+  <button class="btn" id="seedBtn">Popular dados</button>
+  <button class="btn btn-primary" id="createRfqBtn">Criar cotacao</button>
+{% endblock %}
+{% block content %}
+  <section class="grid">
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Filtros</h2>
+        <div class="meta">Refine e aplique</div>
+      </div>
+      <div class="grid grid-3" aria-label="Filtros da inbox">
+        <input class="input" id="searchInput" placeholder="Buscar por referencia" />
         <select class="select" id="typeFilter">
           <option value="">Todos os tipos</option>
           <option value="purchase_request">Solicitacao</option>
           <option value="rfq">Cotacao</option>
           <option value="purchase_order">Ordem de compra</option>
         </select>
-        <input class="input" id="statusFilter" placeholder="Status interno (ex: pending_rfq, open)" />
+        <input class="input" id="statusFilter" placeholder="Status interno, exemplo pending_rfq" />
         <select class="select" id="priorityFilter">
           <option value="">Todas prioridades</option>
           <option value="urgent">Urgente</option>
@@ -43,160 +32,151 @@
           <option value="medium">Media</option>
           <option value="low">Baixa</option>
         </select>
-        <button class="button ghost" id="applyFiltersBtn">Aplicar</button>
-        <button class="button ghost" id="clearFiltersBtn">Limpar</button>
-      </section>
-
-      <section class="kpis" id="kpis">
-        <a class="kpi-card kpi-link" href="/procurement/inbox?type=purchase_request&status=pending_rfq">
-          <div class="kpi-label">Pendentes de Cotacao</div>
-          <div class="kpi-value" data-kpi="pending_rfq">0</div>
-        </a>
-        <a class="kpi-card kpi-link" href="/procurement/inbox?type=rfq&status=open,collecting_quotes">
-          <div class="kpi-label">Aguardando Cotacoes</div>
-          <div class="kpi-value" data-kpi="awaiting_quotes">0</div>
-        </a>
-        <a class="kpi-card kpi-link" href="/procurement/inbox?type=rfq&awaiting_po=1">
-          <div class="kpi-label">Decisao sem OC</div>
-          <div class="kpi-value" data-kpi="awarded_waiting_po">0</div>
-        </a>
-        <a class="kpi-card kpi-link" href="/procurement/inbox?type=purchase_order&status=draft,approved,sent_to_erp,erp_error">
-          <div class="kpi-label">OC pendente ERP</div>
-          <div class="kpi-value" data-kpi="awaiting_erp_push">0</div>
-        </a>
-      </section>
-
-      <section class="panel">
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Tipo</th>
-                <th>Referencia</th>
-                <th>Status</th>
-                <th>Prioridade</th>
-                <th>Necessidade</th>
-                <th>Idade (dias)</th>
-                <th>Atualizado</th>
-                <th>Meta</th>
-                <th>Acoes</th>
-              </tr>
-            </thead>
-            <tbody id="inboxBody"></tbody>
-          </table>
-        </div>
-        <div class="footer-row">
-          <div id="summary" class="small">Carregando...</div>
-          <div class="meta" id="metaInfo"></div>
-        </div>
-      </section>
-    </main>
-
-    <!-- Modals -->
-    <div class="modal-backdrop" id="rfqModalBackdrop" role="dialog" aria-modal="true">
-      <div class="modal">
-        <div class="modal-header">
-          <h2 class="modal-title">Criar Cotacao</h2>
-          <button class="button small ghost" data-close-modal="rfq">Fechar</button>
-        </div>
-        <form id="rfqForm">
-          <div class="modal-body">
-            <div class="field">
-              <label class="field-label" for="rfqTitleInput">Titulo</label>
-              <input class="input" id="rfqTitleInput" name="title" required />
-            </div>
-            <div class="field">
-              <label class="field-label">Itens das solicitacoes em aberto</label>
-              <div class="small" id="rfqRequestsHint">Selecione os itens que entram nesta cotacao.</div>
-              <div class="list" id="rfqRequestsList"></div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="button ghost" data-close-modal="rfq">Cancelar</button>
-            <button type="submit" class="button primary" id="rfqSubmitBtn">Criar</button>
-          </div>
-        </form>
+        <button class="btn btn-ghost" id="applyFiltersBtn">Aplicar</button>
+        <button class="btn btn-ghost" id="clearFiltersBtn">Limpar</button>
       </div>
     </div>
 
-    <div class="modal-backdrop" id="awardModalBackdrop" role="dialog" aria-modal="true">
-      <div class="modal">
-        <div class="modal-header">
-          <h2 class="modal-title">Decisao da Cotacao</h2>
-          <button class="button small ghost" data-close-modal="award">Fechar</button>
-        </div>
-        <form id="awardForm">
-          <div class="modal-body">
-            <div class="meta" id="awardMeta"></div>
-            <input type="hidden" id="awardRfqIdInput" />
-            <div class="field">
-              <label class="field-label" for="awardSupplierInput">Fornecedor</label>
-              <input class="input" id="awardSupplierInput" required />
-            </div>
-            <div class="field">
-              <label class="field-label" for="awardReasonInput">Motivo</label>
-              <textarea class="textarea" id="awardReasonInput" required></textarea>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="button ghost" data-close-modal="award">Cancelar</button>
-            <button type="submit" class="button primary" id="awardSubmitBtn">Confirmar decisao</button>
-          </div>
-        </form>
-      </div>
+    <div class="grid grid-4" id="kpis">
+      <a class="kpi-card" href="/procurement/inbox?type=purchase_request&status=pending_rfq">
+        <div class="kpi-label">Pendentes de cotacao</div>
+        <div class="kpi-value" data-kpi="pending_rfq">0</div>
+      </a>
+      <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes">
+        <div class="kpi-label">Aguardando cotacoes</div>
+        <div class="kpi-value" data-kpi="awaiting_quotes">0</div>
+      </a>
+      <a class="kpi-card" href="/procurement/inbox?type=rfq&awaiting_po=1">
+        <div class="kpi-label">Decisao sem OC</div>
+        <div class="kpi-value" data-kpi="awarded_waiting_po">0</div>
+      </a>
+      <a class="kpi-card" href="/procurement/inbox?type=purchase_order&status=draft,approved,sent_to_erp,erp_error">
+        <div class="kpi-label">OC pendente ERP</div>
+        <div class="kpi-value" data-kpi="awaiting_erp_push">0</div>
+      </a>
     </div>
 
-    <div class="modal-backdrop" id="poModalBackdrop" role="dialog" aria-modal="true">
-      <div class="modal">
-        <div class="modal-header">
-          <h2 class="modal-title">Gerar Ordem de Compra</h2>
-          <button class="button small ghost" data-close-modal="po">Fechar</button>
-        </div>
-        <form id="poForm">
-          <div class="modal-body">
-            <div class="meta" id="poMeta"></div>
-            <input type="hidden" id="poAwardIdInput" />
-            <div class="field">
-              <label class="field-label" for="poSupplierInput">Fornecedor</label>
-              <input class="input" id="poSupplierInput" disabled />
-            </div>
-            <div class="field">
-              <label class="field-label">Status inicial</label>
-              <div class="meta-pill">aprovada</div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="button ghost" data-close-modal="po">Cancelar</button>
-            <button type="submit" class="button primary" id="poSubmitBtn">Gerar OC</button>
-          </div>
-        </form>
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Fila ativa</h2>
+        <div class="meta" id="summary">Carregando</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Tipo</th>
+              <th>Referencia</th>
+              <th>Status</th>
+              <th>Prioridade</th>
+              <th>Necessidade</th>
+              <th>Idade em dias</th>
+              <th>Atualizado</th>
+              <th>Meta</th>
+              <th>Acoes</th>
+            </tr>
+          </thead>
+          <tbody id="inboxBody"></tbody>
+        </table>
+      </div>
+      <div class="stack" style="margin-top: 12px">
+        <div class="meta" id="metaInfo"></div>
       </div>
     </div>
+  </section>
 
-    <div class="modal-backdrop" id="pushModalBackdrop" role="dialog" aria-modal="true">
-      <div class="modal">
-        <div class="modal-header">
-          <h2 class="modal-title">Enviar OC ao ERP</h2>
-          <button class="button small ghost" data-close-modal="push">Fechar</button>
-        </div>
-        <form id="pushForm">
-          <div class="modal-body">
-            <div class="meta" id="pushMeta"></div>
-            <input type="hidden" id="pushPoIdInput" />
-            <div class="field">
-              <label class="field-label">Confirmacao</label>
-              <div class="meta-pill">A OC sera enviada e marcada como ERP aceito (erp_accepted).</div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="button ghost" data-close-modal="push">Cancelar</button>
-            <button type="submit" class="button primary" id="pushSubmitBtn">Enviar agora</button>
-          </div>
-        </form>
+  <div class="modal-backdrop" id="rfqModalBackdrop" role="dialog" aria-modal="true">
+    <div class="card" style="max-width: 620px; margin: 0 auto;">
+      <div class="card-header">
+        <h2 class="card-title">Criar cotacao</h2>
+        <button class="btn btn-ghost btn-small" data-close-modal="rfq">Fechar</button>
       </div>
+      <form id="rfqForm" class="stack">
+        <div>
+          <label class="meta" for="rfqTitleInput">Titulo</label>
+          <input class="input" id="rfqTitleInput" name="title" required />
+        </div>
+        <div>
+          <label class="meta">Itens das solicitacoes em aberto</label>
+          <div class="meta" id="rfqRequestsHint">Selecione os itens que entram nesta cotacao.</div>
+          <div class="list" id="rfqRequestsList"></div>
+        </div>
+        <div class="page-actions">
+          <button type="button" class="btn btn-ghost" data-close-modal="rfq">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="rfqSubmitBtn">Criar</button>
+        </div>
+      </form>
     </div>
+  </div>
 
-    <script>
+  <div class="modal-backdrop" id="awardModalBackdrop" role="dialog" aria-modal="true">
+    <div class="card" style="max-width: 620px; margin: 0 auto;">
+      <div class="card-header">
+        <h2 class="card-title">Decisao da cotacao</h2>
+        <button class="btn btn-ghost btn-small" data-close-modal="award">Fechar</button>
+      </div>
+      <form id="awardForm" class="stack">
+        <div class="meta" id="awardMeta"></div>
+        <input type="hidden" id="awardRfqIdInput" />
+        <div>
+          <label class="meta" for="awardSupplierInput">Fornecedor</label>
+          <input class="input" id="awardSupplierInput" required />
+        </div>
+        <div>
+          <label class="meta" for="awardReasonInput">Motivo</label>
+          <textarea class="textarea" id="awardReasonInput" required></textarea>
+        </div>
+        <div class="page-actions">
+          <button type="button" class="btn btn-ghost" data-close-modal="award">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="awardSubmitBtn">Confirmar decisao</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="poModalBackdrop" role="dialog" aria-modal="true">
+    <div class="card" style="max-width: 620px; margin: 0 auto;">
+      <div class="card-header">
+        <h2 class="card-title">Gerar ordem de compra</h2>
+        <button class="btn btn-ghost btn-small" data-close-modal="po">Fechar</button>
+      </div>
+      <form id="poForm" class="stack">
+        <div class="meta" id="poMeta"></div>
+        <input type="hidden" id="poAwardIdInput" />
+        <div>
+          <label class="meta" for="poSupplierInput">Fornecedor</label>
+          <input class="input" id="poSupplierInput" disabled />
+        </div>
+        <div class="meta">Status inicial, aprovada</div>
+        <div class="page-actions">
+          <button type="button" class="btn btn-ghost" data-close-modal="po">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="poSubmitBtn">Gerar OC</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="pushModalBackdrop" role="dialog" aria-modal="true">
+    <div class="card" style="max-width: 620px; margin: 0 auto;">
+      <div class="card-header">
+        <h2 class="card-title">Enviar OC ao ERP</h2>
+        <button class="btn btn-ghost btn-small" data-close-modal="push">Fechar</button>
+      </div>
+      <form id="pushForm" class="stack">
+        <div class="meta" id="pushMeta"></div>
+        <input type="hidden" id="pushPoIdInput" />
+        <div class="meta">A OC sera enviada e marcada como ERP aceito.</div>
+        <div class="page-actions">
+          <button type="button" class="btn btn-ghost" data-close-modal="push">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="pushSubmitBtn">Enviar agora</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+
+{% block page_scripts %}
+  <script>
       const inboxBody = document.getElementById("inboxBody");
       const summary = document.getElementById("summary");
       const metaInfo = document.getElementById("metaInfo");
@@ -319,7 +299,7 @@
       }
 
       async function loadOpenRequestItems(preselectedRequestIds = []) {
-        rfqRequestsList.innerHTML = '<div class="small">Carregando itens...</div>';
+        rfqRequestsList.innerHTML = '<div class="meta">Carregando itens</div>';
         rfqSubmitBtn.disabled = true;
         try {
           const res = await fetch("/api/procurement/purchase-request-items/open");
@@ -327,9 +307,8 @@
           state.openRequestItems = data.items || [];
           renderOpenRequestItems(state.openRequestItems, preselectedRequestIds);
         } catch (error) {
-          rfqRequestsList.innerHTML =
-            '<div class="small">Nao foi possivel carregar itens de solicitacao.</div>';
-          rfqRequestsHint.textContent = "Erro ao carregar itens.";
+          rfqRequestsList.innerHTML = '<div class="meta">Nao foi possivel carregar itens de solicitacao.</div>';
+          rfqRequestsHint.textContent = "Erro ao carregar itens";
           rfqSubmitBtn.disabled = false;
         }
       }
@@ -337,7 +316,7 @@
       function renderOpenRequestItems(items, preselectedRequestIds = []) {
         if (!items.length) {
           rfqRequestsHint.textContent = "Sem itens de solicitacao em aberto no momento.";
-          rfqRequestsList.innerHTML = '<div class="small">Sem itens de solicitacao em aberto.</div>';
+          rfqRequestsList.innerHTML = '<div class="meta">Sem itens de solicitacao em aberto.</div>';
           rfqSubmitBtn.disabled = true;
           return;
         }
@@ -346,12 +325,12 @@
         const selectedSet = new Set(preselectedRequestIds);
         rfqRequestsList.innerHTML = items
           .map((item) => {
-            const ref = item.number || `SR-${item.purchase_request_id}`;
+            const ref = item.number || `SR ${item.purchase_request_id}`;
             const meta = [
-              item.department || "-",
-              item.requested_by || "-",
-              item.needed_at ? `necessidade: ${item.needed_at}` : "sem data",
-              item.priority ? `prioridade: ${item.priority}` : null,
+              item.department || "n/a",
+              item.requested_by || "n/a",
+              item.needed_at ? `necessidade ${item.needed_at}` : "sem data",
+              item.priority ? `prioridade ${item.priority}` : null,
             ]
               .filter(Boolean)
               .join(" • ");
@@ -364,10 +343,10 @@
                 />
                 <div>
                   <div class="title">${escapeHtml(ref)} • ${escapeHtml(item.description || "Item")}</div>
-                  <div class="meta-line">${escapeHtml(meta)}</div>
-                  <div class="meta-line">
-                    qtd: ${escapeHtml(item.quantity || "-")} ${escapeHtml(item.uom || "")} ${
-                  item.line_no ? `• linha ${item.line_no}` : ""
+                  <div class="meta">${escapeHtml(meta)}</div>
+                  <div class="meta">
+                    qtd ${escapeHtml(item.quantity || "n/a")} ${escapeHtml(item.uom || "")} ${
+                  item.line_no ? `linha ${item.line_no}` : ""
                 }
                   </div>
                 </div>
@@ -395,7 +374,8 @@
       });
 
       async function loadInbox() {
-        summary.textContent = "Carregando inbox...";
+        summary.textContent = "Carregando inbox";
+        inboxBody.innerHTML = skeletonRows(6);
         const res = await fetch(buildInboxUrl());
         const data = await res.json();
 
@@ -412,7 +392,7 @@
           .map(([key, value]) => `${key}=${value}`)
           .join(", ");
 
-        const filtersLabel = activeFilters ? ` | filtros: ${activeFilters}` : "";
+        const filtersLabel = activeFilters ? `, filtros ${activeFilters}` : "";
         summary.textContent = `${state.lastItems.length} itens na inbox${filtersLabel}`;
 
         await loadRfqSuggestions(state.lastItems);
@@ -422,12 +402,12 @@
         metaInfo.innerHTML = "";
         const filters = data.filters || {};
         const pills = [];
-        pills.push(`<span class="meta-pill">limit=${data.paging?.limit ?? state.limit}</span>`);
-        pills.push(`<span class="meta-pill">offset=${data.paging?.offset ?? state.offset}</span>`);
+        pills.push(`<span class="pill">limit ${data.paging?.limit ?? state.limit}</span>`);
+        pills.push(`<span class="pill">offset ${data.paging?.offset ?? state.offset}</span>`);
         for (const [key, value] of Object.entries(filters)) {
           if (!value) continue;
           if (key === "awaiting_po") {
-            pills.push(`<span class="meta-pill">decisao sem OC</span>`);
+            pills.push(`<span class="pill">decisao sem OC</span>`);
             continue;
           }
           const labelMap = {
@@ -437,7 +417,7 @@
             search: "busca",
           };
           const label = labelMap[key] || key;
-          pills.push(`<span class="meta-pill">${label}: ${escapeHtml(value)}</span>`);
+          pills.push(`<span class="pill">${label} ${escapeHtml(value)}</span>`);
         }
         metaInfo.innerHTML = pills.join("");
       }
@@ -466,12 +446,12 @@
             return `
               <tr>
                 <td class="type-label">${prettyType(item.type)}</td>
-                <td><strong>${escapeHtml(item.ref || "-")}</strong></td>
-                <td class="status">${escapeHtml(prettyStatus(item.status || "-"))}</td>
+                <td><strong>${escapeHtml(item.ref || "n/a")}</strong></td>
+                <td class="status">${escapeHtml(prettyStatus(item.status || "n/a"))}</td>
                 <td>${renderPriority(item.priority)}</td>
-                <td>${escapeHtml(item.needed_at || "-")}</td>
+                <td>${escapeHtml(item.needed_at || "n/a")}</td>
                 <td>${item.age_days ?? 0}</td>
-                <td class="muted">${escapeHtml(item.updated_at || "-")}</td>
+                <td class="muted">${escapeHtml(item.updated_at || "n/a")}</td>
                 <td>${meta}</td>
                 <td>${actions}</td>
               </tr>
@@ -481,69 +461,68 @@
 
         bindRowActions();
       }
-
       function renderRowMeta(item) {
         const pills = [];
         if (item.type === "rfq" && item.award_id) {
-          pills.push(`<span class="meta-pill">decisao #${item.award_id}</span>`);
+          pills.push(`<span class="pill">decisao ${item.award_id}</span>`);
           if (item.award_purchase_order_id) {
-            pills.push(`<span class="meta-pill">oc #${item.award_purchase_order_id}</span>`);
+            pills.push(`<span class="pill">oc ${item.award_purchase_order_id}</span>`);
           }
         }
         if (item.type === "rfq" && !item.award_id) {
           const suggestion = state.rfqSuggestions.get(item.id);
           if (suggestion) {
-            pills.push(`<span class="meta-pill">Sugestao: ${escapeHtml(suggestion.name)}</span>`);
+            pills.push(`<span class="pill">Sugestao ${escapeHtml(suggestion.name)}</span>`);
           }
         }
         if (item.type === "purchase_order" && item.status === "erp_accepted") {
-          pills.push('<span class="meta-pill">ERP aceito</span>');
+          pills.push('<span class="pill">ERP aceito</span>');
         }
-        return pills.length ? `<div class="meta">${pills.join("")}</div>` : "-";
+        return pills.length ? `<div class="meta">${pills.join("")}</div>` : "n/a";
       }
 
       function renderActions(item) {
         const actions = [];
         if (item.type === "rfq") {
           actions.push(
-            `<a class="button small ghost" href="/procurement/cotacoes/${item.id}">Mesa</a>
-            <button class="button small" data-action="comparison" data-id="${item.id}">Comparar</button>`
+            `<a class="btn btn-small btn-ghost" href="/procurement/cotacoes/${item.id}">Mesa</a>
+            <button class="btn btn-small" data-action="comparison" data-id="${item.id}">Comparar</button>`
           );
           if (item.status !== "awarded") {
             actions.push(
-              `<button class="button small primary" data-action="award" data-id="${item.id}">Decidir</button>`
+              `<button class="btn btn-small btn-primary" data-action="award" data-id="${item.id}">Decidir</button>`
             );
           }
           if (item.status === "awarded" && item.award_id && !item.award_purchase_order_id) {
             actions.push(
-              `<button class="button small" data-action="create-po" data-award-id="${item.award_id}" data-rfq-id="${item.id}">Gerar OC</button>`
+              `<button class="btn btn-small" data-action="create-po" data-award-id="${item.award_id}" data-rfq-id="${item.id}">Gerar OC</button>`
             );
           }
           if (item.award_purchase_order_id) {
             actions.push(
-              `<a class="button small ghost" href="/procurement/purchase-orders/${item.award_purchase_order_id}">Ver OC</a>`
+              `<a class="btn btn-small btn-ghost" href="/procurement/purchase-orders/${item.award_purchase_order_id}">Ver OC</a>`
             );
           }
         }
         if (item.type === "purchase_request") {
           actions.push(
-            `<button class="button small" data-action="new-rfq" data-id="${item.id}">Criar Cotacao</button>`
+            `<button class="btn btn-small" data-action="new-rfq" data-id="${item.id}">Criar cotacao</button>`
           );
         }
         if (item.type === "purchase_order") {
           actions.push(
-            `<a class="button small ghost" href="/procurement/purchase-orders/${item.id}">Detalhe</a>`
+            `<a class="btn btn-small btn-ghost" href="/procurement/purchase-orders/${item.id}">Detalhe</a>`
           );
           if (item.status !== "erp_accepted") {
             actions.push(
-              `<button class="button small primary" data-action="push-erp" data-id="${item.id}">Enviar ao ERP</button>`
+              `<button class="btn btn-small btn-primary" data-action="push-erp" data-id="${item.id}">Enviar ao ERP</button>`
             );
           } else {
-            actions.push('<span class="meta-pill">ERP OK</span>');
+            actions.push('<span class="pill">ERP OK</span>');
           }
         }
         if (!actions.length) {
-          actions.push(`<span class="small muted">-</span>`);
+          actions.push(`<span class="meta">n/a</span>`);
         }
         return `<div class="actions-cell">${actions.join("")}</div>`;
       }
@@ -564,7 +543,7 @@
           btn.addEventListener("click", () => {
             const requestId = Number(btn.getAttribute("data-id"));
             const requestItem = state.itemsByKey.get(`purchase_request:${requestId}`);
-            const presetTitle = requestItem ? `Cotacao - ${requestItem.ref || requestId}` : "";
+            const presetTitle = requestItem ? `Cotacao ${requestItem.ref || requestId}` : "";
             openRfqModal(presetTitle, Number.isFinite(requestId) ? [requestId] : []);
           });
         });
@@ -583,7 +562,7 @@
       }
 
       async function openRfqModal(presetTitle = "", preselectedRequestIds = []) {
-        rfqTitleInput.value = presetTitle || "Cotacao - Nova cotacao";
+        rfqTitleInput.value = presetTitle || "Cotacao nova";
         await loadOpenRequestItems(preselectedRequestIds);
         openModal(rfqModalBackdrop);
         rfqTitleInput.focus();
@@ -596,10 +575,8 @@
         awardReasonInput.value = "";
 
         awardMeta.innerHTML = rfqItem
-          ? `<span class="meta-pill">Cotacao #${rfqId}</span><span class="meta-pill">${escapeHtml(
-              rfqItem.ref || "Cotacao"
-            )}</span>`
-          : `<span class="meta-pill">Cotacao #${rfqId}</span>`;
+          ? `<span class="pill">Cotacao ${rfqId}</span><span class="pill">${escapeHtml(rfqItem.ref || "Cotacao")}</span>`
+          : `<span class="pill">Cotacao ${rfqId}</span>`;
 
         openModal(awardModalBackdrop);
         awardSupplierInput.focus();
@@ -611,12 +588,11 @@
             const suggestion = getSuggestedSupplierFromComparison(data);
             if (suggestion) {
               awardSupplierInput.value = suggestion.name;
-              awardReasonInput.value = `Menor total (${suggestion.reason})`;
-              awardMeta.innerHTML += `<span class="meta-pill">Sugestao: ${escapeHtml(suggestion.name)}</span>`;
+              awardReasonInput.value = `Menor total, ${suggestion.reason}`;
+              awardMeta.innerHTML += `<span class="pill">Sugestao ${escapeHtml(suggestion.name)}</span>`;
             }
           }
         } catch (error) {
-          // ignore - suggestion is optional
         }
       }
 
@@ -626,8 +602,8 @@
         poSupplierInput.value = "Fornecedor selecionado";
 
         poMeta.innerHTML = `
-          <span class="meta-pill">decisao #${awardId}</span>
-          ${rfqItem ? `<span class="meta-pill">Cotacao #${rfqId}</span>` : ""}
+          <span class="pill">decisao ${awardId}</span>
+          ${rfqItem ? `<span class="pill">Cotacao ${rfqId}</span>` : ""}
         `;
 
         openModal(poModalBackdrop);
@@ -637,22 +613,21 @@
         pushPoIdInput.value = String(purchaseOrderId);
         const poItem = state.itemsByKey.get(`purchase_order:${purchaseOrderId}`);
         pushMeta.innerHTML = poItem
-          ? `<span class="meta-pill">OC #${purchaseOrderId}</span><span class="meta-pill">${escapeHtml(
-              poItem.ref || "OC"
-            )}</span>`
-          : `<span class="meta-pill">OC #${purchaseOrderId}</span>`;
+          ? `<span class="pill">OC ${purchaseOrderId}</span><span class="pill">${escapeHtml(poItem.ref || "OC")}</span>`
+          : `<span class="pill">OC ${purchaseOrderId}</span>`;
         openModal(pushModalBackdrop);
       }
 
       async function seedData() {
         seedBtn.disabled = true;
-        seedBtn.textContent = "Populando...";
+        seedBtn.textContent = "Populando";
         try {
           await fetch("/api/procurement/seed", { method: "POST" });
           await loadInbox();
+          window.showToast("success", "Dados populados");
         } finally {
           seedBtn.disabled = false;
-          seedBtn.textContent = "Popular Dados";
+          seedBtn.textContent = "Popular dados";
         }
       }
 
@@ -674,19 +649,18 @@
         state.offset = 0;
         loadInbox();
       }
-
       rfqForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const title = (rfqTitleInput.value || "").trim();
         if (!title) return;
         const selectedIds = getSelectedRequestItemIds();
         if (!selectedIds.length) {
-          alert("Selecione ao menos um item de solicitacao em aberto.");
+          window.showToast("danger", "Selecione ao menos um item de solicitacao em aberto");
           return;
         }
 
         rfqSubmitBtn.disabled = true;
-        rfqSubmitBtn.textContent = "Criando...";
+        rfqSubmitBtn.textContent = "Criando";
         try {
           const res = await fetch("/api/procurement/rfqs", {
             method: "POST",
@@ -694,10 +668,11 @@
             body: JSON.stringify({ title, purchase_request_item_ids: selectedIds }),
           });
           if (!res.ok) {
-            alert("Nao foi possivel criar a cotacao.");
+            window.showToast("danger", "Nao foi possivel criar a cotacao");
             return;
           }
           closeModal(rfqModalBackdrop);
+          window.showToast("success", "Cotacao criada");
           await loadInbox();
         } finally {
           rfqSubmitBtn.disabled = false;
@@ -713,7 +688,7 @@
         if (!rfqId || !supplier_name || !reason) return;
 
         awardSubmitBtn.disabled = true;
-        awardSubmitBtn.textContent = "Aplicando...";
+        awardSubmitBtn.textContent = "Aplicando";
         try {
           const res = await fetch(`/api/procurement/rfqs/${rfqId}/award`, {
             method: "POST",
@@ -722,10 +697,11 @@
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            alert(`Erro ao registrar decisao: ${err.error || "desconhecido"}`);
+            window.showToast("danger", `Erro ao registrar decisao, ${err.error || "desconhecido"}`);
             return;
           }
           closeModal(awardModalBackdrop);
+          window.showToast("success", "Decisao registrada");
           await loadInbox();
         } finally {
           awardSubmitBtn.disabled = false;
@@ -739,17 +715,18 @@
         if (!awardId) return;
 
         poSubmitBtn.disabled = true;
-        poSubmitBtn.textContent = "Gerando...";
+        poSubmitBtn.textContent = "Gerando";
         try {
           const res = await fetch(`/api/procurement/awards/${awardId}/purchase-orders`, {
             method: "POST",
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            alert(`Erro ao gerar OC: ${data.error || "desconhecido"}`);
+            window.showToast("danger", `Erro ao gerar OC, ${data.error || "desconhecido"}`);
             return;
           }
           closeModal(poModalBackdrop);
+          window.showToast("success", "Ordem criada");
           await loadInbox();
           if (data.purchase_order_id) {
             window.location.href = `/procurement/purchase-orders/${data.purchase_order_id}`;
@@ -766,17 +743,18 @@
         if (!purchaseOrderId) return;
 
         pushSubmitBtn.disabled = true;
-        pushSubmitBtn.textContent = "Enviando...";
+        pushSubmitBtn.textContent = "Enviando";
         try {
           const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, {
             method: "POST",
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            alert(`Erro no push ERP: ${err.error || "desconhecido"}`);
+            window.showToast("danger", `Erro no push ERP, ${err.error || "desconhecido"}`);
             return;
           }
           closeModal(pushModalBackdrop);
+          window.showToast("success", "OC enviada ao ERP");
           await loadInbox();
         } finally {
           pushSubmitBtn.disabled = false;
@@ -803,7 +781,7 @@
       });
 
       function renderPriority(priority) {
-        if (!priority) return "-";
+        if (!priority) return "n/a";
         const cls = `badge prio-${priority}`;
         return `<span class="${cls}">${priority}</span>`;
       }
@@ -830,7 +808,7 @@
           succeeded: "Sucesso",
           failed: "Falha",
         };
-        return map[status] || status || "-";
+        return map[status] || status || "n/a";
       }
       function prettyType(type) {
         switch (type) {
@@ -841,7 +819,7 @@
           case "purchase_order":
             return "Ordem";
           default:
-            return type || "-";
+            return type || "n/a";
         }
       }
 
@@ -853,7 +831,7 @@
         if (!total) return null;
         return {
           id: suggestedId,
-          name: total.supplier_name || `Fornecedor #${suggestedId}`,
+          name: total.supplier_name || `Fornecedor ${suggestedId}`,
           reason: data.summary.suggestion_reason || "menor total",
         };
       }
@@ -904,8 +882,27 @@
           .replaceAll('"', "&quot;")
           .replaceAll("'", "&#039;");
       }
+
+      function skeletonRows(count) {
+        return Array.from({ length: count })
+          .map(
+            () => `
+            <tr>
+              <td class="skeleton">Carregando</td>
+              <td class="skeleton">Carregando</td>
+              <td class="skeleton">Carregando</td>
+              <td class="skeleton">Carregando</td>
+              <td class="skeleton">Carregando</td>
+              <td class="skeleton">Carregando</td>
+              <td class="skeleton">Carregando</td>
+              <td class="skeleton">Carregando</td>
+              <td class="skeleton">Carregando</td>
+            </tr>
+          `
+          )
+          .join("");
+      }
       initFromUrl();
       loadInbox();
     </script>
-  </body>
-</html>
+{% endblock %}
