@@ -1,0 +1,27 @@
+﻿services:
+  - type: web
+    name: plataforma-compras
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run.py
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_READ_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: FLASK_ENV
+        value: production
+      - key: ERP_MODE
+        value: mock
+      - key: ERP_BASE_URL
+        sync: false
+      - key: ERP_TOKEN
+        sync: false
+      - key: RFQ_SLA_DAYS
+        value: "5"
+      - key: LOG_LEVEL
+        value: INFO

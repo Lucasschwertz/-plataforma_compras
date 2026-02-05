@@ -27,7 +27,7 @@ def register_auth(app) -> None:
         path = request.path or "/"
         if path.startswith("/static/"):
             return None
-        if path in {"/login", "/logout", "/register"}:
+        if path in {"/login", "/logout", "/register", "/health"}:
             return None
 
         if session.get("user_email"):

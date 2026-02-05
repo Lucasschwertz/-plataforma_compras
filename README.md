@@ -57,6 +57,8 @@ Variaveis recomendadas:
 
 Deploy (Docker Compose):
 - docs/deploy/docker-compose.md
+Deploy (Render app-only):
+- docs/deploy/render.md
 
 Operacao:
 - docs/ops/backups.md

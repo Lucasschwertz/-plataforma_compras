@@ -1146,6 +1146,8 @@ def _ensure_check_value(
 
 def _recreate_sync_runs(db, allowed_values: Iterable[str]) -> None:
     values = ",".join(f"'{value}'" for value in allowed_values)
+    # Prevent collisions when a previous migration left a temp table behind.
+    db.execute("DROP TABLE IF EXISTS sync_runs_old")
     db.execute("ALTER TABLE sync_runs RENAME TO sync_runs_old")
     db.execute(
         f"""
