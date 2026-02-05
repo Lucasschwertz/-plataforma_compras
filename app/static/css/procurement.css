@@ -487,6 +487,11 @@ body.ui-minimal {
   box-shadow: var(--elev-2);
 }
 
+.ui-minimal a.button.primary,
+.ui-minimal a.button.primary:visited {
+  color: #ffffff;
+}
+
 .ui-minimal .button.ghost {
   background: #5f656d;
   border-color: var(--border);
