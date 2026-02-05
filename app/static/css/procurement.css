@@ -445,32 +445,32 @@ tbody tr:hover {
    Minimalist UI (scoped)
    ========================= */
 body.ui-minimal {
-  --bg: #f5f6fa;
-  --panel: #ffffff;
-  --panel-2: #ffffff;
-  --text: #1f2a3d;
-  --muted: #6b7a99;
+  --bg: #5a5f66;
+  --panel: #6a6f77;
+  --panel-2: #6a6f77;
+  --text: #f2f3f5;
+  --muted: #c9cdd3;
   --accent: #5dd4ff;
   --accent-2: #7c5cff;
   --danger: #ff6b6b;
   --warning: #ffcc66;
   --ok: #4cd08a;
-  --border: rgba(31, 42, 61, 0.12);
-  --border-strong: rgba(31, 42, 61, 0.22);
-  --overlay: rgba(20, 28, 45, 0.24);
-  --elev-1: 0 2px 6px rgba(20, 28, 45, 0.08);
-  --elev-2: 0 6px 14px rgba(20, 28, 45, 0.12);
-  --elev-3: 0 18px 40px rgba(20, 28, 45, 0.18);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --overlay: rgba(20, 24, 30, 0.35);
+  --elev-1: 0 6px 16px rgba(18, 22, 28, 0.35);
+  --elev-2: 0 10px 24px rgba(18, 22, 28, 0.42);
+  --elev-3: 0 18px 40px rgba(18, 22, 28, 0.5);
 }
 
 body.ui-minimal {
-  background: radial-gradient(900px 600px at 10% -10%, #ffffff 0%, var(--bg) 55%);
+  background: radial-gradient(900px 600px at 10% -10%, #6a7078 0%, var(--bg) 55%);
   color: var(--text);
 }
 
 .ui-minimal .button {
   border: 1px solid var(--border);
-  background: #ffffff;
+  background: var(--panel);
   color: var(--text);
   box-shadow: var(--elev-1);
 }
@@ -483,12 +483,12 @@ body.ui-minimal {
 .ui-minimal .button.primary {
   border-color: transparent;
   background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 100%);
-  color: #0d1a33;
-  box-shadow: 0 10px 22px rgba(93, 212, 255, 0.28);
+  color: #0d1020;
+  box-shadow: var(--elev-2);
 }
 
 .ui-minimal .button.ghost {
-  background: #ffffff;
+  background: var(--panel);
   border-color: var(--border);
   box-shadow: none;
 }
@@ -497,7 +497,7 @@ body.ui-minimal {
 .ui-minimal .select,
 .ui-minimal .textarea {
   border: 1px solid var(--border);
-  background: #ffffff;
+  background: #5f656d;
   color: var(--text);
   box-shadow: none;
 }
@@ -505,7 +505,7 @@ body.ui-minimal {
 .ui-minimal .input:focus,
 .ui-minimal .select:focus,
 .ui-minimal .textarea:focus {
-  border-color: rgba(93, 212, 255, 0.6);
+  border-color: rgba(93, 212, 255, 0.7);
   box-shadow: 0 0 0 3px rgba(93, 212, 255, 0.18);
 }
 
@@ -514,7 +514,7 @@ body.ui-minimal {
 .ui-minimal .card,
 .ui-minimal .list-item,
 .ui-minimal .modal {
-  background: #ffffff;
+  background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: var(--elev-1);
 }
@@ -527,12 +527,12 @@ body.ui-minimal {
 
 .ui-minimal .badge {
   border: 1px solid var(--border);
-  background: #f5f7ff;
+  background: #5f656d;
   box-shadow: none;
 }
 
 .ui-minimal .quote-line {
-  background: #f7f9ff;
+  background: #5f656d;
   box-shadow: none;
 }
 
