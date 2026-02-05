@@ -470,7 +470,7 @@ body.ui-minimal {
 
 .ui-minimal .button {
   border: 1px solid var(--border);
-  background: var(--panel);
+  background: #70757d;
   color: var(--text);
   box-shadow: var(--elev-1);
 }
@@ -482,13 +482,13 @@ body.ui-minimal {
 
 .ui-minimal .button.primary {
   border-color: transparent;
-  background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 100%);
-  color: #0d1020;
+  background: #1f2329;
+  color: #ffffff;
   box-shadow: var(--elev-2);
 }
 
 .ui-minimal .button.ghost {
-  background: var(--panel);
+  background: #5f656d;
   border-color: var(--border);
   box-shadow: none;
 }
@@ -534,6 +534,34 @@ body.ui-minimal {
 .ui-minimal .quote-line {
   background: #5f656d;
   box-shadow: none;
+}
+
+/* Grid/table emphasis for minimal palette */
+.ui-minimal table {
+  border-collapse: separate;
+  border-spacing: 0 8px;
+}
+
+.ui-minimal tbody td {
+  background: #70757d;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.ui-minimal tbody td:first-child {
+  border-left: 1px solid var(--border);
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+}
+
+.ui-minimal tbody td:last-child {
+  border-right: 1px solid var(--border);
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.ui-minimal tbody tr:hover td {
+  background: #7a8088;
 }
 
 .ui-minimal .brand-logo {
