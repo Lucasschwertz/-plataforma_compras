@@ -1,150 +1,163 @@
-﻿<!doctype html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Cotacao {{ rfq_id }} - Plataforma Compras</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
-  </head>
-  <body class="ui-minimal">
-    <main class="container">
-      <section class="page-header">
-        <div class="brand">
-          <a class="brand-link" href="/">
-            <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
-            <div class="brand-text">
-              <div class="brand-title">Mesa de Cotacao</div>
-              <div class="brand-tagline">Cotacao #{{ rfq_id }} | Empresa #{{ tenant_id }}</div>
-            </div>
-          </a>
+﻿
+{% extends "_layout.html" %}
+{% set active_nav = "rfq" %}
+{% block title %}Cotacao {{ rfq_id }} | Plataforma Compras{% endblock %}
+{% block page_title %}Mesa de cotacao{% endblock %}
+{% block breadcrumbs %}Workspace {{ workspace_name }}, Cotacao {{ rfq_id }}{% endblock %}
+{% block page_actions %}
+  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq">Voltar para cotacoes</a>
+  <a class="btn btn-primary" href="#decisao">Fazer award</a>
+{% endblock %}
+{% block content %}
+  <section class="grid grid-2">
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Resumo da cotacao</h2>
+        <button class="btn btn-ghost btn-small" id="atualizarBtn">Atualizar</button>
+      </div>
+      <div class="stack" id="cotacaoResumo"></div>
+    </article>
+
+    <article class="card" id="decisao">
+      <div class="card-header">
+        <h2 class="card-title">Decisao</h2>
+        <span class="badge" id="decisaoBadge">Aguardando</span>
+      </div>
+      <div class="stack" id="decisaoResumo"></div>
+      <div class="meta" id="decisaoHint" style="margin-top: 6px"></div>
+      <form id="decisaoForm" class="stack" style="margin-top: 12px">
+        <div>
+          <label class="meta" for="fornecedorInput">Fornecedor</label>
+          <input class="input" id="fornecedorInput" required />
         </div>
-        <div class="actions">
-          <a class="button ghost" href="/procurement/inbox?type=rfq">Voltar para Cotacoes</a>
-          <a class="button ghost" href="/procurement/integrations/logs">Logs</a>
-          <a class="button ghost" href="/logout">Sair</a>
+        <div>
+          <label class="meta" for="motivoInput">Motivo da decisao</label>
+          <textarea class="textarea" id="motivoInput" required></textarea>
         </div>
-      </section>
+        <div class="page-actions">
+          <button class="btn btn-primary" type="submit" id="decidirBtn">Registrar decisao</button>
+        </div>
+      </form>
+    </article>
 
-      <section class="page-grid">
-        <article class="card">
-          <h3>Resumo da Cotacao</h3>
-          <div class="kv" id="cotacaoResumo"></div>
-          <div class="actions" style="margin-top: 12px">
-            <button class="button" id="atualizarBtn">Atualizar</button>
-            <a class="button primary" href="/procurement/inbox?type=rfq">Abrir Inbox</a>
-          </div>
-        </article>
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Ordem de compra</h2>
+        <span class="badge" id="ocBadge">Nao gerada</span>
+      </div>
+      <div class="stack" id="ocResumo"></div>
+      <div class="page-actions" id="ocAcoes" style="margin-top: 12px"></div>
+    </article>
+  </section>
 
-        <article class="card">
-          <h3>Decisao</h3>
-          <div class="kv" id="decisaoResumo"></div>
-          <div class="small" id="decisaoHint" style="margin-top: 8px"></div>
-          <form id="decisaoForm" style="margin-top: 12px; display: grid; gap: 8px">
-            <div class="field">
-              <label class="field-label" for="fornecedorInput">Fornecedor</label>
-              <input class="input" id="fornecedorInput" required />
-            </div>
-            <div class="field">
-              <label class="field-label" for="motivoInput">Motivo da decisao</label>
-              <textarea class="textarea" id="motivoInput" required></textarea>
-            </div>
-            <div class="actions">
-              <button class="button primary" type="submit" id="decidirBtn">Registrar decisao</button>
-            </div>
-          </form>
-        </article>
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Itens e fornecedores por item</h2>
+      <span class="meta">Convide fornecedores e acompanhe propostas</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Quantidade</th>
+            <th>Melhor proposta</th>
+            <th>Fornecedores convidados</th>
+            <th>Convidar</th>
+          </tr>
+        </thead>
+        <tbody id="itensBody"></tbody>
+      </table>
+    </div>
+  </section>
 
-        <article class="card">
-          <h3>Ordem de Compra</h3>
-          <div class="kv" id="ocResumo"></div>
-          <div class="actions" style="margin-top: 12px" id="ocAcoes"></div>
-        </article>
+  <section class="card" id="comparacao">
+    <div class="card-header">
+      <h2 class="card-title">Comparacao por fornecedor</h2>
+      <div class="page-actions">
+        <a class="btn btn-ghost" href="#">Voltar ao topo</a>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="meta" id="comparacaoResumo"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fornecedor</th>
+              <th>Total</th>
+              <th>Prazo medio e pior</th>
+              <th>Cobertura</th>
+              <th>Destaque</th>
+            </tr>
+          </thead>
+          <tbody id="comparacaoTabela"></tbody>
+        </table>
+      </div>
+      <details class="disclosure" id="comparacaoDetalhes">
+        <summary>Ver detalhes</summary>
+        <div class="stack" id="comparacaoDetalhesConteudo"></div>
+      </details>
+      <div class="list" id="comparacaoItens"></div>
+    </div>
+  </section>
 
-        <article class="card" style="grid-column: 1 / -1">
-          <h3>Itens e Fornecedores por Item</h3>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>Quantidade</th>
-                  <th>Melhor proposta</th>
-                  <th>Fornecedores convidados</th>
-                  <th>Convidar</th>
-                </tr>
-              </thead>
-              <tbody id="itensBody"></tbody>
-            </table>
-          </div>
-          <div class="small" style="margin-top: 8px">Dica: voce pode convidar fornecedores diferentes para cada item.</div>
-        </article>
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Registrar proposta por fornecedor</h2>
+    </div>
+    <form id="propostaForm" class="stack">
+      <div style="max-width: 360px">
+        <label class="meta" for="propostaFornecedorSelect">Fornecedor</label>
+        <select class="select" id="propostaFornecedorSelect" required></select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Quantidade</th>
+              <th>Preco unitario</th>
+              <th>Prazo em dias</th>
+            </tr>
+          </thead>
+          <tbody id="propostaItensBody"></tbody>
+        </table>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-primary" type="submit" id="propostaSubmitBtn">Salvar proposta</button>
+      </div>
+    </form>
+  </section>
 
-        <article class="card" style="grid-column: 1 / -1" id="comparacao">
-          <h3>Comparacao por fornecedor</h3>
-          <div class="small" id="comparacaoResumo"></div>
-          <div class="table-wrap" style="margin-top: 10px">
-            <table>
-              <thead>
-                <tr>
-                  <th>Fornecedor</th>
-                  <th>Total</th>
-                  <th>Prazo medio / pior</th>
-                  <th>Cobertura</th>
-                  <th>Destaque</th>
-                </tr>
-              </thead>
-              <tbody id="comparacaoTabela"></tbody>
-            </table>
-          </div>
-          <div class="list" id="comparacaoItens" style="margin-top: 12px"></div>
-        </article>
+  <section class="grid grid-2">
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Eventos da cotacao</h2>
+      </div>
+      <div class="list" id="eventosCotacao"></div>
+    </article>
 
-        <article class="card" style="grid-column: 1 / -1">
-          <h3>Registrar Proposta por Fornecedor</h3>
-          <form id="propostaForm" style="display: grid; gap: 10px">
-            <div class="field" style="max-width: 360px">
-              <label class="field-label" for="propostaFornecedorSelect">Fornecedor</label>
-              <select class="select" id="propostaFornecedorSelect" required></select>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th>Quantidade</th>
-                    <th>Preco unitario</th>
-                    <th>Prazo (dias)</th>
-                  </tr>
-                </thead>
-                <tbody id="propostaItensBody"></tbody>
-              </table>
-            </div>
-            <div class="actions">
-              <button class="button primary" type="submit" id="propostaSubmitBtn">Salvar proposta</button>
-            </div>
-          </form>
-        </article>
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Eventos da decisao</h2>
+      </div>
+      <div class="list" id="eventosDecisao"></div>
+    </article>
+  </section>
+{% endblock %}
 
-        <article class="card">
-          <h3>Eventos da Cotacao</h3>
-          <div class="list" id="eventosCotacao"></div>
-        </article>
-
-        <article class="card">
-          <h3>Eventos da Decisao</h3>
-          <div class="list" id="eventosDecisao"></div>
-        </article>
-      </section>
-    </main>
-
-    <script>
+{% block page_scripts %}
+  <script>
       const rfqId = Number({{ rfq_id }});
 
       const cotacaoResumo = document.getElementById("cotacaoResumo");
       const decisaoResumo = document.getElementById("decisaoResumo");
       const decisaoHint = document.getElementById("decisaoHint");
+      const decisaoBadge = document.getElementById("decisaoBadge");
       const ocResumo = document.getElementById("ocResumo");
       const ocAcoes = document.getElementById("ocAcoes");
+      const ocBadge = document.getElementById("ocBadge");
       const itensBody = document.getElementById("itensBody");
       const propostaItensBody = document.getElementById("propostaItensBody");
       const eventosCotacao = document.getElementById("eventosCotacao");
@@ -152,6 +165,7 @@
       const comparacaoResumo = document.getElementById("comparacaoResumo");
       const comparacaoTabela = document.getElementById("comparacaoTabela");
       const comparacaoItens = document.getElementById("comparacaoItens");
+      const comparacaoDetalhesConteudo = document.getElementById("comparacaoDetalhesConteudo");
 
       const decisaoForm = document.getElementById("decisaoForm");
       const fornecedorInput = document.getElementById("fornecedorInput");
@@ -173,7 +187,7 @@
       };
 
       function escapeHtml(value) {
-        return String(value ?? "-")
+        return String(value ?? "n/a")
           .replaceAll("&", "&amp;")
           .replaceAll("<", "&lt;")
           .replaceAll(">", "&gt;")
@@ -197,29 +211,27 @@
           converted_to_po: "Convertida em OC",
           submitted: "Proposta enviada",
         };
-        return map[status] || status || "-";
+        return map[status] || status || "n/a";
       }
 
       function renderKv(target, rows) {
         target.innerHTML = rows
-          .map(([k, v]) => `<div class="k">${escapeHtml(k)}</div><div>${escapeHtml(v)}</div>`)
+          .map(([k, v]) => `<div class="meta">${escapeHtml(k)}</div><div>${escapeHtml(v)}</div>`)
           .join("");
       }
 
       function renderEventos(target, eventos, vazioLabel) {
         if (!eventos || !eventos.length) {
-          target.innerHTML = `<div class="small">${escapeHtml(vazioLabel)}</div>`;
+          target.innerHTML = `<div class="meta">${escapeHtml(vazioLabel)}</div>`;
           return;
         }
         target.innerHTML = eventos
           .map(
             (e) => `
               <div class="list-item">
-                <div class="top">
-                  <div class="title">${escapeHtml(prettyStatus(e.to_status))}</div>
-                  <div class="meta-line">${escapeHtml(e.occurred_at)}</div>
-                </div>
-                <div class="meta-line">de: ${escapeHtml(e.from_status || "-")} | motivo: ${escapeHtml(e.reason || "-")}</div>
+                <div class="meta">${escapeHtml(prettyStatus(e.to_status))}</div>
+                <div>${escapeHtml(e.occurred_at)}</div>
+                <div class="meta">de ${escapeHtml(e.from_status || "n/a")}, motivo ${escapeHtml(e.reason || "n/a")}</div>
               </div>
             `
           )
@@ -228,13 +240,13 @@
 
       function formatMelhorProposta(melhor) {
         if (!melhor) return "Sem proposta";
-        const preco = melhor.unit_price != null ? `R$ ${Number(melhor.unit_price).toFixed(2)}` : "-";
-        const prazo = melhor.lead_time_days != null ? `${melhor.lead_time_days} dias` : "-";
+        const preco = melhor.unit_price != null ? `R$ ${Number(melhor.unit_price).toFixed(2)}` : "n/a";
+        const prazo = melhor.lead_time_days != null ? `${melhor.lead_time_days} dias` : "n/a";
         return `${melhor.supplier_name} | ${preco} | ${prazo}`;
       }
 
       function formatCurrency(value) {
-        if (value == null || Number.isNaN(Number(value))) return "-";
+        if (value == null || Number.isNaN(Number(value))) return "n/a";
         return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
       }
 
@@ -255,10 +267,10 @@
           sla.sla_limit_days > 0
             ? sla.sla_risk
               ? '<span class="pill danger">Risco SLA</span>'
-              : '<span class="pill ok">SLA OK</span>'
+              : '<span class="pill success">SLA ok</span>'
             : '<span class="pill">SLA desativado</span>';
 
-        return `${rfqAge} (${startSource}) • ${lastQuote} (${lastSource}) • ${slaLimit} ${slaPill}`;
+        return `${rfqAge} <span class="badge">${startSource}</span> • ${lastQuote} <span class="badge">${lastSource}</span> • ${slaLimit} ${slaPill}`;
       }
 
       function renderComparacao(data) {
@@ -266,6 +278,7 @@
           comparacaoResumo.textContent = "Sem itens para comparar.";
           comparacaoTabela.innerHTML = '<tr><td colspan="5" class="empty-row">Sem propostas.</td></tr>';
           comparacaoItens.innerHTML = "";
+          comparacaoDetalhesConteudo.innerHTML = "";
           return;
         }
 
@@ -279,15 +292,15 @@
           const suggestedSupplier = totals.find((t) => t.supplier_id === suggestedSupplierId);
           const suggestedName = suggestedSupplier?.supplier_name
             ? suggestedSupplier.supplier_name
-            : `fornecedor #${suggestedSupplierId || "-"}`;
-          suggestionLabel = `Sugestao: ${suggestedName} (${suggestionReason}).`;
+            : `fornecedor ${suggestedSupplierId || "n/a"}`;
+          suggestionLabel = `Sugestao ${suggestedName}, ${suggestionReason}.`;
         } else if (totals.length) {
-          suggestionLabel = "Sem sugestao geral (cobertura incompleta).";
+          suggestionLabel = "Sem sugestao geral, cobertura incompleta.";
         }
 
         comparacaoResumo.innerHTML = `
-          <div class="meta-line">${escapeHtml(suggestionLabel)}</div>
-          <div class="meta-line">${renderSlaResumo(summary)}</div>
+          <div class="meta">${escapeHtml(suggestionLabel)}</div>
+          <div class="meta">${renderSlaResumo(summary)}</div>
         `;
 
         if (!totals.length) {
@@ -296,8 +309,8 @@
           comparacaoTabela.innerHTML = totals
             .map((t) => {
               const destaque =
-                t.supplier_id === suggestedSupplierId ? '<span class="pill ok">Melhor opcao geral</span>' : "-";
-              const prazoMedio = t.avg_lead_time_days != null ? `${t.avg_lead_time_days.toFixed(1)} dias` : "-";
+                t.supplier_id === suggestedSupplierId ? '<span class="pill success">Melhor opcao geral</span>' : "n/a";
+              const prazoMedio = t.avg_lead_time_days != null ? `${t.avg_lead_time_days.toFixed(1)} dias` : "n/a";
               const prazoPior = t.max_lead_time_days != null ? `pior ${t.max_lead_time_days}d` : "";
               const cobertura = `${t.items_quoted}/${t.items_total}`;
               const flags = [];
@@ -308,11 +321,11 @@
               return `
                 <tr class="${rowClass}">
                   <td>
-                    <strong>${escapeHtml(t.supplier_name || `Fornecedor #${t.supplier_id}`)}</strong>
+                    <strong>${escapeHtml(t.supplier_name || `Fornecedor ${t.supplier_id}`)}</strong>
                     ${flagsHtml}
                   </td>
-                  <td><strong class="total-strong">${formatCurrency(t.total_amount)}</strong></td>
-                  <td>${escapeHtml(prazoMedio)}${prazoPior ? ` <span class="muted">• ${escapeHtml(prazoPior)}</span>` : ""}</td>
+                  <td><strong>${formatCurrency(t.total_amount)}</strong></td>
+                  <td>${escapeHtml(prazoMedio)}${prazoPior ? ` <span class="meta">${escapeHtml(prazoPior)}</span>` : ""}</td>
                   <td>${escapeHtml(cobertura)}</td>
                   <td>${destaque}</td>
                 </tr>
@@ -321,36 +334,44 @@
             .join("");
         }
 
+        comparacaoDetalhesConteudo.innerHTML = totals
+          .map(
+            (t) => `
+              <div class="list-item">
+                <div><strong>${escapeHtml(t.supplier_name || `Fornecedor ${t.supplier_id}`)}</strong></div>
+                <div class="meta">Total ${formatCurrency(t.total_amount)}, cobertura ${t.items_quoted}/${t.items_total}</div>
+              </div>
+            `
+          )
+          .join("");
+
         comparacaoItens.innerHTML = data.items
           .map((item) => {
             const quotes = item.quotes || [];
             if (!quotes.length) {
               return `
                 <div class="list-item">
-                  <div class="top">
-                    <div class="title">${escapeHtml(item.description || "Item")}</div>
-                    <div class="meta-line">Sem propostas registradas</div>
-                  </div>
+                  <div class="meta">${escapeHtml(item.description || "Item")}</div>
+                  <div class="meta">Sem propostas registradas</div>
                 </div>
               `;
             }
             const lines = quotes
               .map((q) => {
-                const classes = ["quote-line"];
-                if (q.best_price || q.best_lead_time) classes.push("best-highlight");
-                const price = q.unit_price != null ? formatCurrency(q.unit_price) : "-";
-                const total = q.item_total != null ? formatCurrency(q.item_total) : "-";
-                const prazo = q.lead_time_days != null ? `${q.lead_time_days} dias` : "-";
+                const classes = ["list-item"];
+                const price = q.unit_price != null ? formatCurrency(q.unit_price) : "n/a";
+                const total = q.item_total != null ? formatCurrency(q.item_total) : "n/a";
+                const prazo = q.lead_time_days != null ? `${q.lead_time_days} dias` : "n/a";
                 const badges = [];
                 if (q.best_price) badges.push("menor preco");
                 if (q.best_lead_time) badges.push("menor prazo");
-                const badgeHtml = badges.length ? `<span class="highlight-label">${escapeHtml(badges.join(" • "))}</span>` : "";
+                const badgeHtml = badges.length ? `<span class="pill warning">${escapeHtml(badges.join(" • "))}</span>` : "";
                 return `
                   <div class="${classes.join(" ")}">
-                    <strong>${escapeHtml(q.supplier_name)}</strong>
-                    <span class="value-strong">Total: ${escapeHtml(total)}</span>
-                    <span class="value-muted">Preco unitario: ${escapeHtml(price)}</span>
-                    <span class="value-muted">Prazo: ${escapeHtml(prazo)}</span>
+                    <div><strong>${escapeHtml(q.supplier_name)}</strong></div>
+                    <div class="meta">Total ${escapeHtml(total)}</div>
+                    <div class="meta">Preco unitario ${escapeHtml(price)}</div>
+                    <div class="meta">Prazo ${escapeHtml(prazo)}</div>
                     ${badgeHtml}
                   </div>
                 `;
@@ -359,17 +380,14 @@
 
             return `
               <div class="list-item">
-                <div class="top">
-                  <div class="title">${escapeHtml(item.description || "Item")}</div>
-                  <div class="meta-line">Sugestao: ${escapeHtml(item.suggestion_reason || "-")}</div>
-                </div>
-                ${lines}
+                <div class="meta">${escapeHtml(item.description || "Item")}</div>
+                <div class="meta">Sugestao ${escapeHtml(item.suggestion_reason || "n/a")}</div>
+                <div class="list">${lines}</div>
               </div>
             `;
           })
           .join("");
       }
-
       function renderItens() {
         if (!state.itens.length) {
           itensBody.innerHTML = '<tr><td colspan="5" class="empty-row">Sem itens nesta cotacao.</td></tr>';
@@ -386,7 +404,7 @@
               ? fornecedores
                   .map((f) => {
                     const preco = f.unit_price != null ? `R$ ${Number(f.unit_price).toFixed(2)}` : "sem preco";
-                    const prazo = f.lead_time_days != null ? `${f.lead_time_days}d` : "-";
+                    const prazo = f.lead_time_days != null ? `${f.lead_time_days}d` : "n/a";
                     return `${f.supplier_name} (${preco}, ${prazo})`;
                   })
                   .join(" | ")
@@ -400,15 +418,15 @@
 
             let convidarControl = opcoes
               ? `
-                <div class="actions-cell">
+                <div class="page-actions">
                   <select class="select" data-invite-select="${item.rfq_item_id}" style="min-width: 180px">${opcoes}</select>
-                  <button class="button small" data-invite-btn="${item.rfq_item_id}">Convidar</button>
+                  <button class="btn btn-small" data-invite-btn="${item.rfq_item_id}">Convidar</button>
                 </div>
               `
-              : '<span class="small">Todos convidados</span>';
+              : '<span class="meta">Todos convidados</span>';
 
             if (!hasSuppliers) {
-              convidarControl = '<span class="small">Sem fornecedores cadastrados</span>';
+              convidarControl = '<span class="meta">Sem fornecedores cadastrados</span>';
             }
 
             return `
@@ -519,22 +537,25 @@
         if (!oc) {
           renderKv(ocResumo, [["Status", "Ainda nao gerada"], ["Proximo passo", "Registrar decisao"]]);
           ocAcoes.innerHTML = "";
+          ocBadge.textContent = "Nao gerada";
           return;
         }
 
         renderKv(ocResumo, [
-          ["Numero", oc.numero || `OC-${oc.id}`],
+          ["Numero", oc.numero || `OC ${oc.id}`],
           ["Status", prettyStatus(oc.status)],
-          ["Fornecedor", oc.fornecedor || "-"],
-          ["ID externo", oc.external_id || "-"],
+          ["Fornecedor", oc.fornecedor || "n/a"],
+          ["ID externo", oc.external_id || "n/a"],
         ]);
 
+        ocBadge.textContent = prettyStatus(oc.status);
+
         ocAcoes.innerHTML = `
-          <a class="button" href="/procurement/purchase-orders/${oc.id}">Abrir OC</a>
+          <a class="btn" href="/procurement/purchase-orders/${oc.id}">Abrir OC</a>
           ${
             oc.status !== "erp_accepted"
-              ? `<button class="button primary" id="pushOcBtn">Enviar ao ERP</button>`
-              : `<span class="meta-pill">ERP aceito</span>`
+              ? `<button class="btn btn-primary" id="pushOcBtn">Enviar ao ERP</button>`
+              : `<span class="pill">ERP aceito</span>`
           }
         `;
 
@@ -550,10 +571,11 @@
           if (suggestion) {
             fornecedorInput.value = suggestion.name;
             motivoInput.value = suggestion.reason;
-            decisaoHint.textContent = `Sugestao: ${suggestion.name} (${suggestion.reason}).`;
+            decisaoHint.textContent = `Sugestao ${suggestion.name}, ${suggestion.reason}.`;
           } else {
             decisaoHint.textContent = "Sem decisao registrada ainda.";
           }
+          decisaoBadge.textContent = "Aguardando";
           renderKv(decisaoResumo, [["Status", "Aguardando decisao"], ["Dica", "Preencha abaixo para decidir"]]);
           decisaoForm.style.display = "grid";
           return;
@@ -561,15 +583,17 @@
 
         renderKv(decisaoResumo, [
           ["Status", prettyStatus(decisao.status)],
-          ["Fornecedor", decisao.fornecedor || "-"],
-          ["Motivo", decisao.motivo || "-"],
-          ["OC", decisao.purchase_order_id || (oc ? oc.id : "-")],
+          ["Fornecedor", decisao.fornecedor || "n/a"],
+          ["Motivo", decisao.motivo || "n/a"],
+          ["OC", decisao.purchase_order_id || (oc ? oc.id : "n/a")],
         ]);
+
+        decisaoBadge.textContent = prettyStatus(decisao.status);
 
         if (decisao.purchase_order_id) {
           decisaoHint.textContent = "Decisao registrada e convertida em ordem de compra.";
         } else {
-          decisaoHint.textContent = "Decisao registrada. Proximo passo: gerar a OC.";
+          decisaoHint.textContent = "Decisao registrada. Proximo passo, gerar a OC.";
         }
 
         if (decisao.purchase_order_id) {
@@ -583,10 +607,10 @@
 
       function renderCotacao(cotacao) {
         renderKv(cotacaoResumo, [
-          ["Titulo", cotacao.titulo || "-"],
+          ["Titulo", cotacao.titulo || "n/a"],
           ["Status", prettyStatus(cotacao.status)],
-          ["Criada em", cotacao.criada_em || "-"],
-          ["Atualizada em", cotacao.atualizada_em || "-"],
+          ["Criada em", cotacao.criada_em || "n/a"],
+          ["Atualizada em", cotacao.atualizada_em || "n/a"],
         ]);
       }
 
@@ -600,11 +624,10 @@
         const reason = summary.suggestion_reason || "menor total";
         return {
           id: suggestedId,
-          name: total.supplier_name || `Fornecedor #${suggestedId}`,
+          name: total.supplier_name || `Fornecedor ${suggestedId}`,
           reason,
         };
       }
-
       async function carregar() {
         const [cotacaoRes, fornecedoresRes, comparacaoRes] = await Promise.all([
           fetch(`/api/procurement/cotacoes/${rfqId}`),
@@ -617,7 +640,7 @@
         const comparacaoData = await comparacaoRes.json().catch(() => ({}));
 
         if (!cotacaoRes.ok) {
-          cotacaoResumo.innerHTML = `<div class="small">Erro: ${escapeHtml(cotacaoData.message || cotacaoData.error || "desconhecido")}</div>`;
+          cotacaoResumo.innerHTML = `<div class="meta">Erro: ${escapeHtml(cotacaoData.message || cotacaoData.error || "desconhecido")}</div>`;
           decisaoResumo.innerHTML = "";
           ocResumo.innerHTML = "";
           itensBody.innerHTML = "";
@@ -660,7 +683,7 @@
         if (!fornecedor || !motivo) return;
 
         decidirBtn.disabled = true;
-        decidirBtn.textContent = "Registrando...";
+        decidirBtn.textContent = "Registrando";
         try {
           const res = await fetch(`/api/procurement/rfqs/${rfqId}/award`, {
             method: "POST",
@@ -669,9 +692,10 @@
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            alert(`Nao foi possivel registrar a decisao: ${err.message || err.error || "erro"}`);
+            window.showToast("danger", `Nao foi possivel registrar a decisao, ${err.message || err.error || "erro"}`);
             return;
           }
+          window.showToast("success", "Decisao registrada");
           await carregar();
         } finally {
           decidirBtn.disabled = false;
@@ -683,6 +707,7 @@
         const confirmar = window.confirm("Deseja enviar esta OC ao ERP agora?");
         if (!confirmar) return;
         await fetch(`/api/procurement/purchase-orders/${ocId}/push-to-erp`, { method: "POST" });
+        window.showToast("success", "OC enviada ao ERP");
         await carregar();
       }
 
@@ -696,7 +721,7 @@
           (item.fornecedores || []).forEach((f) => invitedIds.add(f.supplier_id));
         });
         if (invitedIds.size > 0 && !invitedIds.has(supplierId)) {
-          alert("Fornecedor nao convidado para esta cotacao.");
+          window.showToast("danger", "Fornecedor nao convidado para esta cotacao");
           return;
         }
 
@@ -715,12 +740,12 @@
           .filter((item) => item.unit_price !== null && Number.isFinite(item.unit_price));
 
         if (!itemsPayload.length) {
-          alert("Informe ao menos um preco unitario para salvar a proposta.");
+          window.showToast("danger", "Informe ao menos um preco unitario para salvar a proposta");
           return;
         }
 
         propostaSubmitBtn.disabled = true;
-        propostaSubmitBtn.textContent = "Salvando...";
+        propostaSubmitBtn.textContent = "Salvando";
         try {
           const res = await fetch(`/api/procurement/cotacoes/${rfqId}/propostas`, {
             method: "POST",
@@ -729,9 +754,10 @@
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            alert(`Erro ao salvar proposta: ${err.message || err.error || "erro"}`);
+            window.showToast("danger", `Erro ao salvar proposta, ${err.message || err.error || "erro"}`);
             return;
           }
+          window.showToast("success", "Proposta registrada");
           await carregar();
         } finally {
           propostaSubmitBtn.disabled = false;
@@ -750,5 +776,4 @@
 
       carregar();
     </script>
-  </body>
-</html>
+{% endblock %}
