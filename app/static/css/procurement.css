@@ -758,3 +758,62 @@ a.list-item:hover {
   box-shadow: var(--elev-2);
 }
 
+/* =========================
+   Dark mode (elegante)
+   ========================= */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1524;
+    --panel: #151e2f;
+    --panel-2: #151e2f;
+    --text: #e9efff;
+    --muted: #a8b6d8;
+    --accent: #5dd4ff;
+    --accent-2: #7c5cff;
+    --danger: #ff6b6b;
+    --warning: #ffcc66;
+    --ok: #4cd08a;
+    --border: rgba(233, 239, 255, 0.12);
+    --border-strong: rgba(233, 239, 255, 0.2);
+    --overlay: rgba(6, 10, 18, 0.6);
+    --elev-1: 0 8px 20px rgba(5, 8, 16, 0.35);
+    --elev-2: 0 12px 28px rgba(5, 8, 16, 0.45);
+    --elev-3: 0 22px 48px rgba(5, 8, 16, 0.6);
+  }
+
+  body {
+    background: radial-gradient(900px 600px at 10% -10%, #1a2438 0%, var(--bg) 55%);
+    color: var(--text);
+  }
+
+  .panel,
+  .card,
+  .list-item,
+  .kpi-card,
+  .modal {
+    background: var(--panel);
+  }
+
+  .button,
+  .button.ghost {
+    background: var(--panel);
+    color: var(--text);
+  }
+
+  .input,
+  .select,
+  .textarea {
+    background: #111827;
+    color: var(--text);
+  }
+
+  .badge,
+  .quote-line {
+    background: #1b2439;
+  }
+
+  tbody tr:hover {
+    background: rgba(93, 212, 255, 0.08);
+  }
+}
+
