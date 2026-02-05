@@ -275,12 +275,14 @@
         const suggestionReason = summary.suggestion_reason || "Sem sugestao";
 
         let suggestionLabel = "Sem propostas cadastradas para comparar.";
-        if (totals.length) {
+        if (totals.length && suggestedSupplierId) {
           const suggestedSupplier = totals.find((t) => t.supplier_id === suggestedSupplierId);
           const suggestedName = suggestedSupplier?.supplier_name
             ? suggestedSupplier.supplier_name
             : `fornecedor #${suggestedSupplierId || "-"}`;
           suggestionLabel = `Sugestao: ${suggestedName} (${suggestionReason}).`;
+        } else if (totals.length) {
+          suggestionLabel = "Sem sugestao geral (cobertura incompleta).";
         }
 
         comparacaoResumo.innerHTML = `

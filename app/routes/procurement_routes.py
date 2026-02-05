@@ -1570,17 +1570,18 @@ def _build_rfq_comparison(db, tenant_id: str | None, rfq_id: int) -> dict:
             candidates = full_cover
             suggestion_reason = "menor total (cobertura completa)"
         else:
-            max_cover = max(t["items_quoted"] for t in totals_list)
-            candidates = [t for t in totals_list if t["items_quoted"] == max_cover]
-            suggestion_reason = "maior cobertura, menor total"
+            # Sem cobertura completa: nao sugerir melhor opcao geral.
+            candidates = []
+            suggestion_reason = "sem cobertura completa"
 
-        candidates.sort(
-            key=lambda t: (
-                t["total_amount"],
-                t["avg_lead_time_days"] if t["avg_lead_time_days"] is not None else 9_999,
+        if candidates:
+            candidates.sort(
+                key=lambda t: (
+                    t["total_amount"],
+                    t["avg_lead_time_days"] if t["avg_lead_time_days"] is not None else 9_999,
+                )
             )
-        )
-        suggested_supplier_id = candidates[0]["supplier_id"]
+            suggested_supplier_id = candidates[0]["supplier_id"]
 
     return {
         "items": list(items.values()),
