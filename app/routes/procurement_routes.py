@@ -451,12 +451,24 @@ def procurement_seed():
         (tenant_id,),
     ).fetchone()["total"]
     if existing:
+        open_items = db.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM purchase_request_items pri
+            JOIN purchase_requests pr
+              ON pr.id = pri.purchase_request_id AND pr.tenant_id = pri.tenant_id
+            WHERE pr.status = 'pending_rfq' AND pr.tenant_id = ?
+            """,
+            (tenant_id,),
+        ).fetchone()["total"]
+        if not open_items:
+            _seed_demo_items_for_pending_requests(db, tenant_id)
         _ensure_demo_suppliers(db, tenant_id)
         db.commit()
         cards = _load_inbox_cards(db, tenant_id)
         return jsonify(
             {
-                "seeded": False,
+                "seeded": open_items == 0,
                 "tenant_id": tenant_id,
                 "kpis": cards,
                 "hint": "Seed ja aplicado. Use GET /api/procurement/inbox",
@@ -556,6 +568,45 @@ def procurement_seed():
             "hint": "Agora use GET /api/procurement/inbox",
         }
     )
+
+
+def _seed_demo_items_for_pending_requests(db, tenant_id: str, limit: int = 2) -> None:
+    rows = db.execute(
+        """
+        SELECT id, number
+        FROM purchase_requests
+        WHERE tenant_id = ? AND status = 'pending_rfq'
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (tenant_id, limit),
+    ).fetchall()
+    if not rows:
+        return
+
+    for row in rows:
+        pr_id = row["id"]
+        has_items = db.execute(
+            "SELECT 1 FROM purchase_request_items WHERE tenant_id = ? AND purchase_request_id = ? LIMIT 1",
+            (tenant_id, pr_id),
+        ).fetchone()
+        if has_items:
+            continue
+
+        db.execute(
+            """
+            INSERT INTO purchase_request_items (purchase_request_id, line_no, description, quantity, uom, tenant_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (pr_id, 1, f"Item demo 1 - {row['number']}", 10, "UN", tenant_id),
+        )
+        db.execute(
+            """
+            INSERT INTO purchase_request_items (purchase_request_id, line_no, description, quantity, uom, tenant_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (pr_id, 2, f"Item demo 2 - {row['number']}", 4, "UN", tenant_id),
+        )
 
 
 @procurement_bp.route("/api/procurement/rfqs", methods=["GET"])
