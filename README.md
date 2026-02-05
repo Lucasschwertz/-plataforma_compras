@@ -63,3 +63,6 @@ Deploy (Render app-only):
 Operacao:
 - docs/ops/backups.md
 - docs/ops/read_replica.md
+
+## UX
+- Estilo visual: minimalista (aplicado nas telas de Inbox, RFQ e Award/OC).

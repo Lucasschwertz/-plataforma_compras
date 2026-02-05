@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #f4f6fb;
   --panel: #ffffff;
   --panel-2: #ffffff;
@@ -441,6 +441,105 @@ tbody tr:hover {
   .kpis {
     grid-template-columns: 1fr;
   }
+}
+
+/* =========================
+   Minimalist UI (scoped)
+   ========================= */
+body.ui-minimal {
+  --bg: #f4f6fb;
+  --panel: #ffffff;
+  --panel-2: #ffffff;
+  --text: #1f2a3d;
+  --muted: #6b7a99;
+  --accent: #5dd4ff;
+  --accent-2: #7c5cff;
+  --danger: #ff6b6b;
+  --warning: #ffcc66;
+  --ok: #4cd08a;
+  --border: rgba(31, 42, 61, 0.12);
+  --border-strong: rgba(31, 42, 61, 0.2);
+  --overlay: rgba(20, 28, 45, 0.24);
+  --shadow-soft: 0 6px 18px rgba(20, 28, 45, 0.08);
+  --shadow-hover: 0 10px 24px rgba(20, 28, 45, 0.12);
+}
+
+body.ui-minimal {
+  background: radial-gradient(900px 600px at 10% -10%, #ffffff 0%, var(--bg) 55%);
+  color: var(--text);
+}
+
+.ui-minimal .button {
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--text);
+  box-shadow: var(--shadow-soft);
+}
+
+.ui-minimal .button:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-hover);
+}
+
+.ui-minimal .button.primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 100%);
+  color: #0d1a33;
+  box-shadow: 0 10px 22px rgba(93, 212, 255, 0.28);
+}
+
+.ui-minimal .button.ghost {
+  background: #ffffff;
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.ui-minimal .input,
+.ui-minimal .select,
+.ui-minimal .textarea {
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--text);
+  box-shadow: none;
+}
+
+.ui-minimal .input:focus,
+.ui-minimal .select:focus,
+.ui-minimal .textarea:focus {
+  border-color: rgba(93, 212, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(93, 212, 255, 0.18);
+}
+
+.ui-minimal .kpi-card,
+.ui-minimal .panel,
+.ui-minimal .card,
+.ui-minimal .list-item,
+.ui-minimal .modal {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+}
+
+.ui-minimal .kpi-link:hover,
+.ui-minimal a.list-item:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-hover);
+}
+
+.ui-minimal .badge {
+  border: 1px solid var(--border);
+  background: #f5f7ff;
+  box-shadow: none;
+}
+
+.ui-minimal .quote-line {
+  background: #f7f9ff;
+  box-shadow: none;
+}
+
+.ui-minimal .brand-logo {
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
 }
 /* Detail pages */
 .page-header {
