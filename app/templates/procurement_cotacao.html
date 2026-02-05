@@ -426,7 +426,26 @@
       }
 
       function renderPropostaItens() {
-        propostaItensBody.innerHTML = state.itens
+        const selectedSupplierId = Number(propostaFornecedorSelect.value);
+        const itensFiltrados = state.itens.filter((item) => {
+          if (!selectedSupplierId) return false;
+          const fornecedores = item.fornecedores || [];
+          return fornecedores.some((f) => Number(f.supplier_id) === selectedSupplierId);
+        });
+
+        if (!selectedSupplierId) {
+          propostaItensBody.innerHTML =
+            '<tr><td colspan="4" class="empty-row">Selecione um fornecedor.</td></tr>';
+          return;
+        }
+
+        if (!itensFiltrados.length) {
+          propostaItensBody.innerHTML =
+            '<tr><td colspan="4" class="empty-row">Nenhum item convidado para este fornecedor.</td></tr>';
+          return;
+        }
+
+        propostaItensBody.innerHTML = itensFiltrados
           .map(
             (item) => `
               <tr>
@@ -490,6 +509,8 @@
         propostaFornecedorSelect.innerHTML = fornecedoresDisponiveis
           .map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`)
           .join("");
+
+        renderPropostaItens();
       }
 
       function renderOc(oc) {
@@ -723,6 +744,7 @@
 
       propostaForm.addEventListener("submit", salvarProposta);
       atualizarBtn.addEventListener("click", carregar);
+      propostaFornecedorSelect.addEventListener("change", renderPropostaItens);
 
       carregar();
     </script>

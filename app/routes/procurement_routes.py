@@ -285,6 +285,29 @@ def cotacao_propostas_api(rfq_id: int):
             (rfq_item_id, supplier_id, tenant_id),
         )
 
+        _upsert_quote_item(
+            db,
+            quote_id=int(quote_id),
+            rfq_item_id=int(rfq_item_id),
+            unit_price=float(unit_price),
+            lead_time_days=lead_time_days,
+            tenant_id=tenant_id,
+        )
+
+    db.commit()
+    itens = _load_rfq_items_with_quotes(db, tenant_id, rfq_id)
+    return jsonify({"itens": itens, "quote_id": quote_id})
+
+
+def _upsert_quote_item(
+    db: Database,
+    quote_id: int,
+    rfq_item_id: int,
+    unit_price: float,
+    lead_time_days: int | None,
+    tenant_id: str,
+) -> None:
+    if db.backend == "postgres":
         db.execute(
             """
             INSERT INTO quote_items (quote_id, rfq_item_id, unit_price, lead_time_days, tenant_id)
@@ -294,12 +317,27 @@ def cotacao_propostas_api(rfq_id: int):
                 lead_time_days = excluded.lead_time_days,
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (quote_id, rfq_item_id, float(unit_price), lead_time_days, tenant_id),
+            (quote_id, rfq_item_id, unit_price, lead_time_days, tenant_id),
         )
+        return
 
-    db.commit()
-    itens = _load_rfq_items_with_quotes(db, tenant_id, rfq_id)
-    return jsonify({"itens": itens, "quote_id": quote_id})
+    cursor = db.execute(
+        """
+        UPDATE quote_items
+        SET unit_price = ?, lead_time_days = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE quote_id = ? AND rfq_item_id = ? AND tenant_id = ?
+        """,
+        (unit_price, lead_time_days, quote_id, rfq_item_id, tenant_id),
+    )
+    if cursor.rowcount and cursor.rowcount > 0:
+        return
+    db.execute(
+        """
+        INSERT INTO quote_items (quote_id, rfq_item_id, unit_price, lead_time_days, tenant_id)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (quote_id, rfq_item_id, unit_price, lead_time_days, tenant_id),
+    )
 
 
 @procurement_bp.route("/api/procurement/purchase-orders/<int:purchase_order_id>", methods=["GET"])
