@@ -50,7 +50,7 @@
     </article>
   </section>
 
-  <section class="card">
+  <section class="card" id="itensFornecedoresSection">
     <div class="card-header">
       <h2 class="card-title">Itens e fornecedores por item</h2>
       <span class="meta">Convide fornecedores e acompanhe propostas</span>
@@ -75,6 +75,7 @@
     <div class="card-header">
       <h2 class="card-title">Comparacao por fornecedor</h2>
       <div class="page-actions">
+        <span class="pill info" id="roleLeituraPill" hidden>Modo executivo</span>
         <button class="btn btn-ghost btn-small" type="button" id="toggleDetalheComparacaoBtn">Ocultar detalhe tecnico</button>
         <a class="btn btn-ghost" href="#">Voltar ao topo</a>
       </div>
@@ -128,7 +129,7 @@
     </div>
   </section>
 
-  <section class="card">
+  <section class="card" id="propostaSection">
     <div class="card-header">
       <h2 class="card-title">Registrar proposta por fornecedor</h2>
     </div>
@@ -177,6 +178,8 @@
   <script>
       const rfqId = Number({{ rfq_id }});
       const workspaceId = "{{ workspace_id }}";
+      const currentRole = "{{ role | default('buyer') }}";
+      const isExecutiveReaderRole = ["approver", "admin"].includes(currentRole);
 
       function withWorkspace(path) {
         const separator = path.includes("?") ? "&" : "?";
@@ -200,6 +203,9 @@
       const comparacaoDetalhesConteudo = document.getElementById("comparacaoDetalhesConteudo");
       const comparacaoDetalhada = document.getElementById("comparacaoDetalhada");
       const toggleDetalheComparacaoBtn = document.getElementById("toggleDetalheComparacaoBtn");
+      const roleLeituraPill = document.getElementById("roleLeituraPill");
+      const itensFornecedoresSection = document.getElementById("itensFornecedoresSection");
+      const propostaSection = document.getElementById("propostaSection");
       const execFornecedor = document.getElementById("execFornecedor");
       const execFornecedorMeta = document.getElementById("execFornecedorMeta");
       const execTotal = document.getElementById("execTotal");
@@ -288,9 +294,24 @@
       function setDetalheComparacaoVisivel(visivel) {
         state.detalheComparacaoAberto = Boolean(visivel);
         comparacaoDetalhada.style.display = state.detalheComparacaoAberto ? "grid" : "none";
+        const acaoMostrar = isExecutiveReaderRole ? "Mostrar analise tecnica" : "Mostrar detalhe tecnico";
+        const acaoOcultar = isExecutiveReaderRole ? "Ocultar analise tecnica" : "Ocultar detalhe tecnico";
         toggleDetalheComparacaoBtn.textContent = state.detalheComparacaoAberto
-          ? "Ocultar detalhe tecnico"
-          : "Mostrar detalhe tecnico";
+          ? acaoOcultar
+          : acaoMostrar;
+      }
+
+      function applyRoleReadingMode() {
+        if (!isExecutiveReaderRole) return;
+        if (roleLeituraPill) {
+          roleLeituraPill.hidden = false;
+        }
+        if (itensFornecedoresSection) {
+          itensFornecedoresSection.classList.add("role-readonly");
+        }
+        if (propostaSection) {
+          propostaSection.classList.add("role-readonly");
+        }
       }
 
       function renderExecutiveSummary(summary, totals, suggestedSupplierId) {
@@ -565,6 +586,9 @@
             if (!hasSuppliers) {
               convidarControl = '<span class="meta">Sem fornecedores cadastrados</span>';
             }
+            if (isExecutiveReaderRole) {
+              convidarControl = '<span class="meta">Leitura por perfil</span>';
+            }
 
             return `
               <tr>
@@ -583,6 +607,12 @@
       }
 
       function renderPropostaItens() {
+        if (isExecutiveReaderRole) {
+          propostaItensBody.innerHTML =
+            '<tr><td colspan="4" class="empty-row">Modo executivo, registro de proposta indisponivel neste perfil.</td></tr>';
+          return;
+        }
+
         const selectedSupplierId = Number(propostaFornecedorSelect.value);
         const itensFiltrados = state.itens.filter((item) => {
           if (!selectedSupplierId) return false;
@@ -634,6 +664,15 @@
       }
 
       function renderFornecedores() {
+        if (isExecutiveReaderRole) {
+          propostaFornecedorSelect.innerHTML = '<option value="">Modo executivo</option>';
+          propostaFornecedorSelect.disabled = true;
+          propostaSubmitBtn.disabled = true;
+          propostaSubmitBtn.textContent = "Somente leitura";
+          renderPropostaItens();
+          return;
+        }
+
         const invitedIds = new Set();
         state.itens.forEach((item) => {
           (item.fornecedores || []).forEach((f) => invitedIds.add(f.supplier_id));
@@ -913,7 +952,8 @@
       toggleDetalheComparacaoBtn.addEventListener("click", () => {
         setDetalheComparacaoVisivel(!state.detalheComparacaoAberto);
       });
-      setDetalheComparacaoVisivel(true);
+      applyRoleReadingMode();
+      setDetalheComparacaoVisivel(!isExecutiveReaderRole);
 
       carregar();
     </script>

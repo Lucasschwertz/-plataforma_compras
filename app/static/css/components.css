@@ -373,6 +373,12 @@ th {
   color: var(--danger);
 }
 
+.pill.info {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #3b82f6;
+}
+
 .type-label {
   font-weight: 700;
 }
@@ -390,6 +396,12 @@ th {
 
 tr.best-overall td {
   background: rgba(34, 197, 94, 0.08);
+}
+
+.role-readonly .card-header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .modal-backdrop {
