@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Logs de Integracao - Plataforma Compras</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
+    <script src="{{ url_for('static', filename='js/ui_labels.js') }}"></script>
   </head>
   <body>
     <main class="container">
@@ -88,44 +89,18 @@
       }
 
       function prettyStatus(status) {
-        const map = {
-          running: "Em execucao",
-          succeeded: "Sucesso",
-          failed: "Falha",
-          pending_rfq: "Pendente de cotacao",
-          in_rfq: "Em cotacao",
-          awarded: "Aprovada",
-          ordered: "Ordenada",
-          partially_received: "Recebimento parcial",
-          received: "Recebida",
-          cancelled: "Cancelada",
-          draft: "Rascunho",
-          open: "Aberta",
-          collecting_quotes: "Coletando cotacoes",
-          closed: "Encerrada",
-          approved: "Aprovada",
-          sent_to_erp: "Enviada ao ERP",
-          erp_accepted: "Aceita no ERP",
-          erp_error: "Erro no ERP",
-          converted_to_po: "Convertida em OC",
-        };
-        return map[status] || status || "-";
+        if (window.UiLabels && window.UiLabels.prettyStatus) {
+          return window.UiLabels.prettyStatus(status);
+        }
+        return status || "-";
       }
 
       function prettyScope(scope) {
-        const map = {
-          purchase_order: "Ordens de compra",
-          purchase_orders: "Ordens de compra",
-          purchase_request: "Solicitacoes",
-          purchase_requests: "Solicitacoes",
-          rfq: "Cotacoes",
-          rfqs: "Cotacoes",
-          supplier: "Fornecedores",
-          suppliers: "Fornecedores",
-          receipt: "Recebimentos",
-          receipts: "Recebimentos",
-        };
-        return map[scope] || scope || "-";
+        const normalizedScope = String(scope || "").replace(/s$/, "");
+        if (window.UiLabels && window.UiLabels.prettyScope) {
+          return window.UiLabels.prettyScope(normalizedScope);
+        }
+        return scope || "-";
       }
       function buildUrl() {
         const params = new URLSearchParams();

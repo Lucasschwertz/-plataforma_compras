@@ -1,6 +1,7 @@
 # Plataforma Compras
 
-- SLA de RFQ documentado em docs/domain/sla.md
+- SLA de Cotacao (RFQ) documentado em docs/domain/sla.md
+- Linguagem da interface documentada em docs/domain/linguagem.md
 
 ## Banco de Dados (PostgreSQL)
 
@@ -65,4 +66,4 @@ Operacao:
 - docs/ops/read_replica.md
 
 ## UX
-- Estilo visual: minimalista (aplicado nas telas de Inbox, RFQ e Award/OC).
+- Estilo visual: minimalista (aplicado nas telas de Inbox, Cotacao e Decisao/OC).

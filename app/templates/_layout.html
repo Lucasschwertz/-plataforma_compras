@@ -24,7 +24,7 @@
         <nav class="nav">
           <a class="{% if active_nav == 'inbox' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
           <a class="{% if active_nav == 'rfq' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
-          <a class="{% if active_nav == 'award' %}active{% endif %}" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">Awards</a>
+          <a class="{% if active_nav == 'award' %}active{% endif %}" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">Decisoes</a>
           {% if ui_role == "admin" %}
             <a href="/procurement/integrations/logs">Automacao</a>
             <a href="/procurement/integrations/logs">Configuracoes</a>
@@ -74,6 +74,7 @@
 
     <div class="toast-root" id="toastRoot"></div>
 
+    <script src="{{ url_for('static', filename='js/ui_labels.js') }}"></script>
     <script>
       (function () {
         const stored = localStorage.getItem("theme");

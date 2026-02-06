@@ -24,7 +24,7 @@
           <option value="rfq">Cotacao</option>
           <option value="purchase_order">Ordem de compra</option>
         </select>
-        <input class="input" id="statusFilter" placeholder="Status interno, exemplo pending_rfq" />
+        <input class="input" id="statusFilter" placeholder="Status interno, exemplo Em cotacao" />
         <select class="select" id="priorityFilter">
           <option value="">Todas prioridades</option>
           <option value="urgent">Urgente</option>
@@ -787,40 +787,16 @@
       }
 
       function prettyStatus(status) {
-        const map = {
-          pending_rfq: "Pendente de cotacao",
-          in_rfq: "Em cotacao",
-          awarded: "Aprovada",
-          ordered: "Ordenada",
-          partially_received: "Recebimento parcial",
-          received: "Recebida",
-          cancelled: "Cancelada",
-          draft: "Rascunho",
-          open: "Aberta",
-          collecting_quotes: "Coletando cotacoes",
-          closed: "Encerrada",
-          approved: "Aprovada",
-          sent_to_erp: "Enviada ao ERP",
-          erp_accepted: "Aceita no ERP",
-          erp_error: "Erro no ERP",
-          converted_to_po: "Convertida em OC",
-          running: "Em execucao",
-          succeeded: "Sucesso",
-          failed: "Falha",
-        };
-        return map[status] || status || "n/a";
+        if (window.UiLabels && window.UiLabels.prettyStatus) {
+          return window.UiLabels.prettyStatus(status);
+        }
+        return status || "n/a";
       }
       function prettyType(type) {
-        switch (type) {
-          case "purchase_request":
-            return "Solicitacao";
-          case "rfq":
-            return "Cotacao";
-          case "purchase_order":
-            return "Ordem";
-          default:
-            return type || "n/a";
+        if (window.UiLabels && window.UiLabels.prettyEntity) {
+          return window.UiLabels.prettyEntity(type);
         }
+        return type || "n/a";
       }
 
       function getSuggestedSupplierFromComparison(data) {

@@ -6,7 +6,7 @@
 {% block breadcrumb_tail %} / Cotacao {{ rfq_id }}{% endblock %}
 {% block page_actions %}
   <a class="btn btn-ghost" href="/procurement/inbox?type=rfq">Voltar para cotacoes</a>
-  <a class="btn btn-primary" href="#decisao">Fazer award</a>
+  <a class="btn btn-primary" href="#decisao">Registrar decisao</a>
 {% endblock %}
 {% block content %}
   <section class="grid grid-2">
@@ -196,22 +196,10 @@
       }
 
       function prettyStatus(status) {
-        const map = {
-          pending_rfq: "Pendente de cotacao",
-          in_rfq: "Em cotacao",
-          awarded: "Aprovada",
-          draft: "Rascunho",
-          open: "Aberta",
-          collecting_quotes: "Coletando cotacoes",
-          closed: "Encerrada",
-          approved: "Aprovada",
-          sent_to_erp: "Enviada ao ERP",
-          erp_accepted: "Aceita no ERP",
-          erp_error: "Erro no ERP",
-          converted_to_po: "Convertida em OC",
-          submitted: "Proposta enviada",
-        };
-        return map[status] || status || "n/a";
+        if (window.UiLabels && window.UiLabels.prettyStatus) {
+          return window.UiLabels.prettyStatus(status);
+        }
+        return status || "n/a";
       }
 
       function renderKv(target, rows) {
