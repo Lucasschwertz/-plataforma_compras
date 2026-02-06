@@ -23,18 +23,20 @@
           </div>
         </a>
         <nav class="nav">
+          <div class="nav-section-title">Operacao</div>
+          <a class="{% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Painel</a>
+          <a class="{% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox operacional</a>
+          <a class="{% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
+          {% if ui_role == "approver" or ui_role == "admin" %}
+            <a class="{% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>
+          {% endif %}
+          <div class="nav-section-title">Analise</div>
+          <a class="{% if active_nav == 'governanca' %}active{% endif %}" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">Trilha de cotacoes</a>
           <div class="nav-section-title">Plataforma</div>
-          <a class="{% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Dashboard</a>
-          <a class="{% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Sourcing</a>
-          <a class="{% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Procurement</a>
-          <a class="{% if active_nav == 'governanca' %}active{% endif %}" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">Governanca</a>
           <a class="{% if active_nav == 'integration' %}active{% endif %}" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Integracoes</a>
           {% if ui_role == "admin" %}
             <a href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Automacao</a>
             <a href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Configuracoes</a>
-          {% endif %}
-          {% if ui_role == "approver" %}
-            <a class="{% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>
           {% endif %}
         </nav>
       </aside>

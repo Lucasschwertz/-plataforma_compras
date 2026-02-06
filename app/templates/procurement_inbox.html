@@ -2,8 +2,8 @@
 {% extends "_layout.html" %}
 {% set active_nav = "procurement" %}
 {% block title %}Inbox | Plataforma Compras{% endblock %}
-{% block page_title %}Inbox{% endblock %}
-{% block breadcrumb_tail %} / Inbox{% endblock %}
+{% block page_title %}Inbox operacional{% endblock %}
+{% block breadcrumb_tail %} / Operacao / Inbox{% endblock %}
 {% block page_actions %}
   <button class="btn" id="refreshBtn">Atualizar</button>
   <button class="btn" id="seedBtn">Popular dados</button>
@@ -15,6 +15,11 @@
       <div class="card-header">
         <h2 class="card-title">Filtros</h2>
         <div class="meta">Refine e aplique</div>
+      </div>
+      <div class="page-actions" style="margin-bottom: 10px">
+        <a class="btn btn-ghost btn-small" href="/procurement/inbox?type=purchase_request&workspace_id={{ workspace_id }}">Solicitacoes</a>
+        <a class="btn btn-ghost btn-small" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
+        <a class="btn btn-ghost btn-small" href="/procurement/inbox?type=purchase_order&workspace_id={{ workspace_id }}">Ordens de compra</a>
       </div>
       <div class="grid grid-3" aria-label="Filtros da inbox">
         <input class="input" id="searchInput" placeholder="Buscar por referencia" />

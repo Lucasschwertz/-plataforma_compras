@@ -4,8 +4,8 @@
 {% block page_title %}Dashboard de Compras{% endblock %}
 {% block breadcrumb_tail %} / Dashboard{% endblock %}
 {% block page_actions %}
-  <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir procurement</a>
-  <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Ver integracoes</a>
+  <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir operacao</a>
+  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
 {% endblock %}
 {% block content %}
   <section class="grid grid-4">
@@ -139,15 +139,15 @@
       </div>
       <div class="list">
         <a class="list-item" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">
-          <div class="title">Sourcing</div>
+          <div class="title">Cotacoes</div>
           <div class="meta">RFX, comparacao de fornecedores e decisao</div>
         </a>
         <a class="list-item" href="/procurement/inbox?workspace_id={{ workspace_id }}">
-          <div class="title">Procurement</div>
+          <div class="title">Operacao de compras</div>
           <div class="meta">Execucao ponta a ponta do ciclo de compra</div>
         </a>
         <a class="list-item" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">
-          <div class="title">Governanca</div>
+          <div class="title">Trilha de cotacoes</div>
           <div class="meta">Evidencia de trilha, status e conformidade</div>
         </a>
         <a class="list-item" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">
