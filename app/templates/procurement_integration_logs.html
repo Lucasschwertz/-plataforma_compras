@@ -1,10 +1,10 @@
 {% extends "_layout.html" %}
 {% set active_nav = "governanca" if request.args.get("scope") == "rfq" else "integration" %}
 {% block title %}Logs de Integracao | Plataforma Compras{% endblock %}
-{% block page_title %}Integracoes e trilha de eventos{% endblock %}
-{% block breadcrumb_tail %} / Integracoes / Logs{% endblock %}
+{% block page_title %}Integracoes e trilha de cotacoes{% endblock %}
+{% block breadcrumb_tail %} / Plataforma / Integracoes e trilha{% endblock %}
 {% block page_actions %}
-  <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Voltar para inbox</a>
+  <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Voltar para inbox operacional</a>
 {% endblock %}
 
 {% block content %}

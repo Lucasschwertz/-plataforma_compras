@@ -99,6 +99,10 @@
   gap: var(--space-4);
 }
 
+.sidebar-toggle {
+  display: none;
+}
+
 .topbar-right {
   display: flex;
   align-items: center;
@@ -522,6 +526,13 @@ tr.best-overall td {
   z-index: 99;
 }
 
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  z-index: 19;
+}
+
 .toast {
   min-width: 220px;
   background: var(--surface);
@@ -579,28 +590,27 @@ tr.best-overall td {
   }
 
   .sidebar {
-    flex-direction: row;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    position: sticky;
-    top: 0;
-    z-index: 9;
-    align-items: center;
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 280px;
+    max-width: calc(100vw - 56px);
+    z-index: 20;
+    transform: translateX(-100%);
+    transition: transform 170ms ease;
+    overflow-y: auto;
+    padding: var(--space-4);
   }
 
-  .sidebar .brand {
-    min-width: 220px;
+  body.nav-open .sidebar {
+    transform: translateX(0);
   }
 
   .nav {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    gap: 8px;
+    display: grid;
   }
 
-  .nav a {
-    white-space: nowrap;
+  .sidebar-toggle {
+    display: inline-flex;
   }
 
   .grid-2,

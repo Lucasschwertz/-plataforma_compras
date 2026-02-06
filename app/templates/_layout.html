@@ -44,6 +44,9 @@
       <div class="app-main">
         <header class="topbar">
           <div class="topbar-left">
+            <button class="btn btn-ghost sidebar-toggle" id="sidebarToggle" type="button" aria-label="Abrir menu">
+              Menu
+            </button>
             <div class="workspace-select">
               <label for="workspaceSelect">Workspace</label>
               <select class="select" id="workspaceSelect" data-workspace-current="{{ workspace_id }}">
@@ -82,6 +85,7 @@
       </div>
     </div>
 
+    <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
     <div class="toast-root" id="toastRoot"></div>
 
     <script src="{{ url_for('static', filename='js/ui_labels.js') }}"></script>
@@ -106,6 +110,8 @@
         const workspaceFromUrl = params.get("workspace_id");
         const workspaceSelect = document.getElementById("workspaceSelect");
         const currentWorkspace = workspaceFromUrl || (workspaceSelect ? workspaceSelect.value : null);
+        const sidebarToggle = document.getElementById("sidebarToggle");
+        const sidebarBackdrop = document.getElementById("sidebarBackdrop");
 
         function appendWorkspaceToLinks(workspaceId) {
           if (!workspaceId) return;
@@ -117,6 +123,31 @@
             link.href = `${url.pathname}${url.search}${url.hash}`;
           });
         }
+
+        function setNavOpen(open) {
+          document.body.classList.toggle("nav-open", Boolean(open));
+          if (sidebarBackdrop) {
+            sidebarBackdrop.hidden = !open;
+          }
+        }
+
+        if (sidebarToggle) {
+          sidebarToggle.addEventListener("click", () => {
+            const isOpen = document.body.classList.contains("nav-open");
+            setNavOpen(!isOpen);
+          });
+        }
+        if (sidebarBackdrop) {
+          sidebarBackdrop.addEventListener("click", () => setNavOpen(false));
+        }
+        document.querySelectorAll(".nav a").forEach((link) => {
+          link.addEventListener("click", () => setNavOpen(false));
+        });
+        window.addEventListener("resize", () => {
+          if (window.innerWidth > 1100) {
+            setNavOpen(false);
+          }
+        });
 
         if (workspaceSelect && currentWorkspace) {
           if ([...workspaceSelect.options].some((opt) => opt.value === currentWorkspace)) {

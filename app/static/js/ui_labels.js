@@ -39,6 +39,15 @@
     receipt: "Recebimentos",
   };
 
+  const TYPE_LABELS = {
+    purchase_request: "Solicitacao",
+    purchase_order: "Ordem de compra",
+    rfq: "Cotacao",
+    award: "Decisao",
+    supplier: "Fornecedor",
+    receipt: "Recebimento",
+  };
+
   function prettyStatus(value) {
     return STATUS_LABELS[value] || value || "n/a";
   }
@@ -51,12 +60,18 @@
     return SCOPE_LABELS[value] || value || "n/a";
   }
 
+  function prettyType(value) {
+    return TYPE_LABELS[value] || value || "n/a";
+  }
+
   window.UiLabels = {
     STATUS_LABELS,
     ENTITY_LABELS,
     SCOPE_LABELS,
+    TYPE_LABELS,
     prettyStatus,
     prettyEntity,
     prettyScope,
+    prettyType,
   };
 })();

@@ -1,11 +1,11 @@
 {% extends "_layout.html" %}
 {% set active_nav = "approvals" %}
 {% block title %}Aprovacoes | Plataforma Compras{% endblock %}
-{% block page_title %}Aprovacoes{% endblock %}
-{% block breadcrumb_tail %} / Aprovacoes{% endblock %}
+{% block page_title %}Aprovacoes de cotacao{% endblock %}
+{% block breadcrumb_tail %} / Cotacoes / Aprovacoes{% endblock %}
 {% block page_actions %}
   <button class="btn" id="refreshBtn">Atualizar</button>
-  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir inbox de cotacoes</a>
+  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir modulo de cotacoes</a>
 {% endblock %}
 
 {% block content %}
@@ -28,15 +28,15 @@
     <a class="kpi-card" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">
       <div class="kpi-label">Auditoria</div>
       <div class="kpi-value">LOG</div>
-      <div class="meta">Trilha de eventos e governanca</div>
+      <div class="meta">Trilha de cotacoes e governanca</div>
     </a>
   </section>
 
   <section class="card">
-    <div class="card-header">
-      <h2 class="card-title">Fila de aprovacao</h2>
-      <span class="meta" id="queueMeta">Carregando</span>
-    </div>
+      <div class="card-header">
+        <h2 class="card-title">Fila de aprovacao de cotacoes</h2>
+        <span class="meta" id="queueMeta">Carregando</span>
+      </div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -110,7 +110,7 @@
     function nextActionLabel(item) {
       if (item.type === "rfq" && !item.award_id) return "Registrar decisao";
       if (item.type === "rfq" && item.award_id && !item.award_purchase_order_id) return "Gerar ordem de compra";
-      if (item.type === "purchase_order" && item.status !== "erp_accepted") return "Enviar ao ERP";
+      if (item.type === "purchase_order" && item.status !== "erp_accepted") return "Enviar ordem ao ERP";
       return "Acompanhar";
     }
 

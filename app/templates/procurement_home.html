@@ -1,13 +1,36 @@
 ﻿{% extends "_layout.html" %}
 {% set active_nav = "dashboard" %}
+{% set ui_role = role | default("buyer") %}
 {% block title %}Dashboard | Plataforma Compras{% endblock %}
-{% block page_title %}Dashboard de Compras{% endblock %}
-{% block breadcrumb_tail %} / Dashboard{% endblock %}
+{% block page_title %}{% if ui_role == "approver" %}Painel de aprovacoes{% elif ui_role == "admin" %}Painel administrativo{% else %}Dashboard de compras{% endif %}{% endblock %}
+{% block breadcrumb_tail %} / Painel{% endblock %}
 {% block page_actions %}
-  <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir operacao</a>
-  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
+  {% if ui_role == "approver" %}
+    <a class="btn btn-primary" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Abrir aprovacoes</a>
+    <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
+  {% elif ui_role == "admin" %}
+    <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir operacao</a>
+    <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Abrir integracoes</a>
+  {% else %}
+    <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir operacao</a>
+    <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
+  {% endif %}
 {% endblock %}
 {% block content %}
+  <section class="card compact">
+    <div class="card-header">
+      <h2 class="card-title">Contexto do papel</h2>
+      <span class="badge">Papel {{ ui_role }}</span>
+    </div>
+    {% if ui_role == "approver" %}
+      <div class="meta">Priorize decisoes de cotacao, geracao de ordem e envio ao ERP.</div>
+    {% elif ui_role == "admin" %}
+      <div class="meta">Acompanhe operacao, trilha e integracoes por workspace.</div>
+    {% else %}
+      <div class="meta">Conduza solicitacoes, cotacoes, decisoes e ordens de compra.</div>
+    {% endif %}
+  </section>
+
   <section class="grid grid-4">
     <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
       <div class="kpi-label">Aguardando cotacoes</div>
@@ -88,6 +111,18 @@
         <h2 class="card-title">Proximas acoes</h2>
       </div>
       <div class="list">
+        {% if ui_role == "approver" %}
+        <a class="list-item" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">
+          <div class="title">Priorizar fila de aprovacoes</div>
+          <div class="meta">Ordenar por idade e impacto de negocio</div>
+        </a>
+        {% endif %}
+        {% if ui_role == "admin" %}
+        <a class="list-item" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">
+          <div class="title">Revisar integracoes</div>
+          <div class="meta">Acompanhar execucoes, falhas e retries</div>
+        </a>
+        {% endif %}
         <a class="list-item" href="/procurement/inbox?type=purchase_request&workspace_id={{ workspace_id }}">
           <div class="title">Capturar solicitacoes</div>
           <div class="meta">Separar itens prontos para abertura de cotacao</div>
