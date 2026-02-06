@@ -62,7 +62,7 @@
         <div class="meta" id="summary">Carregando</div>
       </div>
       <div class="table-wrap">
-        <table>
+        <table class="table-mobile-cards">
           <thead>
             <tr>
               <th>Tipo</th>
@@ -452,15 +452,15 @@
             const meta = renderRowMeta(item);
             return `
               <tr>
-                <td class="type-label">${prettyType(item.type)}</td>
-                <td><strong>${escapeHtml(item.ref || "n/a")}</strong></td>
-                <td class="status">${escapeHtml(prettyStatus(item.status || "n/a"))}</td>
-                <td>${renderPriority(item.priority)}</td>
-                <td>${escapeHtml(item.needed_at || "n/a")}</td>
-                <td>${item.age_days ?? 0}</td>
-                <td class="muted">${escapeHtml(item.updated_at || "n/a")}</td>
-                <td>${meta}</td>
-                <td>${actions}</td>
+                <td class="type-label" data-label="Tipo">${prettyType(item.type)}</td>
+                <td data-label="Referencia"><strong>${escapeHtml(item.ref || "n/a")}</strong></td>
+                <td class="status" data-label="Status">${escapeHtml(prettyStatus(item.status || "n/a"))}</td>
+                <td data-label="Prioridade">${renderPriority(item.priority)}</td>
+                <td data-label="Necessidade">${escapeHtml(item.needed_at || "n/a")}</td>
+                <td data-label="Idade em dias">${item.age_days ?? 0}</td>
+                <td class="muted" data-label="Atualizado">${escapeHtml(item.updated_at || "n/a")}</td>
+                <td data-label="Meta">${meta}</td>
+                <td class="cell-actions" data-label="Acoes">${actions}</td>
               </tr>
             `;
           })
