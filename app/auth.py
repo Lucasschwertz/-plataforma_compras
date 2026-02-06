@@ -57,6 +57,7 @@ def login():
             session["user_email"] = user["email"]
             session["display_name"] = user["display_name"]
             session["tenant_id"] = user["tenant_id"]
+            session["user_role"] = user.get("role", "buyer")
             return redirect(_safe_next_url() or url_for("home.home"))
 
         error = "Credenciais invalidas. Tente novamente."
@@ -88,6 +89,7 @@ def register():
                 session["user_email"] = user["email"]
                 session["display_name"] = user["display_name"]
                 session["tenant_id"] = user["tenant_id"]
+                session["user_role"] = user.get("role", "buyer")
                 return redirect(url_for("home.home"))
 
     return render_template("register.html", error=error)
@@ -117,6 +119,7 @@ def _find_user(email: str, password: str, raw_users: object) -> dict | None:
             "email": db_user["email"],
             "display_name": db_user["display_name"] or db_user["email"].split("@")[0],
             "tenant_id": db_user["tenant_id"],
+            "role": "buyer",
         }
 
     for user in _parse_users(raw_users):
@@ -171,6 +174,7 @@ def _create_user(
         "email": email,
         "display_name": display_name or email.split("@")[0],
         "tenant_id": tenant_id,
+        "role": "buyer",
     }
 
 
@@ -222,12 +226,16 @@ def _parse_users(raw_users: object) -> Iterable[dict]:
             continue
         email, password, tenant_id = parts[0].lower(), parts[1], parts[2]
         display_name = parts[3] if len(parts) > 3 and parts[3] else email.split("@")[0]
+        role = parts[4].lower() if len(parts) > 4 and parts[4] else "buyer"
+        if role not in {"buyer", "admin", "approver", "supplier"}:
+            role = "buyer"
         users.append(
             {
                 "email": email,
                 "password": password,
                 "tenant_id": tenant_id,
                 "display_name": display_name,
+                "role": role,
             }
         )
     return users

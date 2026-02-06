@@ -540,10 +540,27 @@ tr.best-overall td {
 
   .sidebar {
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
     position: sticky;
     top: 0;
     z-index: 9;
+    align-items: center;
+  }
+
+  .sidebar .brand {
+    min-width: 220px;
+  }
+
+  .nav {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+  }
+
+  .nav a {
+    white-space: nowrap;
   }
 
   .grid-2,
@@ -574,6 +591,20 @@ tr.best-overall td {
     flex-wrap: wrap;
   }
 
+  .topbar-left {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .workspace-select {
+    width: 100%;
+  }
+
+  .workspace-select .select {
+    min-width: 220px;
+  }
+
   .content {
     padding: var(--space-4);
   }
@@ -597,6 +628,12 @@ tr.best-overall td {
 
   .kpi-value {
     font-size: 28px;
+  }
+
+  .badge,
+  .pill,
+  .flag {
+    font-size: 10px;
   }
 }
 

@@ -12,9 +12,10 @@
     {% set ui_role = role | default("buyer") %}
     {% set workspace_id = workspace_id | default(tenant_id | default("default")) %}
     {% set workspace_name = workspace_name | default("Empresa " ~ workspace_id) %}
+    {% set workspace_options = workspace_options | default([{"id": workspace_id, "name": workspace_name}]) %}
     <div class="app-shell">
       <aside class="sidebar">
-        <a class="brand" href="/procurement/inbox">
+        <a class="brand" href="/procurement/inbox?workspace_id={{ workspace_id }}">
           <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
           <div>
             <div class="brand-title">Plataforma Compras</div>
@@ -44,15 +45,19 @@
             <div class="workspace-select">
               <label for="workspaceSelect">Workspace</label>
               <select class="select" id="workspaceSelect" data-workspace-current="{{ workspace_id }}">
-                <option value="{{ workspace_id }}">{{ workspace_name }} | {{ workspace_id }}</option>
+                {% for ws in workspace_options %}
+                  <option value="{{ ws.id }}" {% if ws.id == workspace_id %}selected{% endif %}>
+                    {{ ws.name }} | {{ ws.id }}
+                  </option>
+                {% endfor %}
               </select>
             </div>
-            <span class="badge">Role {{ ui_role }}</span>
-            <span class="badge">Workspace {{ workspace_id }}</span>
+            <span class="badge">Papel {{ ui_role }}</span>
+            <span class="badge">Tenant {{ workspace_id }}</span>
           </div>
           <div class="topbar-right">
             <button class="btn btn-ghost" id="themeToggle">Alternar tema</button>
-            <a class="btn btn-ghost" href="/procurement/integrations/logs">Logs</a>
+            <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Logs</a>
             <a class="btn btn-ghost" href="/logout">Sair</a>
           </div>
         </header>
@@ -61,7 +66,7 @@
           <div class="page-head">
             <div>
             <div class="breadcrumbs">
-              Workspace {{ workspace_name }}
+              Workspace {{ workspace_name }} ({{ workspace_id }})
               {% block breadcrumb_tail %}{% endblock %}
             </div>
             <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
@@ -98,21 +103,34 @@
         const params = new URLSearchParams(window.location.search);
         const workspaceFromUrl = params.get("workspace_id");
         const workspaceSelect = document.getElementById("workspaceSelect");
-        if (workspaceSelect && workspaceFromUrl) {
-          const option = document.createElement("option");
-          option.value = workspaceFromUrl;
-          option.textContent = `Empresa ${workspaceFromUrl} | ${workspaceFromUrl}`;
-          workspaceSelect.insertBefore(option, workspaceSelect.firstChild);
-          workspaceSelect.value = workspaceFromUrl;
+        const currentWorkspace = workspaceFromUrl || (workspaceSelect ? workspaceSelect.value : null);
+
+        function appendWorkspaceToLinks(workspaceId) {
+          if (!workspaceId) return;
+          const links = document.querySelectorAll('a[href^="/"]');
+          links.forEach((link) => {
+            if (link.getAttribute("href") === "/logout") return;
+            const url = new URL(link.href, window.location.origin);
+            url.searchParams.set("workspace_id", workspaceId);
+            link.href = `${url.pathname}${url.search}${url.hash}`;
+          });
         }
 
-        const links = document.querySelectorAll(".nav a");
-        links.forEach((link) => {
-          if (!workspaceFromUrl) return;
-          const url = new URL(link.href);
-          url.searchParams.set("workspace_id", workspaceFromUrl);
-          link.href = url.toString();
-        });
+        if (workspaceSelect && currentWorkspace) {
+          if ([...workspaceSelect.options].some((opt) => opt.value === currentWorkspace)) {
+            workspaceSelect.value = currentWorkspace;
+          }
+          appendWorkspaceToLinks(workspaceSelect.value);
+
+          workspaceSelect.addEventListener("change", () => {
+            const nextWorkspace = workspaceSelect.value;
+            const nextUrl = new URL(window.location.href);
+            nextUrl.searchParams.set("workspace_id", nextWorkspace);
+            window.location.href = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+          });
+        } else {
+          appendWorkspaceToLinks(currentWorkspace);
+        }
 
         window.showToast = function (type, message) {
           const root = document.getElementById("toastRoot");

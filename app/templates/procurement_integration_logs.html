@@ -1,26 +1,20 @@
-﻿<!doctype html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Logs de Integracao - Plataforma Compras</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
-    <script src="{{ url_for('static', filename='js/ui_labels.js') }}"></script>
-  </head>
-  <body>
-    <main class="container">
-      <section class="page-header">
-        <div>
-          <h1 class="page-title">Logs de Integracao</h1>
-          <p class="page-subtitle">Empresa #{{ tenant_id }} | execucoes + eventos</p>
-        </div>
-        <div class="actions">
-          <a class="button ghost" href="/procurement/inbox">Voltar para Inbox</a>
-          <a class="button ghost" href="/logout">Sair</a>
-        </div>
-      </section>
+{% extends "_layout.html" %}
+{% set active_nav = "governanca" if request.args.get("scope") == "rfq" else "integration" %}
+{% block title %}Logs de Integracao | Plataforma Compras{% endblock %}
+{% block page_title %}Integracoes e trilha de eventos{% endblock %}
+{% block breadcrumb_tail %} / Integracoes / Logs{% endblock %}
+{% block page_actions %}
+  <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Voltar para inbox</a>
+{% endblock %}
 
-      <section class="toolbar" aria-label="Filtros de logs">
+{% block content %}
+  <section class="grid grid-2">
+    <article class="card compact">
+      <div class="card-header">
+        <h2 class="card-title">Filtros de consulta</h2>
+        <span class="meta">Execucoes e eventos</span>
+      </div>
+      <div class="grid grid-4" aria-label="Filtros de logs">
         <select class="select" id="scopeFilter">
           <option value="">Todos os escopos</option>
           <option value="purchase_order">Ordens de compra</option>
@@ -30,11 +24,17 @@
           <option value="receipt">Recebimentos</option>
         </select>
         <input class="input" id="limitInput" type="number" min="10" max="200" value="80" />
-        <button class="button ghost" id="applyLogsFiltersBtn">Aplicar</button>
-        <button class="button ghost" id="clearLogsFiltersBtn">Limpar</button>
-      </section>
+        <button class="btn btn-ghost" id="applyLogsFiltersBtn">Aplicar</button>
+        <button class="btn btn-ghost" id="clearLogsFiltersBtn">Limpar</button>
+      </div>
+    </article>
 
-      <section class="toolbar" aria-label="Sync manual">
+    <article class="card compact">
+      <div class="card-header">
+        <h2 class="card-title">Sync manual</h2>
+        <span class="meta" id="syncStatus">Pronto para executar</span>
+      </div>
+      <div class="grid grid-4" aria-label="Sincronizacao manual">
         <select class="select" id="syncScope">
           <option value="">Selecionar escopo</option>
           <option value="supplier">Fornecedores</option>
@@ -43,186 +43,192 @@
           <option value="receipt">Recebimentos</option>
         </select>
         <input class="input" id="syncLimit" type="number" min="1" max="500" value="100" />
-        <button class="button primary" id="syncNowBtn">Sincronizar</button>
-        <div class="small" id="syncStatus"></div>
-      </section>
+        <button class="btn btn-primary" id="syncNowBtn">Sincronizar agora</button>
+      </div>
+    </article>
+  </section>
 
-      <section class="page-grid">
-        <article class="card">
-          <h3>Execucoes de Integracao</h3>
-          <div class="list" id="syncRunsList"></div>
-        </article>
+  <section class="grid grid-2">
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Execucoes de integracao</h2>
+        <span class="badge">ERP e jobs</span>
+      </div>
+      <div class="list" id="syncRunsList"></div>
+    </article>
 
-        <article class="card">
-          <h3>Eventos de Status</h3>
-          <div class="list" id="eventsList"></div>
-        </article>
-      </section>
-    </main>
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Eventos de status</h2>
+        <span class="badge">Auditoria funcional</span>
+      </div>
+      <div class="list" id="eventsList"></div>
+    </article>
+  </section>
+{% endblock %}
 
-    <script>
-      const scopeFilter = document.getElementById("scopeFilter");
-      const limitInput = document.getElementById("limitInput");
-      const applyLogsFiltersBtn = document.getElementById("applyLogsFiltersBtn");
-      const clearLogsFiltersBtn = document.getElementById("clearLogsFiltersBtn");
+{% block page_scripts %}
+  <script>
+    const scopeFilter = document.getElementById("scopeFilter");
+    const limitInput = document.getElementById("limitInput");
+    const applyLogsFiltersBtn = document.getElementById("applyLogsFiltersBtn");
+    const clearLogsFiltersBtn = document.getElementById("clearLogsFiltersBtn");
 
-      const syncRunsList = document.getElementById("syncRunsList");
-      const eventsList = document.getElementById("eventsList");
+    const syncRunsList = document.getElementById("syncRunsList");
+    const eventsList = document.getElementById("eventsList");
 
-      const syncScope = document.getElementById("syncScope");
-      const syncLimit = document.getElementById("syncLimit");
-      const syncNowBtn = document.getElementById("syncNowBtn");
-      const syncStatus = document.getElementById("syncStatus");
+    const syncScope = document.getElementById("syncScope");
+    const syncLimit = document.getElementById("syncLimit");
+    const syncNowBtn = document.getElementById("syncNowBtn");
+    const syncStatus = document.getElementById("syncStatus");
 
-      const state = {
-        scope: "",
-        limit: 80,
-      };
+    const state = {
+      scope: "",
+      limit: 80,
+    };
 
-      function escapeHtml(value) {
-        return String(value ?? "-")
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#039;");
+    function escapeHtml(value) {
+      return String(value ?? "-")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function prettyStatus(status) {
+      if (window.UiLabels && window.UiLabels.prettyStatus) {
+        return window.UiLabels.prettyStatus(status);
+      }
+      return status || "-";
+    }
+
+    function prettyScope(scope) {
+      const normalizedScope = String(scope || "").replace(/s$/, "");
+      if (window.UiLabels && window.UiLabels.prettyScope) {
+        return window.UiLabels.prettyScope(normalizedScope);
+      }
+      return scope || "-";
+    }
+
+    function buildUrl() {
+      const params = new URLSearchParams();
+      params.set("limit", String(state.limit));
+      if (state.scope) params.set("scope", state.scope);
+      return `/api/procurement/integrations/logs?${params.toString()}`;
+    }
+
+    function renderSyncRuns(items) {
+      if (!items.length) {
+        syncRunsList.innerHTML = '<div class="meta">Sem execucoes de integracao.</div>';
+        return;
       }
 
-      function prettyStatus(status) {
-        if (window.UiLabels && window.UiLabels.prettyStatus) {
-          return window.UiLabels.prettyStatus(status);
-        }
-        return status || "-";
+      syncRunsList.innerHTML = items
+        .map(
+          (s) => `
+            <div class="list-item">
+              <div class="title">Execucao #${escapeHtml(s.id)} | ${escapeHtml(prettyStatus(s.status))}</div>
+              <div class="meta">inicio ${escapeHtml(s.started_at)} | escopo ${escapeHtml(prettyScope(s.scope))}</div>
+              <div class="meta">tentativa ${escapeHtml(s.attempt)} | duracao ms ${escapeHtml(s.duration_ms || "-")}</div>
+              <div class="meta">registros in ${escapeHtml(s.records_in)} | upserted ${escapeHtml(s.records_upserted)} | failed ${escapeHtml(
+                s.records_failed
+              )}</div>
+              ${s.error_summary ? `<div class="meta">erro ${escapeHtml(s.error_summary)}</div>` : ""}
+            </div>
+          `
+        )
+        .join("");
+    }
+
+    function renderEvents(items) {
+      if (!items.length) {
+        eventsList.innerHTML = '<div class="meta">Sem eventos recentes.</div>';
+        return;
       }
 
-      function prettyScope(scope) {
-        const normalizedScope = String(scope || "").replace(/s$/, "");
-        if (window.UiLabels && window.UiLabels.prettyScope) {
-          return window.UiLabels.prettyScope(normalizedScope);
-        }
-        return scope || "-";
-      }
-      function buildUrl() {
-        const params = new URLSearchParams();
-        params.set("limit", String(state.limit));
-        if (state.scope) params.set("scope", state.scope);
-        return `/api/procurement/integrations/logs?${params.toString()}`;
-      }
+      eventsList.innerHTML = items
+        .map(
+          (e) => `
+            <div class="list-item">
+              <div class="title">${escapeHtml(prettyScope(e.entity))} #${escapeHtml(e.entity_id)} -> ${escapeHtml(
+                prettyStatus(e.to_status)
+              )}</div>
+              <div class="meta">${escapeHtml(e.occurred_at)}</div>
+              <div class="meta">de ${escapeHtml(prettyStatus(e.from_status || "-"))} | motivo ${escapeHtml(e.reason || "-")}</div>
+            </div>
+          `
+        )
+        .join("");
+    }
 
-      function renderSyncRuns(items) {
-        if (!items.length) {
-          syncRunsList.innerHTML = '<div class="small">Sem execucoes de integracao.</div>';
-          return;
-        }
-
-        syncRunsList.innerHTML = items
-          .map(
-            (s) => `
-              <div class="list-item">
-                <div class="top">
-                  <div class="title">execucao #${escapeHtml(s.id)} | ${escapeHtml(prettyStatus(s.status))}</div>
-                  <div class="meta-line">${escapeHtml(s.started_at)}</div>
-                </div>
-                <div class="meta-line">escopo: ${escapeHtml(prettyScope(s.scope))} | tentativa: ${escapeHtml(s.attempt)}</div>
-                <div class="meta-line">
-                  registros: in=${escapeHtml(s.records_in)} upserted=${escapeHtml(s.records_upserted)} failed=${escapeHtml(
-              s.records_failed
-            )}
-                </div>
-                <div class="meta-line">duracao (ms): ${escapeHtml(s.duration_ms || "-")}</div>
-                ${s.error_summary ? `<div class="meta-line">erro: ${escapeHtml(s.error_summary)}</div>` : ""}
-              </div>
-            `
-          )
-          .join("");
-      }
-
-      function renderEvents(items) {
-        if (!items.length) {
-          eventsList.innerHTML = '<div class="small">Sem eventos.</div>';
-          return;
-        }
-
-        eventsList.innerHTML = items
-          .map(
-            (e) => `
-              <div class="list-item">
-                <div class="top">
-                  <div class="title">${escapeHtml(prettyScope(e.entity))} #${escapeHtml(
-              e.entity_id
-            )} -> ${escapeHtml(prettyStatus(e.to_status))}</div>
-                  <div class="meta-line">${escapeHtml(e.occurred_at)}</div>
-                </div>
-                <div class="meta-line">de: ${escapeHtml(prettyStatus(e.from_status || "-"))}</div>
-                <div class="meta-line">motivo: ${escapeHtml(e.reason || "-")}</div>
-              </div>
-            `
-          )
-          .join("");
-      }
-
-      async function loadLogs() {
+    async function loadLogs() {
+      try {
         const res = await fetch(buildUrl());
         const data = await res.json();
         renderSyncRuns(data.sync_runs || []);
         renderEvents(data.status_events || []);
+      } catch (error) {
+        showToast("danger", "Falha ao carregar logs");
       }
+    }
 
-      function applyFilters() {
-        state.scope = (scopeFilter.value || "").trim();
-        state.limit = Math.min(200, Math.max(10, Number(limitInput.value || 80)));
-        limitInput.value = String(state.limit);
-        loadLogs();
-      }
-
-      function clearFilters() {
-        state.scope = "";
-        state.limit = 80;
-        scopeFilter.value = "";
-        limitInput.value = "80";
-        loadLogs();
-      }
-
-      async function runSync() {
-        const scopeValue = (syncScope.value || "").trim();
-        if (!scopeValue) {
-          syncStatus.textContent = "Selecione um escopo para sincronizar.";
-          return;
-        }
-
-        syncNowBtn.disabled = true;
-        syncStatus.textContent = "Sincronizando...";
-
-        const limitValue = Math.min(500, Math.max(1, Number(syncLimit.value || 100)));
-        syncLimit.value = String(limitValue);
-
-        try {
-          const res = await fetch(`/api/procurement/integrations/sync?scope=${encodeURIComponent(scopeValue)}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ limit: limitValue }),
-          });
-          const data = await res.json();
-
-          if (!res.ok) {
-            syncStatus.textContent = `Falha: ${data.message || data.error || "erro"}`;
-          } else {
-            syncStatus.textContent = `OK: ${data.result.records_in} recebidos, ${data.result.records_upserted} upserted.`;
-            await loadLogs();
-          }
-        } catch (error) {
-          syncStatus.textContent = "Falha: erro inesperado ao sincronizar.";
-        } finally {
-          syncNowBtn.disabled = false;
-        }
-      }
-
-      applyLogsFiltersBtn.addEventListener("click", applyFilters);
-      clearLogsFiltersBtn.addEventListener("click", clearFilters);
-      syncNowBtn.addEventListener("click", runSync);
-
+    function applyFilters() {
+      state.scope = (scopeFilter.value || "").trim();
+      state.limit = Math.min(200, Math.max(10, Number(limitInput.value || 80)));
+      limitInput.value = String(state.limit);
       loadLogs();
-    </script>
-  </body>
-</html>
+    }
 
+    function clearFilters() {
+      state.scope = "";
+      state.limit = 80;
+      scopeFilter.value = "";
+      limitInput.value = "80";
+      loadLogs();
+    }
+
+    async function runSync() {
+      const scopeValue = (syncScope.value || "").trim();
+      if (!scopeValue) {
+        syncStatus.textContent = "Selecione um escopo para sincronizar";
+        return;
+      }
+
+      syncNowBtn.disabled = true;
+      syncStatus.textContent = "Sincronizando";
+
+      const limitValue = Math.min(500, Math.max(1, Number(syncLimit.value || 100)));
+      syncLimit.value = String(limitValue);
+
+      try {
+        const res = await fetch(`/api/procurement/integrations/sync?scope=${encodeURIComponent(scopeValue)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ limit: limitValue }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          syncStatus.textContent = `Falha: ${data.message || data.error || "erro"}`;
+          showToast("danger", syncStatus.textContent);
+        } else {
+          syncStatus.textContent = `OK: ${data.result.records_in} recebidos, ${data.result.records_upserted} upserted`;
+          showToast("success", "Sincronizacao concluida");
+          await loadLogs();
+        }
+      } catch (error) {
+        syncStatus.textContent = "Falha: erro inesperado ao sincronizar";
+        showToast("danger", syncStatus.textContent);
+      } finally {
+        syncNowBtn.disabled = false;
+      }
+    }
+
+    applyLogsFiltersBtn.addEventListener("click", applyFilters);
+    clearLogsFiltersBtn.addEventListener("click", clearFilters);
+    syncNowBtn.addEventListener("click", runSync);
+
+    loadLogs();
+  </script>
+{% endblock %}
