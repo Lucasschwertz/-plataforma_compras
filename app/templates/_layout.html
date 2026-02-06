@@ -22,13 +22,11 @@
           </div>
         </a>
         <nav class="nav">
-          <div class="nav-section-title">Core</div>
-          <a class="{% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Dashboard</a>
-          <a class="{% if active_nav == 'inbox' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Operacoes</a>
-          <a class="{% if active_nav == 'rfq' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
-          <a class="{% if active_nav == 'award' %}active{% endif %}" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">Decisoes</a>
-          <a class="{% if active_nav == 'po' %}active{% endif %}" href="/procurement/inbox?type=purchase_order&workspace_id={{ workspace_id }}">Ordens</a>
           <div class="nav-section-title">Plataforma</div>
+          <a class="{% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Dashboard</a>
+          <a class="{% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Sourcing</a>
+          <a class="{% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Procurement</a>
+          <a class="{% if active_nav == 'governanca' %}active{% endif %}" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">Governanca</a>
           <a class="{% if active_nav == 'integration' %}active{% endif %}" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Integracoes</a>
           {% if ui_role == "admin" %}
             <a href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Automacao</a>

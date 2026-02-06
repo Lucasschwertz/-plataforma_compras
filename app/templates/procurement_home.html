@@ -4,37 +4,37 @@
 {% block page_title %}Dashboard de Compras{% endblock %}
 {% block breadcrumb_tail %} / Dashboard{% endblock %}
 {% block page_actions %}
-  <a class="btn btn-primary" href="/procurement/inbox">Abrir operacoes</a>
+  <a class="btn btn-primary" href="/procurement/inbox">Abrir procurement</a>
   <a class="btn btn-ghost" href="/procurement/integrations/logs">Ver integracoes</a>
 {% endblock %}
 {% block content %}
   <section class="grid grid-4">
-    <a class="kpi-card" href="/procurement/inbox?type=purchase_request">
-      <div class="kpi-label">Entrada</div>
-      <div class="kpi-value">SR</div>
-      <div class="meta">Solicitacoes em tratamento</div>
-    </a>
     <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes">
-      <div class="kpi-label">Cotacao</div>
-      <div class="kpi-value">RF</div>
-      <div class="meta">Cotacoes ativas</div>
+      <div class="kpi-label">Pilar</div>
+      <div class="kpi-value">SRC</div>
+      <div class="meta">RFX, comparacao de propostas e decisao</div>
     </a>
-    <a class="kpi-card" href="/procurement/inbox?type=rfq&awaiting_po=1">
-      <div class="kpi-label">Decisao</div>
-      <div class="kpi-value">AW</div>
-      <div class="meta">Decisoes pendentes de OC</div>
+    <a class="kpi-card" href="/procurement/inbox">
+      <div class="kpi-label">Pilar</div>
+      <div class="kpi-value">PRC</div>
+      <div class="meta">Solicitacao, cotacao, OC e recebimento</div>
     </a>
-    <a class="kpi-card" href="/procurement/inbox?type=purchase_order">
-      <div class="kpi-label">Operacao</div>
-      <div class="kpi-value">OC</div>
-      <div class="meta">Ordens e status ERP</div>
+    <a class="kpi-card" href="/procurement/integrations/logs?scope=rfq">
+      <div class="kpi-label">Pilar</div>
+      <div class="kpi-value">GOV</div>
+      <div class="meta">Auditoria de status, rastreabilidade e controle</div>
+    </a>
+    <a class="kpi-card" href="/procurement/integrations/logs">
+      <div class="kpi-label">Pilar</div>
+      <div class="kpi-value">INT</div>
+      <div class="meta">Sincronizacao ERP, eventos e excecoes</div>
     </a>
   </section>
 
   <section class="grid grid-2">
     <article class="card">
       <div class="card-header">
-        <h2 class="card-title">Ciclo de compras</h2>
+        <h2 class="card-title">Jornada operacional</h2>
       </div>
       <div class="list">
         <a class="list-item" href="/procurement/inbox?type=purchase_request">
@@ -58,24 +58,24 @@
 
     <article class="card">
       <div class="card-header">
-        <h2 class="card-title">Modulos da plataforma</h2>
+        <h2 class="card-title">Pilares da plataforma</h2>
       </div>
       <div class="list">
-        <a class="list-item" href="/procurement/inbox">
-          <div class="title">Operacoes</div>
-          <div class="meta">Fila unica com filtros e proximas acoes</div>
-        </a>
         <a class="list-item" href="/procurement/inbox?type=rfq">
-          <div class="title">Cotacoes e comparacao</div>
-          <div class="meta">Comparacao por item, fornecedor e SLA</div>
+          <div class="title">Sourcing</div>
+          <div class="meta">RFX, comparacao de fornecedores e decisao</div>
         </a>
-        <a class="list-item" href="/procurement/inbox?type=rfq&awaiting_po=1">
-          <div class="title">Decisoes e OC</div>
-          <div class="meta">Fluxo de decisao manual e ordem de compra</div>
+        <a class="list-item" href="/procurement/inbox">
+          <div class="title">Procurement</div>
+          <div class="meta">Execucao ponta a ponta do ciclo de compra</div>
+        </a>
+        <a class="list-item" href="/procurement/integrations/logs?scope=rfq">
+          <div class="title">Governanca</div>
+          <div class="meta">Evidencia de trilha, status e conformidade</div>
         </a>
         <a class="list-item" href="/procurement/integrations/logs">
-          <div class="title">Integracoes e auditoria</div>
-          <div class="meta">Execucoes, eventos e falhas de sincronizacao</div>
+          <div class="title">Integracoes</div>
+          <div class="meta">Jobs de sincronizacao e tratamento de excecoes</div>
         </a>
       </div>
     </article>
