@@ -146,6 +146,10 @@
   padding: var(--space-5);
 }
 
+.card.compact {
+  padding: var(--space-4);
+}
+
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -192,6 +196,8 @@
   color: inherit;
   display: grid;
   gap: 6px;
+  position: relative;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
 .kpi-label {
@@ -202,8 +208,22 @@
 }
 
 .kpi-value {
-  font-size: 30px;
-  font-weight: 700;
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.kpi-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid transparent;
+}
+
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2);
+  border-color: rgba(76, 111, 255, 0.35);
 }
 
 .btn {
@@ -548,7 +568,43 @@ tr.best-overall td {
     padding: var(--space-4);
   }
 
+  .card {
+    padding: var(--space-4);
+  }
+
+  .page-actions {
+    width: 100%;
+  }
+
+  .page-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
   table {
-    min-width: 720px;
+    min-width: 560px;
+  }
+
+  .kpi-value {
+    font-size: 28px;
+  }
+}
+
+@media (max-width: 560px) {
+  .sidebar {
+    padding: var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .nav a {
+    padding: 8px 10px;
+  }
+
+  table {
+    min-width: 480px;
+  }
+
+  .btn {
+    padding: 10px 12px;
   }
 }
