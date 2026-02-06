@@ -5,7 +5,7 @@
 {% block page_title %}Mesa de cotacao{% endblock %}
 {% block breadcrumb_tail %} / Cotacao {{ rfq_id }}{% endblock %}
 {% block page_actions %}
-  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq">Voltar para cotacoes</a>
+  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Voltar para cotacoes</a>
   <a class="btn btn-primary" href="#decisao">Registrar decisao</a>
 {% endblock %}
 {% block content %}
@@ -150,6 +150,12 @@
 {% block page_scripts %}
   <script>
       const rfqId = Number({{ rfq_id }});
+      const workspaceId = "{{ workspace_id }}";
+
+      function withWorkspace(path) {
+        const separator = path.includes("?") ? "&" : "?";
+        return `${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
+      }
 
       const cotacaoResumo = document.getElementById("cotacaoResumo");
       const decisaoResumo = document.getElementById("decisaoResumo");
@@ -539,7 +545,7 @@
         ocBadge.textContent = prettyStatus(oc.status);
 
         ocAcoes.innerHTML = `
-          <a class="btn" href="/procurement/purchase-orders/${oc.id}">Abrir OC</a>
+            <a class="btn" href="${withWorkspace(`/procurement/purchase-orders/${oc.id}`)}">Abrir OC</a>
           ${
             oc.status !== "erp_accepted"
               ? `<button class="btn btn-primary" id="pushOcBtn">Enviar ao ERP</button>`

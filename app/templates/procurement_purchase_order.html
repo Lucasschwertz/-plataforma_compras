@@ -5,7 +5,7 @@
 {% block page_title %}Detalhe da OC{% endblock %}
 {% block breadcrumb_tail %} / OC {{ purchase_order_id }}{% endblock %}
 {% block page_actions %}
-  <a class="btn btn-ghost" href="/procurement/inbox">Voltar para inbox</a>
+  <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Voltar para inbox</a>
   <button class="btn btn-primary" id="pushErpBtn">Enviar ao ERP</button>
 {% endblock %}
 {% block content %}

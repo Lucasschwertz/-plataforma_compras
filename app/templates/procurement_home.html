@@ -4,27 +4,27 @@
 {% block page_title %}Dashboard de Compras{% endblock %}
 {% block breadcrumb_tail %} / Dashboard{% endblock %}
 {% block page_actions %}
-  <a class="btn btn-primary" href="/procurement/inbox">Abrir procurement</a>
-  <a class="btn btn-ghost" href="/procurement/integrations/logs">Ver integracoes</a>
+  <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir procurement</a>
+  <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Ver integracoes</a>
 {% endblock %}
 {% block content %}
   <section class="grid grid-4">
-    <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes">
+    <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
       <div class="kpi-label">Pilar</div>
       <div class="kpi-value">SRC</div>
       <div class="meta">RFX, comparacao de propostas e decisao</div>
     </a>
-    <a class="kpi-card" href="/procurement/inbox">
+    <a class="kpi-card" href="/procurement/inbox?workspace_id={{ workspace_id }}">
       <div class="kpi-label">Pilar</div>
       <div class="kpi-value">PRC</div>
       <div class="meta">Solicitacao, cotacao, OC e recebimento</div>
     </a>
-    <a class="kpi-card" href="/procurement/integrations/logs?scope=rfq">
+    <a class="kpi-card" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">
       <div class="kpi-label">Pilar</div>
       <div class="kpi-value">GOV</div>
       <div class="meta">Auditoria de status, rastreabilidade e controle</div>
     </a>
-    <a class="kpi-card" href="/procurement/integrations/logs">
+    <a class="kpi-card" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">
       <div class="kpi-label">Pilar</div>
       <div class="kpi-value">INT</div>
       <div class="meta">Sincronizacao ERP, eventos e excecoes</div>
@@ -37,19 +37,19 @@
         <h2 class="card-title">Jornada operacional</h2>
       </div>
       <div class="list">
-        <a class="list-item" href="/procurement/inbox?type=purchase_request">
+        <a class="list-item" href="/procurement/inbox?type=purchase_request&workspace_id={{ workspace_id }}">
           <div class="title">1. Capturar solicitacoes</div>
           <div class="meta">Consolidar itens prontos para cotacao</div>
         </a>
-        <a class="list-item" href="/procurement/inbox?type=rfq&status=open,collecting_quotes">
+        <a class="list-item" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
           <div class="title">2. Executar cotacoes</div>
           <div class="meta">Convidar fornecedores e registrar propostas</div>
         </a>
-        <a class="list-item" href="/procurement/inbox?type=rfq&awaiting_po=1">
+        <a class="list-item" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
           <div class="title">3. Registrar decisoes</div>
           <div class="meta">Escolher fornecedor e justificar decisao</div>
         </a>
-        <a class="list-item" href="/procurement/inbox?type=purchase_order">
+        <a class="list-item" href="/procurement/inbox?type=purchase_order&workspace_id={{ workspace_id }}">
           <div class="title">4. Emitir e enviar OC</div>
           <div class="meta">Concluir envio para o ERP e acompanhar retorno</div>
         </a>
@@ -61,19 +61,19 @@
         <h2 class="card-title">Pilares da plataforma</h2>
       </div>
       <div class="list">
-        <a class="list-item" href="/procurement/inbox?type=rfq">
+        <a class="list-item" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">
           <div class="title">Sourcing</div>
           <div class="meta">RFX, comparacao de fornecedores e decisao</div>
         </a>
-        <a class="list-item" href="/procurement/inbox">
+        <a class="list-item" href="/procurement/inbox?workspace_id={{ workspace_id }}">
           <div class="title">Procurement</div>
           <div class="meta">Execucao ponta a ponta do ciclo de compra</div>
         </a>
-        <a class="list-item" href="/procurement/integrations/logs?scope=rfq">
+        <a class="list-item" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">
           <div class="title">Governanca</div>
           <div class="meta">Evidencia de trilha, status e conformidade</div>
         </a>
-        <a class="list-item" href="/procurement/integrations/logs">
+        <a class="list-item" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">
           <div class="title">Integracoes</div>
           <div class="meta">Jobs de sincronizacao e tratamento de excecoes</div>
         </a>

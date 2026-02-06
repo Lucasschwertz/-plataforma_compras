@@ -38,19 +38,19 @@
     </div>
 
     <div class="grid grid-4" id="kpis">
-      <a class="kpi-card" href="/procurement/inbox?type=purchase_request&status=pending_rfq">
+      <a class="kpi-card" href="/procurement/inbox?type=purchase_request&status=pending_rfq&workspace_id={{ workspace_id }}">
         <div class="kpi-label">Pendentes de cotacao</div>
         <div class="kpi-value" data-kpi="pending_rfq">0</div>
       </a>
-      <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes">
+      <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
         <div class="kpi-label">Aguardando cotacoes</div>
         <div class="kpi-value" data-kpi="awaiting_quotes">0</div>
       </a>
-      <a class="kpi-card" href="/procurement/inbox?type=rfq&awaiting_po=1">
+      <a class="kpi-card" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
         <div class="kpi-label">Decisao sem OC</div>
         <div class="kpi-value" data-kpi="awarded_waiting_po">0</div>
       </a>
-      <a class="kpi-card" href="/procurement/inbox?type=purchase_order&status=draft,approved,sent_to_erp,erp_error">
+      <a class="kpi-card" href="/procurement/inbox?type=purchase_order&status=draft,approved,sent_to_erp,erp_error&workspace_id={{ workspace_id }}">
         <div class="kpi-label">OC pendente ERP</div>
         <div class="kpi-value" data-kpi="awaiting_erp_push">0</div>
       </a>
@@ -177,6 +177,13 @@
 
 {% block page_scripts %}
   <script>
+      const workspaceId = "{{ workspace_id }}";
+
+      function withWorkspace(path) {
+        const separator = path.includes("?") ? "&" : "?";
+        return `${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
+      }
+
       const inboxBody = document.getElementById("inboxBody");
       const summary = document.getElementById("summary");
       const metaInfo = document.getElementById("metaInfo");
@@ -485,7 +492,7 @@
         const actions = [];
         if (item.type === "rfq") {
           actions.push(
-            `<a class="btn btn-small btn-ghost" href="/procurement/cotacoes/${item.id}">Mesa</a>
+            `<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/cotacoes/${item.id}`)}">Mesa</a>
             <button class="btn btn-small" data-action="comparison" data-id="${item.id}">Comparar</button>`
           );
           if (item.status !== "awarded") {
@@ -500,7 +507,7 @@
           }
           if (item.award_purchase_order_id) {
             actions.push(
-              `<a class="btn btn-small btn-ghost" href="/procurement/purchase-orders/${item.award_purchase_order_id}">Ver OC</a>`
+              `<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/purchase-orders/${item.award_purchase_order_id}`)}">Ver OC</a>`
             );
           }
         }
@@ -511,7 +518,7 @@
         }
         if (item.type === "purchase_order") {
           actions.push(
-            `<a class="btn btn-small btn-ghost" href="/procurement/purchase-orders/${item.id}">Detalhe</a>`
+            `<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/purchase-orders/${item.id}`)}">Detalhe</a>`
           );
           if (item.status !== "erp_accepted") {
             actions.push(
@@ -531,7 +538,7 @@
         document.querySelectorAll("[data-action='comparison']").forEach((btn) => {
           btn.addEventListener("click", () => {
             const id = btn.getAttribute("data-id");
-            window.location.href = `/procurement/cotacoes/${id}#comparacao`;
+            window.location.href = `${withWorkspace(`/procurement/cotacoes/${id}`)}#comparacao`;
           });
         });
 
@@ -729,7 +736,7 @@
           window.showToast("success", "Ordem criada");
           await loadInbox();
           if (data.purchase_order_id) {
-            window.location.href = `/procurement/purchase-orders/${data.purchase_order_id}`;
+            window.location.href = withWorkspace(`/procurement/purchase-orders/${data.purchase_order_id}`);
           }
         } finally {
           poSubmitBtn.disabled = false;
