@@ -75,30 +75,56 @@
     <div class="card-header">
       <h2 class="card-title">Comparacao por fornecedor</h2>
       <div class="page-actions">
+        <button class="btn btn-ghost btn-small" type="button" id="toggleDetalheComparacaoBtn">Ocultar detalhe tecnico</button>
         <a class="btn btn-ghost" href="#">Voltar ao topo</a>
       </div>
     </div>
     <div class="stack">
       <div class="meta" id="comparacaoResumo"></div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Fornecedor</th>
-              <th>Total</th>
-              <th>Prazo medio e pior</th>
-              <th>Cobertura</th>
-              <th>Destaque</th>
-            </tr>
-          </thead>
-          <tbody id="comparacaoTabela"></tbody>
-        </table>
+      <div class="grid grid-4" id="comparacaoExecutivaCards">
+        <article class="insight-card">
+          <div class="insight-label">Fornecedor recomendado</div>
+          <div class="insight-value" id="execFornecedor">n/a</div>
+          <div class="insight-meta" id="execFornecedorMeta">Sem dados</div>
+        </article>
+        <article class="insight-card">
+          <div class="insight-label">Total recomendado</div>
+          <div class="insight-value" id="execTotal">n/a</div>
+          <div class="insight-meta">Comparativo consolidado</div>
+        </article>
+        <article class="insight-card">
+          <div class="insight-label">Economia potencial</div>
+          <div class="insight-value" id="execEconomia">n/a</div>
+          <div class="insight-meta">Vs fornecedor mais caro</div>
+        </article>
+        <article class="insight-card">
+          <div class="insight-label">Risco de decisao</div>
+          <div class="insight-value" id="execRisco">n/a</div>
+          <div class="insight-meta" id="execRiscoMeta">Sem dados de risco</div>
+        </article>
       </div>
-      <details class="disclosure" id="comparacaoDetalhes">
-        <summary>Ver detalhes</summary>
-        <div class="stack" id="comparacaoDetalhesConteudo"></div>
-      </details>
-      <div class="list" id="comparacaoItens"></div>
+      <div class="list" id="execRanking"></div>
+      <div id="comparacaoDetalhada">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Fornecedor</th>
+                <th>Total</th>
+                <th>Prazo medio e pior</th>
+                <th>Cobertura</th>
+                <th>Destaque</th>
+              </tr>
+            </thead>
+            <tbody id="comparacaoTabela"></tbody>
+          </table>
+        </div>
+        <details class="disclosure" id="comparacaoDetalhes">
+          <summary>Ver detalhes</summary>
+          <div class="stack" id="comparacaoDetalhesConteudo"></div>
+        </details>
+        <div class="list" id="comparacaoItens"></div>
+      </div>
     </div>
   </section>
 
@@ -172,6 +198,15 @@
       const comparacaoTabela = document.getElementById("comparacaoTabela");
       const comparacaoItens = document.getElementById("comparacaoItens");
       const comparacaoDetalhesConteudo = document.getElementById("comparacaoDetalhesConteudo");
+      const comparacaoDetalhada = document.getElementById("comparacaoDetalhada");
+      const toggleDetalheComparacaoBtn = document.getElementById("toggleDetalheComparacaoBtn");
+      const execFornecedor = document.getElementById("execFornecedor");
+      const execFornecedorMeta = document.getElementById("execFornecedorMeta");
+      const execTotal = document.getElementById("execTotal");
+      const execEconomia = document.getElementById("execEconomia");
+      const execRisco = document.getElementById("execRisco");
+      const execRiscoMeta = document.getElementById("execRiscoMeta");
+      const execRanking = document.getElementById("execRanking");
 
       const decisaoForm = document.getElementById("decisaoForm");
       const fornecedorInput = document.getElementById("fornecedorInput");
@@ -190,6 +225,7 @@
         decisao: null,
         ordemCompra: null,
         comparacao: null,
+        detalheComparacaoAberto: true,
       };
 
       function escapeHtml(value) {
@@ -244,6 +280,111 @@
         return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
       }
 
+      function toNumber(value) {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+      }
+
+      function setDetalheComparacaoVisivel(visivel) {
+        state.detalheComparacaoAberto = Boolean(visivel);
+        comparacaoDetalhada.style.display = state.detalheComparacaoAberto ? "grid" : "none";
+        toggleDetalheComparacaoBtn.textContent = state.detalheComparacaoAberto
+          ? "Ocultar detalhe tecnico"
+          : "Mostrar detalhe tecnico";
+      }
+
+      function renderExecutiveSummary(summary, totals, suggestedSupplierId) {
+        if (!totals.length) {
+          execFornecedor.textContent = "n/a";
+          execFornecedorMeta.textContent = "Sem dados de fornecedores";
+          execTotal.textContent = "n/a";
+          execEconomia.textContent = "n/a";
+          execRisco.textContent = "n/a";
+          execRiscoMeta.textContent = "Sem dados de risco";
+          execRanking.innerHTML = "";
+          return;
+        }
+
+        const totalsWithMetrics = totals.map((item) => ({
+          ...item,
+          totalNumeric: toNumber(item.total_amount),
+          avgLeadNumeric: toNumber(item.avg_lead_time_days) ?? 9999,
+          coverageRatio:
+            Number(item.items_total || 0) > 0
+              ? Number(item.items_quoted || 0) / Number(item.items_total || 1)
+              : 0,
+        }));
+
+        const sortedByTotal = totalsWithMetrics
+          .filter((item) => item.totalNumeric != null)
+          .sort((a, b) => Number(a.totalNumeric) - Number(b.totalNumeric));
+
+        const recommended =
+          totalsWithMetrics.find((item) => item.supplier_id === suggestedSupplierId) ||
+          sortedByTotal[0] ||
+          totalsWithMetrics[0];
+
+        const recommendedTotal = toNumber(recommended?.total_amount);
+        const maxTotal = sortedByTotal.length ? Number(sortedByTotal[sortedByTotal.length - 1].totalNumeric) : null;
+        const economia = maxTotal != null && recommendedTotal != null ? maxTotal - recommendedTotal : null;
+
+        execFornecedor.textContent = recommended?.supplier_name || `Fornecedor ${recommended?.supplier_id || "n/a"}`;
+        execFornecedorMeta.textContent = `Cobertura ${recommended?.items_quoted || 0}/${recommended?.items_total || 0}`;
+        execTotal.textContent = formatCurrency(recommendedTotal);
+        execEconomia.textContent = economia != null && economia > 0 ? formatCurrency(economia) : "n/a";
+
+        let riskScore = 0;
+        const slaRisk = Boolean(summary?.sla?.sla_risk);
+        if (slaRisk) riskScore += 2;
+        if (recommended?.flags?.late_delivery) riskScore += 1;
+        if (recommended?.flags?.no_supplier_response) riskScore += 2;
+        const flaggedSuppliers = totalsWithMetrics.filter(
+          (item) => item.flags?.late_delivery || item.flags?.no_supplier_response
+        ).length;
+        if (flaggedSuppliers > 1) riskScore += 1;
+
+        let riskLabel = "Baixo";
+        if (riskScore >= 4) riskLabel = "Alto";
+        else if (riskScore >= 2) riskLabel = "Medio";
+        execRisco.textContent = riskLabel;
+        execRiscoMeta.textContent = slaRisk
+          ? "SLA em risco, revisar decisao"
+          : flaggedSuppliers > 0
+            ? `${flaggedSuppliers} fornecedor(es) com alerta`
+            : "Sem alertas relevantes";
+
+        const maxTotalValue = Math.max(...totalsWithMetrics.map((item) => Number(item.totalNumeric ?? 0)), 1);
+        const maxLeadValue = Math.max(...totalsWithMetrics.map((item) => Number(item.avgLeadNumeric ?? 0)), 1);
+
+        const ranking = totalsWithMetrics
+          .map((item) => {
+            const totalWeight = (Number(item.totalNumeric ?? maxTotalValue) / maxTotalValue) * 0.55;
+            const leadWeight = (Number(item.avgLeadNumeric ?? maxLeadValue) / maxLeadValue) * 0.25;
+            const coveragePenalty = (1 - Number(item.coverageRatio || 0)) * 0.2;
+            const flagsPenalty =
+              (item.flags?.late_delivery ? 0.12 : 0) + (item.flags?.no_supplier_response ? 0.18 : 0);
+            const score = totalWeight + leadWeight + coveragePenalty + flagsPenalty;
+            return {
+              ...item,
+              score,
+            };
+          })
+          .sort((a, b) => a.score - b.score);
+
+        execRanking.innerHTML = ranking
+          .map(
+            (item, index) => `
+              <div class="list-item">
+                <div><strong>${index + 1}. ${escapeHtml(item.supplier_name || `Fornecedor ${item.supplier_id}`)}</strong></div>
+                <div class="meta">Score ${escapeHtml((item.score * 100).toFixed(1))} | Total ${escapeHtml(
+              formatCurrency(item.totalNumeric)
+            )} | Cobertura ${escapeHtml(`${item.items_quoted}/${item.items_total}`)}</div>
+              </div>
+            `
+          )
+          .join("");
+      }
+
       function renderSlaResumo(summary) {
         const sla = summary?.sla || {};
         const startLabel = sla.sla_start_label || "dias desde abertura";
@@ -273,6 +414,7 @@
           comparacaoTabela.innerHTML = '<tr><td colspan="5" class="empty-row">Sem propostas.</td></tr>';
           comparacaoItens.innerHTML = "";
           comparacaoDetalhesConteudo.innerHTML = "";
+          renderExecutiveSummary({}, [], null);
           return;
         }
 
@@ -296,6 +438,7 @@
           <div class="meta">${escapeHtml(suggestionLabel)}</div>
           <div class="meta">${renderSlaResumo(summary)}</div>
         `;
+        renderExecutiveSummary(summary, totals, suggestedSupplierId);
 
         if (!totals.length) {
           comparacaoTabela.innerHTML = '<tr><td colspan="5" class="empty-row">Sem propostas.</td></tr>';
@@ -767,6 +910,10 @@
       propostaForm.addEventListener("submit", salvarProposta);
       atualizarBtn.addEventListener("click", carregar);
       propostaFornecedorSelect.addEventListener("change", renderPropostaItens);
+      toggleDetalheComparacaoBtn.addEventListener("click", () => {
+        setDetalheComparacaoVisivel(!state.detalheComparacaoAberto);
+      });
+      setDetalheComparacaoVisivel(true);
 
       carregar();
     </script>
