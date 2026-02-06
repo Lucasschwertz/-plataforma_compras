@@ -10,25 +10,63 @@
 {% block content %}
   <section class="grid grid-4">
     <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
-      <div class="kpi-label">Pilar</div>
-      <div class="kpi-value">SRC</div>
-      <div class="meta">RFX, comparacao de propostas e decisao</div>
+      <div class="kpi-label">Aguardando cotacoes</div>
+      <div class="kpi-value skeleton" data-kpi="awaiting_quotes">0</div>
+      <div class="meta">Cotacoes abertas para receber propostas</div>
     </a>
-    <a class="kpi-card" href="/procurement/inbox?workspace_id={{ workspace_id }}">
-      <div class="kpi-label">Pilar</div>
-      <div class="kpi-value">PRC</div>
-      <div class="meta">Solicitacao, cotacao, OC e recebimento</div>
+    <a class="kpi-card" href="/procurement/inbox?type=purchase_request&status=pending_rfq&workspace_id={{ workspace_id }}">
+      <div class="kpi-label">Pendentes de cotacao</div>
+      <div class="kpi-value skeleton" data-kpi="pending_rfq">0</div>
+      <div class="meta">Solicitacoes prontas para iniciar cotacao</div>
     </a>
-    <a class="kpi-card" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">
-      <div class="kpi-label">Pilar</div>
-      <div class="kpi-value">GOV</div>
-      <div class="meta">Auditoria de status, rastreabilidade e controle</div>
+    <a class="kpi-card" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
+      <div class="kpi-label">Decisao sem OC</div>
+      <div class="kpi-value skeleton" data-kpi="awarded_waiting_po">0</div>
+      <div class="meta">Cotacoes decididas sem ordem de compra</div>
     </a>
-    <a class="kpi-card" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">
-      <div class="kpi-label">Pilar</div>
-      <div class="kpi-value">INT</div>
-      <div class="meta">Sincronizacao ERP, eventos e excecoes</div>
+    <a class="kpi-card" href="/procurement/inbox?type=purchase_order&status=draft,approved,sent_to_erp,erp_error&workspace_id={{ workspace_id }}">
+      <div class="kpi-label">OC pendente ERP</div>
+      <div class="kpi-value skeleton" data-kpi="awaiting_erp_push">0</div>
+      <div class="meta">Ordens que ainda exigem envio ou retorno ERP</div>
     </a>
+  </section>
+
+  <section class="grid grid-2">
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Pendencias prioritarias</h2>
+        <span class="meta" id="pendingMeta">Carregando dados</span>
+      </div>
+      <div class="list" id="pendingList">
+        <div class="list-item skeleton">Carregando pendencias</div>
+        <div class="list-item skeleton">Carregando pendencias</div>
+        <div class="list-item skeleton">Carregando pendencias</div>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Proximas acoes</h2>
+      </div>
+      <div class="list">
+        <a class="list-item" href="/procurement/inbox?type=purchase_request&workspace_id={{ workspace_id }}">
+          <div class="title">Capturar solicitacoes</div>
+          <div class="meta">Separar itens prontos para abertura de cotacao</div>
+        </a>
+        <a class="list-item" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
+          <div class="title">Executar cotacoes</div>
+          <div class="meta">Convidar fornecedores e registrar propostas</div>
+        </a>
+        <a class="list-item" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
+          <div class="title">Registrar decisoes</div>
+          <div class="meta">Definir fornecedor e gerar ordem de compra</div>
+        </a>
+        <a class="list-item" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">
+          <div class="title">Revisar governanca</div>
+          <div class="meta">Conferir trilha de status e evidencias operacionais</div>
+        </a>
+      </div>
+    </article>
   </section>
 
   <section class="grid grid-2">
@@ -80,4 +118,111 @@
       </div>
     </article>
   </section>
+{% endblock %}
+
+{% block page_scripts %}
+  <script>
+    const workspaceId = "{{ workspace_id }}";
+    const pendingMeta = document.getElementById("pendingMeta");
+    const pendingList = document.getElementById("pendingList");
+
+    function withWorkspace(path) {
+      const separator = path.includes("?") ? "&" : "?";
+      return `${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
+    }
+
+    function prettyType(type) {
+      if (window.UiLabels && window.UiLabels.prettyType) {
+        return window.UiLabels.prettyType(type);
+      }
+      return type || "item";
+    }
+
+    function prettyStatus(status) {
+      if (window.UiLabels && window.UiLabels.prettyStatus) {
+        return window.UiLabels.prettyStatus(status);
+      }
+      return status || "n/a";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "n/a")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function updateKpis(kpis) {
+      const kpiMap = {
+        pending_rfq: Number(kpis?.pending_rfq || 0),
+        awaiting_quotes: Number(kpis?.awaiting_quotes || 0),
+        awarded_waiting_po: Number(kpis?.awarded_waiting_po || 0),
+        awaiting_erp_push: Number(kpis?.awaiting_erp_push || 0),
+      };
+      Object.entries(kpiMap).forEach(([key, value]) => {
+        const element = document.querySelector(`[data-kpi='${key}']`);
+        if (!element) return;
+        element.textContent = String(value);
+        element.classList.remove("skeleton");
+      });
+    }
+
+    function itemHref(item) {
+      if (item.type === "rfq") {
+        return withWorkspace(`/procurement/cotacoes/${item.id}`);
+      }
+      if (item.type === "purchase_order") {
+        return withWorkspace(`/procurement/purchase-orders/${item.id}`);
+      }
+      const params = new URLSearchParams();
+      params.set("type", item.type || "purchase_request");
+      if (item.ref) params.set("search", item.ref);
+      return withWorkspace(`/procurement/inbox?${params.toString()}`);
+    }
+
+    function renderPending(items) {
+      if (!items.length) {
+        pendingMeta.textContent = "Sem pendencias para este workspace";
+        pendingList.innerHTML = '<div class="list-item"><div class="meta">Nenhuma pendencia no momento</div></div>';
+        return;
+      }
+
+      pendingMeta.textContent = `${items.length} itens ativos`;
+      pendingList.innerHTML = items
+        .slice(0, 8)
+        .map(
+          (item) => `
+            <a class="list-item" href="${itemHref(item)}">
+              <div class="title">${escapeHtml(item.ref || "Sem referencia")} | ${escapeHtml(prettyType(item.type))}</div>
+              <div class="meta">${escapeHtml(prettyStatus(item.status))}, prioridade ${escapeHtml(item.priority || "n/a")}, idade ${escapeHtml(
+            item.age_days ?? 0
+          )} dias</div>
+            </a>
+          `
+        )
+        .join("");
+    }
+
+    async function loadDashboardData() {
+      try {
+        const response = await fetch("/api/procurement/inbox?limit=20&offset=0");
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload?.message || payload?.error || "erro");
+        }
+        updateKpis(payload.kpis || {});
+        renderPending(payload.items || []);
+      } catch (error) {
+        pendingMeta.textContent = "Falha ao carregar dados";
+        pendingList.innerHTML = '<div class="list-item"><div class="meta">Nao foi possivel carregar pendencias</div></div>';
+        if (window.showToast) {
+          window.showToast("danger", "Falha ao carregar dashboard");
+        }
+      }
+    }
+
+    loadDashboardData();
+  </script>
 {% endblock %}
