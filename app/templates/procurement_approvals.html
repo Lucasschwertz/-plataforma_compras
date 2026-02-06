@@ -1,0 +1,195 @@
+{% extends "_layout.html" %}
+{% set active_nav = "approvals" %}
+{% block title %}Aprovacoes | Plataforma Compras{% endblock %}
+{% block page_title %}Aprovacoes{% endblock %}
+{% block breadcrumb_tail %} / Aprovacoes{% endblock %}
+{% block page_actions %}
+  <button class="btn" id="refreshBtn">Atualizar</button>
+  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir inbox de cotacoes</a>
+{% endblock %}
+
+{% block content %}
+  <section class="grid grid-4">
+    <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
+      <div class="kpi-label">Aguardando decisao</div>
+      <div class="kpi-value skeleton" data-kpi="awaiting_decision">0</div>
+      <div class="meta">Cotacoes sem decisao registrada</div>
+    </a>
+    <a class="kpi-card" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
+      <div class="kpi-label">Decisao sem OC</div>
+      <div class="kpi-value skeleton" data-kpi="awarded_waiting_po">0</div>
+      <div class="meta">Cotacoes com decisao pendente de ordem</div>
+    </a>
+    <a class="kpi-card" href="/procurement/inbox?type=purchase_order&status=draft,approved,sent_to_erp,erp_error&workspace_id={{ workspace_id }}">
+      <div class="kpi-label">OC pendente ERP</div>
+      <div class="kpi-value skeleton" data-kpi="awaiting_erp_push">0</div>
+      <div class="meta">Ordens aguardando envio ou retorno ERP</div>
+    </a>
+    <a class="kpi-card" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">
+      <div class="kpi-label">Auditoria</div>
+      <div class="kpi-value">LOG</div>
+      <div class="meta">Trilha de eventos e governanca</div>
+    </a>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Fila de aprovacao</h2>
+      <span class="meta" id="queueMeta">Carregando</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Referencia</th>
+            <th>Tipo</th>
+            <th>Status</th>
+            <th>Prioridade</th>
+            <th>Idade em dias</th>
+            <th>Proxima acao</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody id="queueBody">
+          <tr>
+            <td colspan="7" class="empty-row">Carregando fila de aprovacao</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block page_scripts %}
+  <script>
+    const workspaceId = "{{ workspace_id }}";
+    const refreshBtn = document.getElementById("refreshBtn");
+    const queueMeta = document.getElementById("queueMeta");
+    const queueBody = document.getElementById("queueBody");
+
+    function withWorkspace(path) {
+      const separator = path.includes("?") ? "&" : "?";
+      return `${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "n/a")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function prettyType(type) {
+      if (window.UiLabels && window.UiLabels.prettyType) {
+        return window.UiLabels.prettyType(type);
+      }
+      return type || "item";
+    }
+
+    function prettyStatus(status) {
+      if (window.UiLabels && window.UiLabels.prettyStatus) {
+        return window.UiLabels.prettyStatus(status);
+      }
+      return status || "n/a";
+    }
+
+    function prettyPriority(priority) {
+      if (!priority) return "n/a";
+      return String(priority).toUpperCase();
+    }
+
+    function updateKpi(selector, value) {
+      const el = document.querySelector(selector);
+      if (!el) return;
+      el.textContent = String(value);
+      el.classList.remove("skeleton");
+    }
+
+    function nextActionLabel(item) {
+      if (item.type === "rfq" && !item.award_id) return "Registrar decisao";
+      if (item.type === "rfq" && item.award_id && !item.award_purchase_order_id) return "Gerar ordem de compra";
+      if (item.type === "purchase_order" && item.status !== "erp_accepted") return "Enviar ao ERP";
+      return "Acompanhar";
+    }
+
+    function renderActions(item) {
+      if (item.type === "rfq") {
+        return `
+          <a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/cotacoes/${item.id}`)}">Abrir mesa</a>
+          <a class="btn btn-small" href="${withWorkspace(`/procurement/cotacoes/${item.id}`)}#comparacao">Comparar</a>
+        `;
+      }
+      if (item.type === "purchase_order") {
+        return `<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/purchase-orders/${item.id}`)}">Abrir OC</a>`;
+      }
+      return `<a class="btn btn-small btn-ghost" href="${withWorkspace("/procurement/inbox")}">Abrir inbox</a>`;
+    }
+
+    function renderQueue(items) {
+      if (!items.length) {
+        queueMeta.textContent = "Sem itens para aprovar";
+        queueBody.innerHTML = `
+          <tr>
+            <td colspan="7" class="empty-row">Nenhuma pendencia de aprovacao no momento</td>
+          </tr>
+        `;
+        return;
+      }
+
+      queueMeta.textContent = `${items.length} itens em fila`;
+      queueBody.innerHTML = items
+        .map(
+          (item) => `
+            <tr>
+              <td><strong>${escapeHtml(item.ref || "Sem referencia")}</strong></td>
+              <td>${escapeHtml(prettyType(item.type))}</td>
+              <td>${escapeHtml(prettyStatus(item.status))}</td>
+              <td>${escapeHtml(prettyPriority(item.priority))}</td>
+              <td>${escapeHtml(item.age_days ?? 0)}</td>
+              <td>${escapeHtml(nextActionLabel(item))}</td>
+              <td><div class="actions-cell">${renderActions(item)}</div></td>
+            </tr>
+          `
+        )
+        .join("");
+    }
+
+    async function loadApprovals() {
+      queueMeta.textContent = "Atualizando";
+      try {
+        const response = await fetch("/api/procurement/inbox?limit=120&offset=0");
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload?.message || payload?.error || "erro");
+        }
+
+        const allItems = payload.items || [];
+        const pendingDecision = allItems.filter((item) => item.type === "rfq" && !item.award_id);
+        const waitingPo = allItems.filter((item) => item.type === "rfq" && item.award_id && !item.award_purchase_order_id);
+        const pendingErp = allItems.filter((item) => item.type === "purchase_order" && item.status !== "erp_accepted");
+
+        updateKpi("[data-kpi='awaiting_decision']", pendingDecision.length);
+        updateKpi("[data-kpi='awarded_waiting_po']", waitingPo.length);
+        updateKpi("[data-kpi='awaiting_erp_push']", pendingErp.length);
+
+        const queue = [...pendingDecision, ...waitingPo, ...pendingErp].sort((a, b) => Number(b.age_days || 0) - Number(a.age_days || 0));
+        renderQueue(queue);
+      } catch (error) {
+        queueMeta.textContent = "Falha ao carregar";
+        queueBody.innerHTML = `
+          <tr>
+            <td colspan="7" class="empty-row">Nao foi possivel carregar a fila de aprovacao</td>
+          </tr>
+        `;
+        if (window.showToast) {
+          window.showToast("danger", "Falha ao carregar aprovacoes");
+        }
+      }
+    }
+
+    refreshBtn.addEventListener("click", loadApprovals);
+    loadApprovals();
+  </script>
+{% endblock %}

@@ -34,7 +34,7 @@
             <a href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Configuracoes</a>
           {% endif %}
           {% if ui_role == "approver" %}
-            <a href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Aprovacoes</a>
+            <a class="{% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>
           {% endif %}
         </nav>
       </aside>

@@ -101,6 +101,12 @@ def integration_logs_page():
     return render_template("procurement_integration_logs.html", tenant_id=tenant_id)
 
 
+@procurement_bp.route("/procurement/aprovacoes", methods=["GET"])
+def approvals_page():
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    return render_template("procurement_approvals.html", tenant_id=tenant_id)
+
+
 @procurement_bp.route("/api/procurement/inbox", methods=["GET"])
 def procurement_inbox():
     db = get_read_db()
