@@ -31,6 +31,45 @@
     </a>
   </section>
 
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Filtros rapidos</h2>
+      <span class="meta">Abrir inbox com contexto pronto</span>
+    </div>
+    <div class="grid grid-4">
+      <select class="select" id="quickType">
+        <option value="">Todos os tipos</option>
+        <option value="purchase_request">Solicitacao</option>
+        <option value="rfq">Cotacao</option>
+        <option value="purchase_order">Ordem de compra</option>
+      </select>
+      <select class="select" id="quickStatus">
+        <option value="">Todos os status</option>
+        <option value="pending_rfq">Pendente de cotacao</option>
+        <option value="in_rfq">Em cotacao</option>
+        <option value="open">Cotacao aberta</option>
+        <option value="collecting_quotes">Coletando propostas</option>
+        <option value="awarded">Com decisao</option>
+        <option value="draft">OC rascunho</option>
+        <option value="approved">OC aprovada</option>
+        <option value="sent_to_erp">OC enviada ao ERP</option>
+        <option value="erp_error">Falha no ERP</option>
+      </select>
+      <select class="select" id="quickPriority">
+        <option value="">Todas as prioridades</option>
+        <option value="urgent">Urgente</option>
+        <option value="high">Alta</option>
+        <option value="medium">Media</option>
+        <option value="low">Baixa</option>
+      </select>
+      <input class="input" id="quickSearch" placeholder="Referencia ou termo" />
+    </div>
+    <div class="page-actions" style="margin-top: 12px">
+      <button class="btn btn-primary" id="applyQuickFiltersBtn">Abrir inbox filtrada</button>
+      <button class="btn btn-ghost" id="clearQuickFiltersBtn">Limpar filtros</button>
+    </div>
+  </section>
+
   <section class="grid grid-2">
     <article class="card">
       <div class="card-header">
@@ -125,6 +164,12 @@
     const workspaceId = "{{ workspace_id }}";
     const pendingMeta = document.getElementById("pendingMeta");
     const pendingList = document.getElementById("pendingList");
+    const quickType = document.getElementById("quickType");
+    const quickStatus = document.getElementById("quickStatus");
+    const quickPriority = document.getElementById("quickPriority");
+    const quickSearch = document.getElementById("quickSearch");
+    const applyQuickFiltersBtn = document.getElementById("applyQuickFiltersBtn");
+    const clearQuickFiltersBtn = document.getElementById("clearQuickFiltersBtn");
 
     function withWorkspace(path) {
       const separator = path.includes("?") ? "&" : "?";
@@ -222,6 +267,37 @@
         }
       }
     }
+
+    function applyQuickFilters() {
+      const params = new URLSearchParams();
+      const type = (quickType.value || "").trim();
+      const status = (quickStatus.value || "").trim();
+      const priority = (quickPriority.value || "").trim();
+      const search = (quickSearch.value || "").trim();
+
+      if (type) params.set("type", type);
+      if (status) params.set("status", status);
+      if (priority) params.set("priority", priority);
+      if (search) params.set("search", search);
+      params.set("workspace_id", workspaceId);
+
+      window.location.href = `/procurement/inbox?${params.toString()}`;
+    }
+
+    function clearQuickFilters() {
+      quickType.value = "";
+      quickStatus.value = "";
+      quickPriority.value = "";
+      quickSearch.value = "";
+    }
+
+    applyQuickFiltersBtn.addEventListener("click", applyQuickFilters);
+    clearQuickFiltersBtn.addEventListener("click", clearQuickFilters);
+    quickSearch.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        applyQuickFilters();
+      }
+    });
 
     loadDashboardData();
   </script>
