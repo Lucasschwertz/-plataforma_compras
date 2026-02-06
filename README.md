@@ -2,6 +2,7 @@
 
 - SLA de Cotacao (RFQ) documentado em docs/domain/sla.md
 - Linguagem da interface documentada em docs/domain/linguagem.md
+- Modelo UX concorrente documentado em docs/procurement/06_competitor_mode_ux.md
 
 ## Banco de Dados (PostgreSQL)
 

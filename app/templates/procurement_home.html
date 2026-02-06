@@ -1,73 +1,83 @@
-﻿<!doctype html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Plataforma Compras</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
-  </head>
-  <body>
-    <main class="container">
-      <section class="header">
-        <div class="brand">
-          <a class="brand-link" href="/">
-            <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
-            <div class="brand-text">
-              <div class="brand-title">Plataforma Compras</div>
-              <div class="brand-tagline">Operacao + analise no mesmo lugar. Empresa #{{ tenant_id }}</div>
-            </div>
-          </a>
-        </div>
-        <div class="actions">
-          <a class="button primary" href="/procurement/inbox">Abrir Inbox</a>
-          <a class="button ghost" href="/procurement/integrations/logs">Ver Logs</a>
-          <a class="button ghost" href="/logout">Sair</a>
-        </div>
-      </section>
+﻿{% extends "_layout.html" %}
+{% set active_nav = "dashboard" %}
+{% block title %}Dashboard | Plataforma Compras{% endblock %}
+{% block page_title %}Dashboard de Compras{% endblock %}
+{% block breadcrumb_tail %} / Dashboard{% endblock %}
+{% block page_actions %}
+  <a class="btn btn-primary" href="/procurement/inbox">Abrir operacoes</a>
+  <a class="btn btn-ghost" href="/procurement/integrations/logs">Ver integracoes</a>
+{% endblock %}
+{% block content %}
+  <section class="grid grid-4">
+    <a class="kpi-card" href="/procurement/inbox?type=purchase_request">
+      <div class="kpi-label">Entrada</div>
+      <div class="kpi-value">SR</div>
+      <div class="meta">Solicitacoes em tratamento</div>
+    </a>
+    <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes">
+      <div class="kpi-label">Cotacao</div>
+      <div class="kpi-value">RF</div>
+      <div class="meta">Cotacoes ativas</div>
+    </a>
+    <a class="kpi-card" href="/procurement/inbox?type=rfq&awaiting_po=1">
+      <div class="kpi-label">Decisao</div>
+      <div class="kpi-value">AW</div>
+      <div class="meta">Decisoes pendentes de OC</div>
+    </a>
+    <a class="kpi-card" href="/procurement/inbox?type=purchase_order">
+      <div class="kpi-label">Operacao</div>
+      <div class="kpi-value">OC</div>
+      <div class="meta">Ordens e status ERP</div>
+    </a>
+  </section>
 
-      <section class="page-grid">
-        <article class="card">
-          <h3>Comecar por Categoria</h3>
-          <div class="list">
-            <a class="list-item" href="/procurement/inbox?type=purchase_request">
-              <div class="top">
-                <div class="title">Solicitacoes</div>
-                <div class="meta-line">Entrada</div>
-              </div>
-              <div class="meta-line">Veja tudo que ainda precisa virar cotacao.</div>
-            </a>
-            <a class="list-item" href="/procurement/inbox?type=rfq&status=open">
-              <div class="top">
-                <div class="title">Cotacoes abertas</div>
-                <div class="meta-line">Em andamento</div>
-              </div>
-              <div class="meta-line">Processos com cotacao em aberto e aguardando propostas.</div>
-            </a>
-            <a class="list-item" href="/procurement/inbox?type=rfq&status=awarded">
-              <div class="top">
-                <div class="title">Cotacoes com decisao</div>
-                <div class="meta-line">Decisao</div>
-              </div>
-              <div class="meta-line">Cotacoes aprovadas que podem gerar ordem de compra.</div>
-            </a>
-            <a class="list-item" href="/procurement/inbox?type=purchase_order&status=approved">
-              <div class="top">
-                <div class="title">Ordens aprovadas</div>
-                <div class="meta-line">Operacao</div>
-              </div>
-              <div class="meta-line">Ordens prontas para envio ao ERP.</div>
-            </a>
-            <a class="list-item" href="/procurement/inbox?type=purchase_order&status=erp_error">
-              <div class="top">
-                <div class="title">Erros no ERP</div>
-                <div class="meta-line">Atencao</div>
-              </div>
-              <div class="meta-line">Ordens com falha no envio e que precisam de correcao.</div>
-            </a>
-          </div>
-        </article>
+  <section class="grid grid-2">
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Ciclo de compras</h2>
+      </div>
+      <div class="list">
+        <a class="list-item" href="/procurement/inbox?type=purchase_request">
+          <div class="title">1. Capturar solicitacoes</div>
+          <div class="meta">Consolidar itens prontos para cotacao</div>
+        </a>
+        <a class="list-item" href="/procurement/inbox?type=rfq&status=open,collecting_quotes">
+          <div class="title">2. Executar cotacoes</div>
+          <div class="meta">Convidar fornecedores e registrar propostas</div>
+        </a>
+        <a class="list-item" href="/procurement/inbox?type=rfq&awaiting_po=1">
+          <div class="title">3. Registrar decisoes</div>
+          <div class="meta">Escolher fornecedor e justificar decisao</div>
+        </a>
+        <a class="list-item" href="/procurement/inbox?type=purchase_order">
+          <div class="title">4. Emitir e enviar OC</div>
+          <div class="meta">Concluir envio para o ERP e acompanhar retorno</div>
+        </a>
+      </div>
+    </article>
 
-      </section>
-    </main>
-  </body>
-</html>
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Modulos da plataforma</h2>
+      </div>
+      <div class="list">
+        <a class="list-item" href="/procurement/inbox">
+          <div class="title">Operacoes</div>
+          <div class="meta">Fila unica com filtros e proximas acoes</div>
+        </a>
+        <a class="list-item" href="/procurement/inbox?type=rfq">
+          <div class="title">Cotacoes e comparacao</div>
+          <div class="meta">Comparacao por item, fornecedor e SLA</div>
+        </a>
+        <a class="list-item" href="/procurement/inbox?type=rfq&awaiting_po=1">
+          <div class="title">Decisoes e OC</div>
+          <div class="meta">Fluxo de decisao manual e ordem de compra</div>
+        </a>
+        <a class="list-item" href="/procurement/integrations/logs">
+          <div class="title">Integracoes e auditoria</div>
+          <div class="meta">Execucoes, eventos e falhas de sincronizacao</div>
+        </a>
+      </div>
+    </article>
+  </section>
+{% endblock %}

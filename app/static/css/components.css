@@ -46,6 +46,16 @@
   gap: 6px;
 }
 
+.nav-section-title {
+  font-size: 10px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 8px;
+  margin-bottom: 2px;
+  padding: 0 6px;
+}
+
 .nav a {
   text-decoration: none;
   color: var(--text);
