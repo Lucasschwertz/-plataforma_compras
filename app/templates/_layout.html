@@ -12,6 +12,16 @@
   {% set workspace_id = workspace_id | default(tenant_id | default("default")) %}
   {% set workspace_name = workspace_name | default("Empresa " ~ workspace_id) %}
   {% set workspace_options = workspace_options | default([{"id": workspace_id, "name": workspace_name}]) %}
+  {% set default_breadcrumb_module =
+      "Dashboard" if active_nav == "dashboard"
+      else "Operacao" if active_nav == "procurement"
+      else "Cotacoes" if active_nav == "sourcing"
+      else "Aprovacoes" if active_nav == "approvals"
+      else "Analise" if active_nav == "governanca"
+      else "Plataforma" if active_nav == "integration"
+      else "Modulo"
+  %}
+  {% set breadcrumb_module = breadcrumb_module | default(default_breadcrumb_module) %}
   {% if ui_role == "admin" %}
     {% set role_label = "Administrador" %}
   {% elif ui_role == "approver" %}
@@ -70,6 +80,7 @@
             </div>
             <span class="badge">Papel {{ role_label }}</span>
             <span class="badge success" id="workspaceIndicator">Workspace ativo</span>
+            <span class="badge" id="workspaceSourceBadge">Origem em carregamento</span>
             <span class="badge">Tenant {{ workspace_id }}</span>
           </div>
           <div class="topbar-right">
@@ -104,6 +115,7 @@
             <div>
             <div class="breadcrumbs">
               <span class="crumb">Workspace {{ workspace_name }} ({{ workspace_id }})</span>
+              <span class="crumb-sep">/</span><span class="crumb">{{ breadcrumb_module }}</span>
               {% block breadcrumb_tail %}{% endblock %}
             </div>
             <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
@@ -156,6 +168,7 @@
         const workspaceFromUrl = params.get("workspace_id");
         const workspaceSelect = document.getElementById("workspaceSelect");
         const workspaceIndicator = document.getElementById("workspaceIndicator");
+        const workspaceSourceBadge = document.getElementById("workspaceSourceBadge");
         const globalSearchInput = document.getElementById("globalSearchInput");
         let activeWorkspace = workspaceFromUrl || (workspaceSelect ? workspaceSelect.value : null);
         const sidebarToggle = document.getElementById("sidebarToggle");
@@ -266,6 +279,9 @@
             const activeText = workspaceSelect.options[workspaceSelect.selectedIndex]?.textContent || workspaceSelect.value;
             workspaceIndicator.textContent = `Workspace ${activeText}`;
           }
+          if (workspaceSourceBadge) {
+            workspaceSourceBadge.textContent = workspaceFromUrl ? "Origem URL" : "Origem sessao";
+          }
           appendWorkspaceToLinks(workspaceSelect.value);
           bindWorkspaceRouteMemory(workspaceSelect.value);
           rememberWorkspaceRoute(workspaceSelect.value, window.location.href);
@@ -287,6 +303,9 @@
           appendWorkspaceToLinks(activeWorkspace);
           bindWorkspaceRouteMemory(activeWorkspace);
           rememberWorkspaceRoute(activeWorkspace, window.location.href);
+          if (workspaceSourceBadge) {
+            workspaceSourceBadge.textContent = workspaceFromUrl ? "Origem URL" : "Origem sessao";
+          }
         }
 
         if (globalSearchInput) {
