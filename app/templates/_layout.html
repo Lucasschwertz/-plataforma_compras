@@ -81,6 +81,18 @@
               placeholder="Buscar na operacao (/)"
               aria-label="Buscar na operacao"
             />
+            <div class="role-shortcuts" aria-label="Atalhos por papel">
+              {% if ui_role == "buyer" or ui_role == "manager" %}
+                <a class="btn btn-ghost btn-small" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
+                <a class="btn btn-ghost btn-small" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
+              {% endif %}
+              {% if ui_role == "approver" or ui_role == "manager" or ui_role == "admin" %}
+                <a class="btn btn-ghost btn-small" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>
+              {% endif %}
+              {% if ui_role == "admin" %}
+                <a class="btn btn-ghost btn-small" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Integracoes</a>
+              {% endif %}
+            </div>
             <button class="btn btn-ghost" id="themeToggle">Alternar tema</button>
             <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Logs</a>
             <a class="btn btn-ghost" href="/logout">Sair</a>

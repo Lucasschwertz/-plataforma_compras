@@ -52,16 +52,20 @@
       </div>
       <div class="workflow-tabs" id="workflowTabs">
         <a class="workflow-tab" data-step="requests" href="/procurement/inbox?type=purchase_request&status=pending_rfq&workspace_id={{ workspace_id }}">
-          1 Solicitacoes
+          <span class="workflow-tab-label">1 Solicitacoes</span>
+          <span class="workflow-tab-count" data-workflow-count="pending_rfq">0</span>
         </a>
         <a class="workflow-tab" data-step="quotes" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
-          2 Cotacao
+          <span class="workflow-tab-label">2 Cotacao</span>
+          <span class="workflow-tab-count" data-workflow-count="awaiting_quotes">0</span>
         </a>
         <a class="workflow-tab" data-step="award" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
-          3 Decisao
+          <span class="workflow-tab-label">3 Decisao</span>
+          <span class="workflow-tab-count" data-workflow-count="awarded_waiting_po">0</span>
         </a>
         <a class="workflow-tab" data-step="po" href="/procurement/inbox?type=purchase_order&status=draft,approved,sent_to_erp,erp_error&workspace_id={{ workspace_id }}">
-          4 Ordem de compra
+          <span class="workflow-tab-label">4 Ordem de compra</span>
+          <span class="workflow-tab-count" data-workflow-count="awaiting_erp_push">0</span>
         </a>
       </div>
     </div>
@@ -154,6 +158,16 @@
         <div>
           <label class="meta" for="awardReasonInput">Motivo</label>
           <textarea class="textarea" id="awardReasonInput" required></textarea>
+        </div>
+        <div>
+          <label class="meta" for="awardReasonCategorySelect">Foco da decisao</label>
+          <select class="select" id="awardReasonCategorySelect">
+            <option value="balanced">Equilibrio geral</option>
+            <option value="cost">Custo total</option>
+            <option value="lead_time">Prazo de entrega</option>
+            <option value="coverage">Cobertura de itens</option>
+            <option value="risk">Risco operacional</option>
+          </select>
         </div>
         <div>
           <label class="meta" for="awardReasonPresetSelect">Motivo sugerido por papel</label>
@@ -288,6 +302,7 @@
       const awardReasonInput = document.getElementById("awardReasonInput");
       const awardSubmitBtn = document.getElementById("awardSubmitBtn");
       const awardMeta = document.getElementById("awardMeta");
+      const awardReasonCategorySelect = document.getElementById("awardReasonCategorySelect");
       const awardReasonPresetSelect = document.getElementById("awardReasonPresetSelect");
       const awardModalMatrix = document.getElementById("awardModalMatrix");
       const awardModalMatrixSummary = document.getElementById("awardModalMatrixSummary");
@@ -542,6 +557,8 @@
         for (const [key, value] of Object.entries(kpis)) {
           const el = document.querySelector(`[data-kpi="${key}"]`);
           if (el) el.textContent = value;
+          const workflowEl = document.querySelector(`[data-workflow-count="${key}"]`);
+          if (workflowEl) workflowEl.textContent = value;
         }
       }
 
@@ -701,9 +718,13 @@
         awardRfqIdInput.value = String(rfqId);
         awardSupplierInput.value = "";
         awardReasonInput.value = "";
+        if (awardReasonCategorySelect) {
+          awardReasonCategorySelect.value = "balanced";
+        }
         if (awardReasonPresetSelect) {
           awardReasonPresetSelect.value = "";
         }
+        fillAwardReasonPresetOptions();
         state.currentAwardSuggestion = null;
         if (awardModalMatrix) {
           awardModalMatrix.hidden = true;
@@ -733,6 +754,10 @@
               awardSupplierInput.value = suggestion.name;
               awardReasonInput.value = `Menor total, ${suggestion.reason}`;
               awardMeta.innerHTML += `<span class="pill">Recomendacao ${escapeHtml(suggestion.name)}</span>`;
+              if (awardReasonCategorySelect) {
+                awardReasonCategorySelect.value = detectAwardReasonCategory(suggestion);
+                fillAwardReasonPresetOptions();
+              }
             }
             renderAwardModalMatrix(data.items || []);
           }
@@ -901,6 +926,11 @@
       seedBtn.addEventListener("click", seedData);
       createRfqBtn.addEventListener("click", () => openRfqModal());
       fillAwardReasonPresetOptions();
+      if (awardReasonCategorySelect) {
+        awardReasonCategorySelect.addEventListener("change", () => {
+          fillAwardReasonPresetOptions();
+        });
+      }
       if (awardReasonPresetSelect) {
         awardReasonPresetSelect.addEventListener("change", () => {
           const selected = (awardReasonPresetSelect.value || "").trim();
@@ -956,35 +986,136 @@
         return type || "Nao informado";
       }
 
-      function getReasonPresetsByRole(role) {
-        const map = {
-          buyer: [
-            "Menor custo total para os itens cotados",
-            "Melhor equilibrio entre custo e prazo de entrega",
-            "Fornecedor com melhor cobertura dos itens cotados",
-          ],
-          manager: [
-            "Melhor equilibrio entre custo, prazo e cobertura",
-            "Risco operacional reduzido para o ciclo atual",
-            "Decisao alinhada com prioridade de negocio",
-          ],
-          approver: [
-            "Decisao em conformidade com a politica de compras",
-            "Justificativa validada com base na comparacao",
-            "Risco e custo aprovados para emissao de ordem",
-          ],
-          admin: [
-            "Decisao homologada para continuidade do fluxo",
-            "Conducao validada com trilha operacional",
-            "Aprovacao registrada com foco em risco e prazo",
-          ],
+      function detectAwardReasonCategory(suggestion) {
+        const reason = (suggestion?.reason || "").toLowerCase();
+        if (reason.includes("prazo")) return "lead_time";
+        if (reason.includes("cobertura")) return "coverage";
+        if (reason.includes("risco")) return "risk";
+        if (reason.includes("total") || reason.includes("custo")) return "cost";
+        return "balanced";
+      }
+
+      function getReasonPresetsByRole(role, category) {
+        const byCategory = {
+          balanced: {
+            buyer: [
+              "Melhor equilibrio entre custo e prazo de entrega",
+              "Fornecedor com melhor cobertura dos itens cotados",
+              "Decisao orientada pelo comparativo consolidado",
+            ],
+            manager: [
+              "Melhor equilibrio entre custo, prazo e cobertura",
+              "Decisao alinhada com prioridade de negocio",
+              "Risco operacional reduzido para o ciclo atual",
+            ],
+            approver: [
+              "Justificativa validada com base na comparacao",
+              "Decisao em conformidade com a politica de compras",
+              "Risco e custo aprovados para emissao de ordem",
+            ],
+            admin: [
+              "Conducao validada com trilha operacional",
+              "Decisao homologada para continuidade do fluxo",
+              "Aprovacao registrada com foco em risco e prazo",
+            ],
+          },
+          cost: {
+            buyer: [
+              "Menor custo total para os itens cotados",
+              "Melhor custo consolidado com cobertura suficiente",
+              "Economia validada frente as demais propostas",
+            ],
+            manager: [
+              "Decisao por custo total com risco controlado",
+              "Melhor retorno financeiro para o ciclo atual",
+              "Economia consolidada com cobertura adequada",
+            ],
+            approver: [
+              "Custo validado com base no comparativo oficial",
+              "Decisao aprovada por menor impacto financeiro",
+              "Escolha aderente ao criterio de menor custo",
+            ],
+            admin: [
+              "Registro homologado por criterio financeiro",
+              "Escolha validada por custo total e governanca",
+              "Aprovacao final orientada por economia",
+            ],
+          },
+          lead_time: {
+            buyer: [
+              "Melhor prazo de entrega para itens criticos",
+              "Lead time reduzido para atender necessidade",
+              "Prazo priorizado para continuidade operacional",
+            ],
+            manager: [
+              "Prazo priorizado para reduzir risco de parada",
+              "Decisao orientada por tempo de atendimento",
+              "Lead time alinhado com prioridade de negocio",
+            ],
+            approver: [
+              "Prazo validado para atender necessidade operacional",
+              "Decisao aprovada por risco de atraso reduzido",
+              "Lead time em conformidade com a urgencia",
+            ],
+            admin: [
+              "Escolha homologada por prazo critico",
+              "Decisao final orientada por lead time",
+              "Registro aprovado para acelerar atendimento",
+            ],
+          },
+          coverage: {
+            buyer: [
+              "Fornecedor com maior cobertura dos itens cotados",
+              "Cobertura priorizada para reduzir fragmentacao",
+              "Escolha orientada por abrangencia da proposta",
+            ],
+            manager: [
+              "Cobertura consolidada para simplificar operacao",
+              "Decisao por maior abrangencia com custo viavel",
+              "Fornecedor com melhor aderencia ao escopo",
+            ],
+            approver: [
+              "Cobertura validada para continuidade do fluxo",
+              "Aprovacao com foco em abrangencia de atendimento",
+              "Decisao conforme escopo total da cotacao",
+            ],
+            admin: [
+              "Homologacao por cobertura e conformidade",
+              "Registro final por maior aderencia ao escopo",
+              "Escolha aprovada para reduzir gaps operacionais",
+            ],
+          },
+          risk: {
+            buyer: [
+              "Menor risco operacional considerando historico",
+              "Escolha com menor exposicao a atraso",
+              "Fornecedor com resposta mais confiavel",
+            ],
+            manager: [
+              "Risco operacional reduzido para o ciclo atual",
+              "Decisao com foco em continuidade e previsibilidade",
+              "Escolha orientada por menor risco de ruptura",
+            ],
+            approver: [
+              "Risco avaliado e aprovado para emissao de ordem",
+              "Decisao em conformidade com diretriz de risco",
+              "Aprovacao registrada por menor exposicao",
+            ],
+            admin: [
+              "Homologacao por criterio de risco e controle",
+              "Registro final com foco em estabilidade operacional",
+              "Escolha aprovada por menor criticidade",
+            ],
+          },
         };
-        return map[role] || map.buyer;
+        const rolePresets = byCategory[category]?.[role] || byCategory[category]?.buyer;
+        return rolePresets || byCategory.balanced.buyer;
       }
 
       function fillAwardReasonPresetOptions() {
         if (!awardReasonPresetSelect) return;
-        const presets = getReasonPresetsByRole(currentRole);
+        const selectedCategory = (awardReasonCategorySelect?.value || "balanced").trim();
+        const presets = getReasonPresetsByRole(currentRole, selectedCategory);
         awardReasonPresetSelect.innerHTML = `
           <option value="">Selecionar motivo rapido</option>
           ${presets.map((reason) => `<option value="${escapeHtml(reason)}">${escapeHtml(reason)}</option>`).join("")}

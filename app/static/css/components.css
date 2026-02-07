@@ -109,6 +109,12 @@
   gap: var(--space-3);
 }
 
+.role-shortcuts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .topbar-search {
   min-width: 260px;
 }
@@ -189,7 +195,32 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.35px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   transition: border-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+
+.workflow-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-tab-count {
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--text);
 }
 
 .workflow-tab:hover {
@@ -201,6 +232,10 @@
   color: var(--text);
   border-color: rgba(76, 111, 255, 0.45);
   box-shadow: var(--shadow-1);
+}
+
+.workflow-tab.active .workflow-tab-count {
+  border-color: rgba(76, 111, 255, 0.45);
 }
 
 .card {
@@ -1016,6 +1051,13 @@ tr.best-overall td {
     flex-wrap: wrap;
   }
 
+  .role-shortcuts {
+    width: 100%;
+    order: 2;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
   .topbar-search {
     min-width: 0;
     flex: 1 1 220px;
@@ -1059,6 +1101,10 @@ tr.best-overall td {
 
   .workflow-tabs {
     grid-template-columns: 1fr;
+  }
+
+  .workflow-tab {
+    padding: 9px 10px;
   }
 
   .modal-panel {
