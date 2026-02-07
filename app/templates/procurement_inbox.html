@@ -3,7 +3,10 @@
 {% set active_nav = "procurement" %}
 {% block title %}Inbox | Plataforma Compras{% endblock %}
 {% block page_title %}Inbox de operacoes{% endblock %}
-{% block breadcrumb_tail %} / Operacao / Inbox de compras{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb">Operacao</span>
+  <span class="crumb-sep">/</span><span class="crumb current">Inbox de compras</span>
+{% endblock %}
 {% block page_actions %}
   <button class="btn" id="refreshBtn">Atualizar</button>
   <button class="btn" id="seedBtn">Popular dados</button>

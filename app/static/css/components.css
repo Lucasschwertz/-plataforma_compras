@@ -141,6 +141,20 @@
   gap: 6px;
 }
 
+.crumb {
+  color: var(--muted);
+}
+
+.crumb.current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.crumb-sep {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
 .page-title {
   margin: 4px 0 0;
   font-size: 26px;

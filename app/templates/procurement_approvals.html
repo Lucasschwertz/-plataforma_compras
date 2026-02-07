@@ -2,7 +2,10 @@
 {% set active_nav = "approvals" %}
 {% block title %}Aprovacoes | Plataforma Compras{% endblock %}
 {% block page_title %}Aprovacoes de cotacao{% endblock %}
-{% block breadcrumb_tail %} / Cotacoes / Aprovacoes{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb">Cotacoes</span>
+  <span class="crumb-sep">/</span><span class="crumb current">Aprovacoes</span>
+{% endblock %}
 {% block page_actions %}
   <button class="btn" id="refreshBtn">Atualizar</button>
   <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir modulo de cotacoes</a>

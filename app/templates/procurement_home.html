@@ -3,7 +3,9 @@
 {% set ui_role = role | default("buyer") %}
 {% block title %}Dashboard | Plataforma Compras{% endblock %}
 {% block page_title %}{% if ui_role == "approver" %}Painel de aprovacoes{% elif ui_role == "admin" %}Painel administrativo{% else %}Dashboard de compras{% endif %}{% endblock %}
-{% block breadcrumb_tail %} / Painel{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb current">Painel</span>
+{% endblock %}
 {% block page_actions %}
   {% if ui_role == "approver" %}
     <a class="btn btn-primary" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Abrir aprovacoes</a>

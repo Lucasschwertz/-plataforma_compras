@@ -3,7 +3,10 @@
 {% set active_nav = "procurement" %}
 {% block title %}OC {{ purchase_order_id }} | Plataforma Compras{% endblock %}
 {% block page_title %}Ordem de compra{% endblock %}
-{% block breadcrumb_tail %} / Operacao / Ordem de compra {{ purchase_order_id }}{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb">Operacao</span>
+  <span class="crumb-sep">/</span><span class="crumb current">Ordem de compra {{ purchase_order_id }}</span>
+{% endblock %}
 {% block page_actions %}
   <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Voltar para inbox operacional</a>
   <button class="btn btn-primary" id="pushErpBtn">Enviar ao ERP</button>
