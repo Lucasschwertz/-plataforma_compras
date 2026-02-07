@@ -49,19 +49,19 @@
   };
 
   function prettyStatus(value) {
-    return STATUS_LABELS[value] || value || "n/a";
+    return STATUS_LABELS[value] || value || "Nao informado";
   }
 
   function prettyEntity(value) {
-    return ENTITY_LABELS[value] || value || "n/a";
+    return ENTITY_LABELS[value] || value || "Nao informado";
   }
 
   function prettyScope(value) {
-    return SCOPE_LABELS[value] || value || "n/a";
+    return SCOPE_LABELS[value] || value || "Nao informado";
   }
 
   function prettyType(value) {
-    return TYPE_LABELS[value] || value || "n/a";
+    return TYPE_LABELS[value] || value || "Nao informado";
   }
 
   window.UiLabels = {

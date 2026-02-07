@@ -25,7 +25,7 @@
         <nav class="nav">
           <div class="nav-section-title">Operacao</div>
           <a class="{% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Painel</a>
-          <a class="{% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox operacional</a>
+          <a class="{% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
           <a class="{% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
           {% if ui_role == "approver" or ui_role == "admin" %}
             <a class="{% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>

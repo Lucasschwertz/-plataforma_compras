@@ -7,8 +7,8 @@
   <span class="crumb-sep">/</span><span class="crumb current">Aprovacoes</span>
 {% endblock %}
 {% block page_actions %}
-  <button class="btn" id="refreshBtn">Atualizar</button>
-  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir modulo de cotacoes</a>
+  <button class="btn" id="refreshBtn">Atualizar dados</button>
+  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
 {% endblock %}
 
 {% block content %}
@@ -81,7 +81,7 @@
     }
 
     function escapeHtml(value) {
-      return String(value ?? "n/a")
+      return String(value ?? "Nao informado")
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
@@ -100,11 +100,11 @@
       if (window.UiLabels && window.UiLabels.prettyStatus) {
         return window.UiLabels.prettyStatus(status);
       }
-      return status || "n/a";
+      return status || "Nao informado";
     }
 
     function prettyPriority(priority) {
-      if (!priority) return "n/a";
+      if (!priority) return "Nao informado";
       return String(priority).toUpperCase();
     }
 

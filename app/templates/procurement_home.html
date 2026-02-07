@@ -11,10 +11,10 @@
     <a class="btn btn-primary" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Abrir aprovacoes</a>
     <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
   {% elif ui_role == "admin" %}
-    <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir operacao</a>
+    <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir inbox</a>
     <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Abrir integracoes</a>
   {% else %}
-    <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir operacao</a>
+    <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir inbox</a>
     <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
   {% endif %}
 {% endblock %}
@@ -250,11 +250,11 @@
       if (window.UiLabels && window.UiLabels.prettyStatus) {
         return window.UiLabels.prettyStatus(status);
       }
-      return status || "n/a";
+      return status || "Nao informado";
     }
 
     function escapeHtml(value) {
-      return String(value ?? "n/a")
+      return String(value ?? "Nao informado")
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
@@ -311,10 +311,10 @@
               <div class="title">${escapeHtml(item.ref || "Sem referencia")} | ${escapeHtml(prettyType(item.type))}</div>
               <div class="chip-row">
                 <span class="pill">${escapeHtml(prettyStatus(item.status))}</span>
-                <span class="pill">Prioridade ${escapeHtml(item.priority || "n/a")}</span>
+                <span class="pill">Prioridade ${escapeHtml(item.priority || "Nao informado")}</span>
                 <span class="pill">Idade ${escapeHtml(item.age_days ?? 0)}d</span>
               </div>
-              <div class="meta">Atualizado em ${escapeHtml(item.updated_at || "n/a")}</div>
+              <div class="meta">Atualizado em ${escapeHtml(item.updated_at || "Nao informado")}</div>
             </a>
           `
         )

@@ -7,7 +7,7 @@
   <span class="crumb-sep">/</span><span class="crumb current">Integracoes e trilha</span>
 {% endblock %}
 {% block page_actions %}
-  <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Voltar para inbox operacional</a>
+  <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Voltar para inbox</a>
 {% endblock %}
 
 {% block content %}
@@ -66,7 +66,7 @@
     </article>
     <article class="ops-metric">
       <div class="label">Ultimo status</div>
-      <div class="value" id="metricLastStatus">n/a</div>
+      <div class="value" id="metricLastStatus">Nao informado</div>
     </article>
   </section>
 
@@ -114,7 +114,7 @@
     };
 
     function escapeHtml(value) {
-      return String(value ?? "-")
+      return String(value ?? "Nao informado")
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
@@ -126,7 +126,7 @@
       if (window.UiLabels && window.UiLabels.prettyStatus) {
         return window.UiLabels.prettyStatus(status);
       }
-      return status || "-";
+      return status || "Nao informado";
     }
 
     function prettyScope(scope) {
@@ -134,7 +134,7 @@
       if (window.UiLabels && window.UiLabels.prettyScope) {
         return window.UiLabels.prettyScope(normalizedScope);
       }
-      return scope || "-";
+      return scope || "Nao informado";
     }
 
     function statusTone(status) {
@@ -239,7 +239,7 @@
       metricRuns.textContent = String(runItems.length);
       metricFailures.textContent = String(failures);
       metricEvents.textContent = String(eventItems.length);
-      metricLastStatus.textContent = runItems.length ? prettyStatus(runItems[0].status) : "n/a";
+      metricLastStatus.textContent = runItems.length ? prettyStatus(runItems[0].status) : "Nao informado";
     }
 
     async function loadLogs() {

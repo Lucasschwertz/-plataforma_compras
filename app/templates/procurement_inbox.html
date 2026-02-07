@@ -2,13 +2,13 @@
 {% extends "_layout.html" %}
 {% set active_nav = "procurement" %}
 {% block title %}Inbox | Plataforma Compras{% endblock %}
-{% block page_title %}Inbox de operacoes{% endblock %}
+{% block page_title %}Inbox de compras{% endblock %}
 {% block breadcrumb_tail %}
   <span class="crumb-sep">/</span><span class="crumb">Operacao</span>
   <span class="crumb-sep">/</span><span class="crumb current">Inbox de compras</span>
 {% endblock %}
 {% block page_actions %}
-  <button class="btn" id="refreshBtn">Atualizar</button>
+  <button class="btn" id="refreshBtn">Atualizar dados</button>
   <button class="btn" id="seedBtn">Popular dados</button>
   <button class="btn btn-primary" id="createRfqBtn">Nova cotacao</button>
 {% endblock %}
@@ -342,8 +342,8 @@
           .map((item) => {
             const ref = item.number || `SR ${item.purchase_request_id}`;
             const meta = [
-              item.department || "n/a",
-              item.requested_by || "n/a",
+              item.department || "Nao informado",
+              item.requested_by || "Nao informado",
               item.needed_at ? `necessidade ${item.needed_at}` : "sem data",
               item.priority ? `prioridade ${item.priority}` : null,
             ]
@@ -360,7 +360,7 @@
                   <div class="title">${escapeHtml(ref)} • ${escapeHtml(item.description || "Item")}</div>
                   <div class="meta">${escapeHtml(meta)}</div>
                   <div class="meta">
-                    qtd ${escapeHtml(item.quantity || "n/a")} ${escapeHtml(item.uom || "")} ${
+                    qtd ${escapeHtml(item.quantity || "Nao informado")} ${escapeHtml(item.uom || "")} ${
                   item.line_no ? `linha ${item.line_no}` : ""
                 }
                   </div>
@@ -473,12 +473,12 @@
             return `
               <tr>
                 <td class="type-label" data-label="Tipo">${prettyType(item.type)}</td>
-                <td data-label="Referencia"><strong>${escapeHtml(item.ref || "n/a")}</strong></td>
-                <td class="status" data-label="Status">${escapeHtml(prettyStatus(item.status || "n/a"))}</td>
+                <td data-label="Referencia"><strong>${escapeHtml(item.ref || "Nao informado")}</strong></td>
+                <td class="status" data-label="Status">${escapeHtml(prettyStatus(item.status || "Nao informado"))}</td>
                 <td data-label="Prioridade">${renderPriority(item.priority)}</td>
-                <td data-label="Necessidade">${escapeHtml(item.needed_at || "n/a")}</td>
+                <td data-label="Necessidade">${escapeHtml(item.needed_at || "Nao informado")}</td>
                 <td class="numeric" data-label="Idade em dias">${item.age_days ?? 0}</td>
-                <td class="muted" data-label="Atualizado">${escapeHtml(item.updated_at || "n/a")}</td>
+                <td class="muted" data-label="Atualizado">${escapeHtml(item.updated_at || "Nao informado")}</td>
                 <td data-label="Meta">${meta}</td>
                 <td class="cell-actions" data-label="Acoes">${actions}</td>
               </tr>
@@ -505,7 +505,7 @@
         if (item.type === "purchase_order" && item.status === "erp_accepted") {
           pills.push('<span class="pill">ERP aceito</span>');
         }
-        return pills.length ? `<div class="meta">${pills.join("")}</div>` : "n/a";
+        return pills.length ? `<div class="meta">${pills.join("")}</div>` : "Nao informado";
       }
 
       function renderActions(item) {
@@ -549,7 +549,7 @@
           }
         }
         if (!actions.length) {
-          actions.push(`<span class="meta">n/a</span>`);
+          actions.push(`<span class="meta">Nao informado</span>`);
         }
         return `<div class="actions-cell">${actions.join("")}</div>`;
       }
@@ -808,7 +808,7 @@
       });
 
       function renderPriority(priority) {
-        if (!priority) return "n/a";
+        if (!priority) return "Nao informado";
         const cls = `badge prio-${priority}`;
         return `<span class="${cls}">${priority}</span>`;
       }
@@ -817,13 +817,13 @@
         if (window.UiLabels && window.UiLabels.prettyStatus) {
           return window.UiLabels.prettyStatus(status);
         }
-        return status || "n/a";
+        return status || "Nao informado";
       }
       function prettyType(type) {
         if (window.UiLabels && window.UiLabels.prettyType) {
           return window.UiLabels.prettyType(type);
         }
-        return type || "n/a";
+        return type || "Nao informado";
       }
 
       function getSuggestedSupplierFromComparison(data) {

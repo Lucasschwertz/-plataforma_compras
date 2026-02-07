@@ -28,7 +28,7 @@
     <article class="card">
       <div class="card-header">
         <h2 class="card-title">Contexto da cotacao</h2>
-        <button class="btn btn-ghost btn-small" id="atualizarBtn">Atualizar</button>
+        <button class="btn btn-ghost btn-small" id="atualizarBtn">Atualizar dados</button>
       </div>
       <div class="stack" id="cotacaoResumo"></div>
     </article>
@@ -100,22 +100,22 @@
       <div class="grid grid-4" id="comparacaoExecutivaCards">
         <article class="insight-card">
           <div class="insight-label">Fornecedor recomendado</div>
-          <div class="insight-value" id="execFornecedor">n/a</div>
+          <div class="insight-value" id="execFornecedor">Nao informado</div>
           <div class="insight-meta" id="execFornecedorMeta">Sem dados</div>
         </article>
         <article class="insight-card">
           <div class="insight-label">Total recomendado</div>
-          <div class="insight-value" id="execTotal">n/a</div>
+          <div class="insight-value" id="execTotal">Nao informado</div>
           <div class="insight-meta">Comparativo consolidado</div>
         </article>
         <article class="insight-card">
           <div class="insight-label">Economia potencial</div>
-          <div class="insight-value" id="execEconomia">n/a</div>
+          <div class="insight-value" id="execEconomia">Nao informado</div>
           <div class="insight-meta">Vs fornecedor mais caro</div>
         </article>
         <article class="insight-card">
           <div class="insight-label">Risco de decisao</div>
-          <div class="insight-value" id="execRisco">n/a</div>
+          <div class="insight-value" id="execRisco">Nao informado</div>
           <div class="insight-meta" id="execRiscoMeta">Sem dados de risco</div>
         </article>
       </div>
@@ -253,7 +253,7 @@
       };
 
       function escapeHtml(value) {
-        return String(value ?? "n/a")
+        return String(value ?? "Nao informado")
           .replaceAll("&", "&amp;")
           .replaceAll("<", "&lt;")
           .replaceAll(">", "&gt;")
@@ -265,7 +265,7 @@
         if (window.UiLabels && window.UiLabels.prettyStatus) {
           return window.UiLabels.prettyStatus(status);
         }
-        return status || "n/a";
+        return status || "Nao informado";
       }
 
       function renderKv(target, rows) {
@@ -298,7 +298,7 @@
               <div class="list-item">
                 <div class="meta">${escapeHtml(prettyStatus(e.to_status))}</div>
                 <div>${escapeHtml(e.occurred_at)}</div>
-                <div class="meta">de ${escapeHtml(e.from_status || "n/a")}, motivo ${escapeHtml(e.reason || "n/a")}</div>
+                <div class="meta">de ${escapeHtml(e.from_status || "Nao informado")}, motivo ${escapeHtml(e.reason || "Nao informado")}</div>
               </div>
             `
           )
@@ -307,13 +307,13 @@
 
       function formatMelhorProposta(melhor) {
         if (!melhor) return "Sem proposta";
-        const preco = melhor.unit_price != null ? `R$ ${Number(melhor.unit_price).toFixed(2)}` : "n/a";
-        const prazo = melhor.lead_time_days != null ? `${melhor.lead_time_days} dias` : "n/a";
+        const preco = melhor.unit_price != null ? `R$ ${Number(melhor.unit_price).toFixed(2)}` : "Nao informado";
+        const prazo = melhor.lead_time_days != null ? `${melhor.lead_time_days} dias` : "Nao informado";
         return `${melhor.supplier_name} | ${preco} | ${prazo}`;
       }
 
       function formatCurrency(value) {
-        if (value == null || Number.isNaN(Number(value))) return "n/a";
+        if (value == null || Number.isNaN(Number(value))) return "Nao informado";
         return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
       }
 
@@ -347,11 +347,11 @@
 
       function renderExecutiveSummary(summary, totals, suggestedSupplierId) {
         if (!totals.length) {
-          execFornecedor.textContent = "n/a";
+          execFornecedor.textContent = "Nao informado";
           execFornecedorMeta.textContent = "Sem dados de fornecedores";
-          execTotal.textContent = "n/a";
-          execEconomia.textContent = "n/a";
-          execRisco.textContent = "n/a";
+          execTotal.textContent = "Nao informado";
+          execEconomia.textContent = "Nao informado";
+          execRisco.textContent = "Nao informado";
           execRiscoMeta.textContent = "Sem dados de risco";
           execRanking.innerHTML = "";
           return;
@@ -380,10 +380,10 @@
         const maxTotal = sortedByTotal.length ? Number(sortedByTotal[sortedByTotal.length - 1].totalNumeric) : null;
         const economia = maxTotal != null && recommendedTotal != null ? maxTotal - recommendedTotal : null;
 
-        execFornecedor.textContent = recommended?.supplier_name || `Fornecedor ${recommended?.supplier_id || "n/a"}`;
+        execFornecedor.textContent = recommended?.supplier_name || `Fornecedor ${recommended?.supplier_id || "Nao informado"}`;
         execFornecedorMeta.textContent = `Cobertura ${recommended?.items_quoted || 0}/${recommended?.items_total || 0}`;
         execTotal.textContent = formatCurrency(recommendedTotal);
-        execEconomia.textContent = economia != null && economia > 0 ? formatCurrency(economia) : "n/a";
+        execEconomia.textContent = economia != null && economia > 0 ? formatCurrency(economia) : "Nao informado";
 
         let riskScore = 0;
         const slaRisk = Boolean(summary?.sla?.sla_risk);
@@ -484,7 +484,7 @@
           const suggestedSupplier = totals.find((t) => t.supplier_id === suggestedSupplierId);
           const suggestedName = suggestedSupplier?.supplier_name
             ? suggestedSupplier.supplier_name
-            : `fornecedor ${suggestedSupplierId || "n/a"}`;
+            : `fornecedor ${suggestedSupplierId || "Nao informado"}`;
           suggestionLabel = `Recomendacao ${suggestedName}, ${suggestionReason}.`;
         } else if (totals.length) {
           suggestionLabel = "Sem recomendacao geral, cobertura incompleta.";
@@ -506,8 +506,8 @@
           comparacaoTabela.innerHTML = totals
             .map((t) => {
               const destaque =
-                t.supplier_id === suggestedSupplierId ? '<span class="pill success">Melhor opcao geral</span>' : "n/a";
-              const prazoMedio = t.avg_lead_time_days != null ? `${t.avg_lead_time_days.toFixed(1)} dias` : "n/a";
+                t.supplier_id === suggestedSupplierId ? '<span class="pill success">Melhor opcao geral</span>' : "Nao informado";
+              const prazoMedio = t.avg_lead_time_days != null ? `${t.avg_lead_time_days.toFixed(1)} dias` : "Nao informado";
               const prazoPior = t.max_lead_time_days != null ? `pior ${t.max_lead_time_days}d` : "";
               const cobertura = `${t.items_quoted}/${t.items_total}`;
               const flags = [];
@@ -556,9 +556,9 @@
             const lines = quotes
               .map((q) => {
                 const classes = ["list-item"];
-                const price = q.unit_price != null ? formatCurrency(q.unit_price) : "n/a";
-                const total = q.item_total != null ? formatCurrency(q.item_total) : "n/a";
-                const prazo = q.lead_time_days != null ? `${q.lead_time_days} dias` : "n/a";
+                const price = q.unit_price != null ? formatCurrency(q.unit_price) : "Nao informado";
+                const total = q.item_total != null ? formatCurrency(q.item_total) : "Nao informado";
+                const prazo = q.lead_time_days != null ? `${q.lead_time_days} dias` : "Nao informado";
                 const badges = [];
                 if (q.best_price) badges.push("menor preco");
                 if (q.best_lead_time) badges.push("menor prazo");
@@ -578,7 +578,7 @@
             return `
               <div class="list-item">
                 <div class="meta">${escapeHtml(item.description || "Item")}</div>
-                <div class="meta">Sugestao ${escapeHtml(item.suggestion_reason || "n/a")}</div>
+                <div class="meta">Sugestao ${escapeHtml(item.suggestion_reason || "Nao informado")}</div>
                 <div class="list">${lines}</div>
               </div>
             `;
@@ -605,7 +605,7 @@
               ? fornecedores
                   .map((f) => {
                     const preco = f.unit_price != null ? `R$ ${Number(f.unit_price).toFixed(2)}` : "sem preco";
-                    const prazo = f.lead_time_days != null ? `${f.lead_time_days}d` : "n/a";
+                    const prazo = f.lead_time_days != null ? `${f.lead_time_days}d` : "Nao informado";
                     return `${f.supplier_name} (${preco}, ${prazo})`;
                   })
                   .join(" | ")
@@ -772,8 +772,8 @@
         renderKv(ocResumo, [
           ["Numero", oc.numero || `OC ${oc.id}`],
           ["Status", prettyStatus(oc.status)],
-          ["Fornecedor", oc.fornecedor || "n/a"],
-          ["ID externo", oc.external_id || "n/a"],
+          ["Fornecedor", oc.fornecedor || "Nao informado"],
+          ["ID externo", oc.external_id || "Nao informado"],
         ]);
 
         ocBadge.textContent = prettyStatus(oc.status);
@@ -849,9 +849,9 @@
 
         renderKv(decisaoResumo, [
           ["Status", prettyStatus(decisao.status)],
-          ["Fornecedor", decisao.fornecedor || "n/a"],
-          ["Motivo", decisao.motivo || "n/a"],
-          ["OC", decisao.purchase_order_id || (oc ? oc.id : "n/a")],
+          ["Fornecedor", decisao.fornecedor || "Nao informado"],
+          ["Motivo", decisao.motivo || "Nao informado"],
+          ["OC", decisao.purchase_order_id || (oc ? oc.id : "Nao informado")],
         ]);
 
         decisaoBadge.textContent = prettyStatus(decisao.status);
@@ -873,10 +873,10 @@
 
       function renderCotacao(cotacao) {
         renderKv(cotacaoResumo, [
-          ["Titulo", cotacao.titulo || "n/a"],
+          ["Titulo", cotacao.titulo || "Nao informado"],
           ["Status", prettyStatus(cotacao.status)],
-          ["Criada em", cotacao.criada_em || "n/a"],
-          ["Atualizada em", cotacao.atualizada_em || "n/a"],
+          ["Criada em", cotacao.criada_em || "Nao informado"],
+          ["Atualizada em", cotacao.atualizada_em || "Nao informado"],
         ]);
       }
 
@@ -1065,3 +1065,4 @@
       carregar();
     </script>
 {% endblock %}
+
