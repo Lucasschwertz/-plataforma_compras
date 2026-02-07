@@ -8,11 +8,11 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}" />
     {% block head %}{% endblock %}
   </head>
-  <body>
-    {% set ui_role = role | default("buyer") %}
-    {% set workspace_id = workspace_id | default(tenant_id | default("default")) %}
-    {% set workspace_name = workspace_name | default("Empresa " ~ workspace_id) %}
-    {% set workspace_options = workspace_options | default([{"id": workspace_id, "name": workspace_name}]) %}
+  {% set ui_role = role | default("buyer") %}
+  {% set workspace_id = workspace_id | default(tenant_id | default("default")) %}
+  {% set workspace_name = workspace_name | default("Empresa " ~ workspace_id) %}
+  {% set workspace_options = workspace_options | default([{"id": workspace_id, "name": workspace_name}]) %}
+  <body class="role-{{ ui_role }}">
     <div class="app-shell">
       <aside class="sidebar">
         <a class="brand" href="/procurement/inbox?workspace_id={{ workspace_id }}">
@@ -67,7 +67,7 @@
           </div>
         </header>
 
-        <main class="content">
+        <main class="content content-{{ active_nav | default('module') }}">
           <div class="page-head">
             <div>
             <div class="breadcrumbs">
