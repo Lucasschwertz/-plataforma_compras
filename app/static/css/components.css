@@ -172,6 +172,37 @@
   gap: var(--space-2);
 }
 
+.workflow-tabs {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.workflow-tab {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 10px 12px;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+
+.workflow-tab:hover {
+  border-color: rgba(76, 111, 255, 0.4);
+  color: var(--text);
+}
+
+.workflow-tab.active {
+  color: var(--text);
+  border-color: rgba(76, 111, 255, 0.45);
+  box-shadow: var(--shadow-1);
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -958,6 +989,10 @@ tr.best-overall td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .workflow-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .role-panel-grid {
     grid-template-columns: 1fr;
   }
@@ -1020,6 +1055,10 @@ tr.best-overall td {
   .page-actions .btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .workflow-tabs {
+    grid-template-columns: 1fr;
   }
 
   .modal-panel {

@@ -49,6 +49,12 @@
           <label class="meta" for="motivoInput">Motivo da decisao</label>
           <textarea class="textarea" id="motivoInput" required></textarea>
         </div>
+        <div>
+          <label class="meta" for="motivoPresetSelect">Motivo sugerido por papel</label>
+          <select class="select" id="motivoPresetSelect">
+            <option value="">Selecionar motivo rapido</option>
+          </select>
+        </div>
         <div class="page-actions">
           <button class="btn btn-primary" type="submit" id="decidirBtn">Registrar decisao</button>
         </div>
@@ -254,6 +260,7 @@
       const decisaoForm = document.getElementById("decisaoForm");
       const fornecedorInput = document.getElementById("fornecedorInput");
       const motivoInput = document.getElementById("motivoInput");
+      const motivoPresetSelect = document.getElementById("motivoPresetSelect");
       const decidirBtn = document.getElementById("decidirBtn");
       const atualizarBtn = document.getElementById("atualizarBtn");
 
@@ -300,6 +307,41 @@
           return window.UiLabels.prettyStatus(status);
         }
         return status || "Nao informado";
+      }
+
+      function getReasonPresetsByRole(role) {
+        const map = {
+          buyer: [
+            "Menor custo total para os itens cotados",
+            "Melhor equilibrio entre custo e prazo de entrega",
+            "Fornecedor com melhor cobertura dos itens cotados",
+          ],
+          manager: [
+            "Melhor equilibrio entre custo, prazo e cobertura",
+            "Risco operacional reduzido para o ciclo atual",
+            "Decisao alinhada com prioridade de negocio",
+          ],
+          approver: [
+            "Decisao em conformidade com a politica de compras",
+            "Justificativa validada com base na comparacao",
+            "Risco e custo aprovados para emissao de ordem",
+          ],
+          admin: [
+            "Decisao homologada para continuidade do fluxo",
+            "Conducao validada com trilha operacional",
+            "Aprovacao registrada com foco em risco e prazo",
+          ],
+        };
+        return map[role] || map.buyer;
+      }
+
+      function fillReasonPresetOptions() {
+        if (!motivoPresetSelect) return;
+        const presets = getReasonPresetsByRole(currentRole);
+        motivoPresetSelect.innerHTML = `
+          <option value="">Selecionar motivo rapido</option>
+          ${presets.map((reason) => `<option value="${escapeHtml(reason)}">${escapeHtml(reason)}</option>`).join("")}
+        `;
       }
 
       function renderKv(target, rows) {
@@ -1336,6 +1378,15 @@
       propostaForm.addEventListener("submit", salvarProposta);
       atualizarBtn.addEventListener("click", carregar);
       propostaFornecedorSelect.addEventListener("change", renderPropostaItens);
+      fillReasonPresetOptions();
+      if (motivoPresetSelect) {
+        motivoPresetSelect.addEventListener("change", () => {
+          const selected = (motivoPresetSelect.value || "").trim();
+          if (!selected) return;
+          motivoInput.value = selected;
+          motivoInput.focus();
+        });
+      }
       nextActionPrimaryBtn.addEventListener("click", async () => {
         const action = nextActionPrimaryBtn.dataset.action || "focus_decision";
         if (action === "focus_decision") {

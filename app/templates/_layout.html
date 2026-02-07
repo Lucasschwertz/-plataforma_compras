@@ -145,9 +145,58 @@
         const workspaceSelect = document.getElementById("workspaceSelect");
         const workspaceIndicator = document.getElementById("workspaceIndicator");
         const globalSearchInput = document.getElementById("globalSearchInput");
-        const currentWorkspace = workspaceFromUrl || (workspaceSelect ? workspaceSelect.value : null);
+        let activeWorkspace = workspaceFromUrl || (workspaceSelect ? workspaceSelect.value : null);
         const sidebarToggle = document.getElementById("sidebarToggle");
         const sidebarBackdrop = document.getElementById("sidebarBackdrop");
+        const workspaceRouteStoreKey = "platform.workspace.last_route.v1";
+
+        function isOperationalPath(pathname) {
+          if (!pathname || pathname === "/logout") return false;
+          if (pathname.startsWith("/static/")) return false;
+          return pathname.startsWith("/");
+        }
+
+        function readWorkspaceRoutes() {
+          try {
+            const raw = localStorage.getItem(workspaceRouteStoreKey);
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : {};
+          } catch (error) {
+            return {};
+          }
+        }
+
+        function writeWorkspaceRoutes(routes) {
+          try {
+            localStorage.setItem(workspaceRouteStoreKey, JSON.stringify(routes || {}));
+          } catch (error) {
+          }
+        }
+
+        function rememberWorkspaceRoute(workspaceId, href) {
+          if (!workspaceId || !href) return;
+          const url = new URL(href, window.location.origin);
+          if (!isOperationalPath(url.pathname)) return;
+          url.searchParams.set("workspace_id", workspaceId);
+          const routes = readWorkspaceRoutes();
+          routes[workspaceId] = `${url.pathname}${url.search}${url.hash}`;
+          writeWorkspaceRoutes(routes);
+        }
+
+        function getRememberedWorkspaceRoute(workspaceId) {
+          const routes = readWorkspaceRoutes();
+          const value = routes[workspaceId];
+          if (!value || typeof value !== "string") return null;
+          try {
+            const url = new URL(value, window.location.origin);
+            if (!isOperationalPath(url.pathname)) return null;
+            url.searchParams.set("workspace_id", workspaceId);
+            return `${url.pathname}${url.search}${url.hash}`;
+          } catch (error) {
+            return null;
+          }
+        }
 
         function appendWorkspaceToLinks(workspaceId) {
           if (!workspaceId) return;
@@ -157,6 +206,18 @@
             const url = new URL(link.href, window.location.origin);
             url.searchParams.set("workspace_id", workspaceId);
             link.href = `${url.pathname}${url.search}${url.hash}`;
+          });
+        }
+
+        function bindWorkspaceRouteMemory(workspaceId) {
+          const links = document.querySelectorAll('a[href^="/"]');
+          links.forEach((link) => {
+            if (link.dataset.workspaceMemBound === "1") return;
+            if (link.getAttribute("href") === "/logout") return;
+            link.dataset.workspaceMemBound = "1";
+            link.addEventListener("click", () => {
+              rememberWorkspaceRoute(workspaceId, link.href);
+            });
           });
         }
 
@@ -185,24 +246,35 @@
           }
         });
 
-        if (workspaceSelect && currentWorkspace) {
-          if ([...workspaceSelect.options].some((opt) => opt.value === currentWorkspace)) {
-            workspaceSelect.value = currentWorkspace;
+        if (workspaceSelect && activeWorkspace) {
+          if ([...workspaceSelect.options].some((opt) => opt.value === activeWorkspace)) {
+            workspaceSelect.value = activeWorkspace;
           }
           if (workspaceIndicator) {
             const activeText = workspaceSelect.options[workspaceSelect.selectedIndex]?.textContent || workspaceSelect.value;
             workspaceIndicator.textContent = `Workspace ${activeText}`;
           }
           appendWorkspaceToLinks(workspaceSelect.value);
+          bindWorkspaceRouteMemory(workspaceSelect.value);
+          rememberWorkspaceRoute(workspaceSelect.value, window.location.href);
 
           workspaceSelect.addEventListener("change", () => {
             const nextWorkspace = workspaceSelect.value;
+            rememberWorkspaceRoute(activeWorkspace || workspaceSelect.value, window.location.href);
+            activeWorkspace = nextWorkspace;
+            const remembered = getRememberedWorkspaceRoute(nextWorkspace);
+            if (remembered) {
+              window.location.href = remembered;
+              return;
+            }
             const nextUrl = new URL(window.location.href);
             nextUrl.searchParams.set("workspace_id", nextWorkspace);
             window.location.href = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
           });
         } else {
-          appendWorkspaceToLinks(currentWorkspace);
+          appendWorkspaceToLinks(activeWorkspace);
+          bindWorkspaceRouteMemory(activeWorkspace);
+          rememberWorkspaceRoute(activeWorkspace, window.location.href);
         }
 
         if (globalSearchInput) {
@@ -210,7 +282,7 @@
             if (event.key !== "Enter") return;
             event.preventDefault();
             const term = (globalSearchInput.value || "").trim();
-            const selectedWorkspace = workspaceSelect ? workspaceSelect.value : currentWorkspace;
+            const selectedWorkspace = workspaceSelect ? workspaceSelect.value : activeWorkspace;
             const nextUrl = new URL("/procurement/inbox", window.location.origin);
             if (term) {
               nextUrl.searchParams.set("search", term);
