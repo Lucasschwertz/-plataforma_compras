@@ -38,21 +38,26 @@
         <span class="meta" id="queueMeta">Carregando</span>
       </div>
     <div class="table-wrap">
-      <table>
+      <table class="table-mobile-cards table-compact">
         <thead>
           <tr>
             <th>Referencia</th>
             <th>Tipo</th>
             <th>Status</th>
             <th>Prioridade</th>
-            <th>Idade em dias</th>
+            <th class="numeric">Idade em dias</th>
             <th>Proxima acao</th>
             <th>Acoes</th>
           </tr>
         </thead>
         <tbody id="queueBody">
           <tr>
-            <td colspan="7" class="empty-row">Carregando fila de aprovacao</td>
+            <td colspan="7" class="empty-row">
+              <div class="empty-state-inline">
+                <div class="empty-state-title">Carregando fila de aprovacao</div>
+                <div class="meta">Aguarde alguns segundos</div>
+              </div>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -114,6 +119,19 @@
       return "Acompanhar";
     }
 
+    function renderEmptyRow(message, detail, colspan = 7) {
+      return `
+        <tr>
+          <td colspan="${colspan}" class="empty-row">
+            <div class="empty-state-inline">
+              <div class="empty-state-title">${escapeHtml(message)}</div>
+              <div class="meta">${escapeHtml(detail)}</div>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
     function renderActions(item) {
       if (item.type === "rfq") {
         return `
@@ -130,11 +148,10 @@
     function renderQueue(items) {
       if (!items.length) {
         queueMeta.textContent = "Sem itens para aprovar";
-        queueBody.innerHTML = `
-          <tr>
-            <td colspan="7" class="empty-row">Nenhuma pendencia de aprovacao no momento</td>
-          </tr>
-        `;
+        queueBody.innerHTML = renderEmptyRow(
+          "Fila sem pendencias",
+          "Nao ha itens exigindo aprovacao neste momento"
+        );
         return;
       }
 
@@ -143,13 +160,13 @@
         .map(
           (item) => `
             <tr>
-              <td><strong>${escapeHtml(item.ref || "Sem referencia")}</strong></td>
-              <td>${escapeHtml(prettyType(item.type))}</td>
-              <td>${escapeHtml(prettyStatus(item.status))}</td>
-              <td>${escapeHtml(prettyPriority(item.priority))}</td>
-              <td>${escapeHtml(item.age_days ?? 0)}</td>
-              <td>${escapeHtml(nextActionLabel(item))}</td>
-              <td><div class="actions-cell">${renderActions(item)}</div></td>
+              <td data-label="Referencia"><strong>${escapeHtml(item.ref || "Sem referencia")}</strong></td>
+              <td data-label="Tipo">${escapeHtml(prettyType(item.type))}</td>
+              <td data-label="Status">${escapeHtml(prettyStatus(item.status))}</td>
+              <td data-label="Prioridade">${escapeHtml(prettyPriority(item.priority))}</td>
+              <td class="numeric" data-label="Idade em dias">${escapeHtml(item.age_days ?? 0)}</td>
+              <td data-label="Proxima acao">${escapeHtml(nextActionLabel(item))}</td>
+              <td class="cell-actions" data-label="Acoes"><div class="actions-cell">${renderActions(item)}</div></td>
             </tr>
           `
         )
@@ -178,11 +195,10 @@
         renderQueue(queue);
       } catch (error) {
         queueMeta.textContent = "Falha ao carregar";
-        queueBody.innerHTML = `
-          <tr>
-            <td colspan="7" class="empty-row">Nao foi possivel carregar a fila de aprovacao</td>
-          </tr>
-        `;
+        queueBody.innerHTML = renderEmptyRow(
+          "Falha ao carregar fila",
+          "Atualize a pagina para tentar novamente"
+        );
         if (window.showToast) {
           window.showToast("danger", "Nao foi possivel carregar a fila de aprovacoes");
         }

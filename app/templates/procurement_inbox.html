@@ -67,7 +67,7 @@
         <div class="meta" id="summary">Carregando</div>
       </div>
       <div class="table-wrap">
-        <table class="table-mobile-cards">
+        <table class="table-mobile-cards table-compact">
           <thead>
             <tr>
               <th>Tipo</th>
@@ -75,7 +75,7 @@
               <th>Status</th>
               <th>Prioridade</th>
               <th>Necessidade</th>
-              <th>Idade em dias</th>
+              <th class="numeric">Idade em dias</th>
               <th>Atualizado</th>
               <th>Meta</th>
               <th>Acoes</th>
@@ -441,13 +441,25 @@
         }
       }
 
+      function renderEmptyRow(message, detail, colspan = 9) {
+        return `
+          <tr>
+            <td colspan="${colspan}" class="empty-row">
+              <div class="empty-state-inline">
+                <div class="empty-state-title">${escapeHtml(message)}</div>
+                <div class="meta">${escapeHtml(detail)}</div>
+              </div>
+            </td>
+          </tr>
+        `;
+      }
+
       function renderRows(items) {
         if (!items.length) {
-          inboxBody.innerHTML = `
-            <tr>
-              <td colspan="9" class="empty-row">Inbox vazia para os filtros atuais.</td>
-            </tr>
-          `;
+          inboxBody.innerHTML = renderEmptyRow(
+            "Inbox sem registros",
+            "Ajuste os filtros ou atualize os dados para continuar"
+          );
           return;
         }
 
@@ -462,7 +474,7 @@
                 <td class="status" data-label="Status">${escapeHtml(prettyStatus(item.status || "n/a"))}</td>
                 <td data-label="Prioridade">${renderPriority(item.priority)}</td>
                 <td data-label="Necessidade">${escapeHtml(item.needed_at || "n/a")}</td>
-                <td data-label="Idade em dias">${item.age_days ?? 0}</td>
+                <td class="numeric" data-label="Idade em dias">${item.age_days ?? 0}</td>
                 <td class="muted" data-label="Atualizado">${escapeHtml(item.updated_at || "n/a")}</td>
                 <td data-label="Meta">${meta}</td>
                 <td class="cell-actions" data-label="Acoes">${actions}</td>
@@ -881,7 +893,7 @@
               <td class="skeleton">Carregando</td>
               <td class="skeleton">Carregando</td>
               <td class="skeleton">Carregando</td>
-              <td class="skeleton">Carregando</td>
+              <td class="skeleton numeric">Carregando</td>
               <td class="skeleton">Carregando</td>
               <td class="skeleton">Carregando</td>
               <td class="skeleton">Carregando</td>

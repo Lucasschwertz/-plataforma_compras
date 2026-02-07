@@ -331,6 +331,8 @@ a.btn {
   overflow: auto;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
 }
 
 table {
@@ -344,6 +346,7 @@ td {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   text-align: left;
+  vertical-align: middle;
 }
 
 th {
@@ -351,6 +354,37 @@ th {
   color: var(--muted);
   letter-spacing: 0.4px;
   text-transform: uppercase;
+}
+
+tbody tr {
+  transition: background-color 160ms ease;
+}
+
+tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.table-compact {
+  min-width: 920px;
+}
+
+.table-compact th,
+.table-compact td {
+  padding: 10px 12px;
+}
+
+.table-compact td strong {
+  font-weight: 700;
+}
+
+.numeric {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.center {
+  text-align: center;
 }
 
 .pill {
@@ -394,6 +428,18 @@ th {
 .empty-row {
   color: var(--muted);
   padding: 14px;
+}
+
+.empty-state-inline {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+}
+
+.empty-state-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .actions-cell {
@@ -782,6 +828,11 @@ tr.best-overall td {
   .table-mobile-cards td.cell-actions .btn {
     min-width: 120px;
     justify-content: center;
+  }
+
+  .table-mobile-cards td.numeric {
+    text-align: left;
+    font-variant-numeric: normal;
   }
 
   .kpi-value {

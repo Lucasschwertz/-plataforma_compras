@@ -56,11 +56,11 @@
       <span class="meta">Convide fornecedores e acompanhe propostas por item</span>
     </div>
     <div class="table-wrap">
-      <table>
+      <table class="table-mobile-cards table-compact">
         <thead>
           <tr>
             <th>Item</th>
-            <th>Quantidade</th>
+            <th class="numeric">Quantidade</th>
             <th>Melhor proposta</th>
             <th>Fornecedores convidados</th>
             <th>Convidar</th>
@@ -107,13 +107,13 @@
       <div class="list" id="execRanking"></div>
       <div id="comparacaoDetalhada">
         <div class="table-wrap">
-          <table>
+          <table class="table-compact">
             <thead>
               <tr>
                 <th>Fornecedor</th>
-                <th>Total</th>
+                <th class="numeric">Total</th>
                 <th>Prazo medio e pior</th>
-                <th>Cobertura</th>
+                <th class="numeric">Cobertura</th>
                 <th>Destaque</th>
               </tr>
             </thead>
@@ -139,13 +139,13 @@
         <select class="select" id="propostaFornecedorSelect" required></select>
       </div>
       <div class="table-wrap">
-        <table>
+        <table class="table-mobile-cards table-compact">
           <thead>
             <tr>
               <th>Item</th>
-              <th>Quantidade</th>
-              <th>Preco unitario</th>
-              <th>Prazo em dias</th>
+              <th class="numeric">Quantidade</th>
+              <th class="numeric">Preco unitario</th>
+              <th class="numeric">Prazo em dias</th>
             </tr>
           </thead>
           <tbody id="propostaItensBody"></tbody>
@@ -254,6 +254,19 @@
         target.innerHTML = rows
           .map(([k, v]) => `<div class="meta">${escapeHtml(k)}</div><div>${escapeHtml(v)}</div>`)
           .join("");
+      }
+
+      function renderEmptyRow(message, detail, colspan) {
+        return `
+          <tr>
+            <td colspan="${colspan}" class="empty-row">
+              <div class="empty-state-inline">
+                <div class="empty-state-title">${escapeHtml(message)}</div>
+                <div class="meta">${escapeHtml(detail)}</div>
+              </div>
+            </td>
+          </tr>
+        `;
       }
 
       function renderEventos(target, eventos, vazioLabel) {
@@ -432,7 +445,11 @@
       function renderComparacao(data) {
         if (!data || !data.items || !data.items.length) {
           comparacaoResumo.textContent = "Sem dados de propostas para comparar.";
-          comparacaoTabela.innerHTML = '<tr><td colspan="5" class="empty-row">Sem propostas.</td></tr>';
+          comparacaoTabela.innerHTML = renderEmptyRow(
+            "Sem propostas registradas",
+            "Registre propostas para habilitar o comparativo",
+            5
+          );
           comparacaoItens.innerHTML = "";
           comparacaoDetalhesConteudo.innerHTML = "";
           renderExecutiveSummary({}, [], null);
@@ -462,7 +479,11 @@
         renderExecutiveSummary(summary, totals, suggestedSupplierId);
 
         if (!totals.length) {
-          comparacaoTabela.innerHTML = '<tr><td colspan="5" class="empty-row">Sem propostas.</td></tr>';
+          comparacaoTabela.innerHTML = renderEmptyRow(
+            "Sem propostas registradas",
+            "Ainda nao ha fornecedores com proposta valida",
+            5
+          );
         } else {
           comparacaoTabela.innerHTML = totals
             .map((t) => {
@@ -482,9 +503,9 @@
                     <strong>${escapeHtml(t.supplier_name || `Fornecedor ${t.supplier_id}`)}</strong>
                     ${flagsHtml}
                   </td>
-                  <td><strong>${formatCurrency(t.total_amount)}</strong></td>
+                  <td class="numeric"><strong>${formatCurrency(t.total_amount)}</strong></td>
                   <td>${escapeHtml(prazoMedio)}${prazoPior ? ` <span class="meta">${escapeHtml(prazoPior)}</span>` : ""}</td>
-                  <td>${escapeHtml(cobertura)}</td>
+                  <td class="numeric">${escapeHtml(cobertura)}</td>
                   <td>${destaque}</td>
                 </tr>
               `;
@@ -548,7 +569,11 @@
       }
       function renderItens() {
         if (!state.itens.length) {
-          itensBody.innerHTML = '<tr><td colspan="5" class="empty-row">Sem itens nesta cotacao.</td></tr>';
+          itensBody.innerHTML = renderEmptyRow(
+            "Sem itens nesta cotacao",
+            "Volte para a inbox e crie uma cotacao com itens selecionados",
+            5
+          );
           propostaItensBody.innerHTML = '';
           return;
         }
@@ -592,11 +617,11 @@
 
             return `
               <tr>
-                <td><strong>${escapeHtml(item.descricao)}</strong></td>
-                <td>${escapeHtml(item.quantidade)} ${escapeHtml(item.uom)}</td>
-                <td>${escapeHtml(formatMelhorProposta(item.melhor_proposta))}</td>
-                <td>${escapeHtml(fornecedoresTxt)}</td>
-                <td>${convidarControl}</td>
+                <td data-label="Item"><strong>${escapeHtml(item.descricao)}</strong></td>
+                <td class="numeric" data-label="Quantidade">${escapeHtml(item.quantidade)} ${escapeHtml(item.uom)}</td>
+                <td data-label="Melhor proposta">${escapeHtml(formatMelhorProposta(item.melhor_proposta))}</td>
+                <td data-label="Fornecedores convidados">${escapeHtml(fornecedoresTxt)}</td>
+                <td class="cell-actions" data-label="Convidar">${convidarControl}</td>
               </tr>
             `;
           })
@@ -608,8 +633,11 @@
 
       function renderPropostaItens() {
         if (isExecutiveReaderRole) {
-          propostaItensBody.innerHTML =
-            '<tr><td colspan="4" class="empty-row">Modo executivo, registro de proposta indisponivel neste perfil.</td></tr>';
+          propostaItensBody.innerHTML = renderEmptyRow(
+            "Modo executivo ativo",
+            "Registro de proposta indisponivel para este perfil",
+            4
+          );
           return;
         }
 
@@ -621,14 +649,20 @@
         });
 
         if (!selectedSupplierId) {
-          propostaItensBody.innerHTML =
-            '<tr><td colspan="4" class="empty-row">Selecione um fornecedor.</td></tr>';
+          propostaItensBody.innerHTML = renderEmptyRow(
+            "Selecione um fornecedor",
+            "Escolha o fornecedor para preencher os itens convidados",
+            4
+          );
           return;
         }
 
         if (!itensFiltrados.length) {
-          propostaItensBody.innerHTML =
-            '<tr><td colspan="4" class="empty-row">Nenhum item convidado para este fornecedor.</td></tr>';
+          propostaItensBody.innerHTML = renderEmptyRow(
+            "Fornecedor sem itens convidados",
+            "Convide este fornecedor em ao menos um item para registrar proposta",
+            4
+          );
           return;
         }
 
@@ -636,12 +670,12 @@
           .map(
             (item) => `
               <tr>
-                <td>${escapeHtml(item.descricao)}</td>
-                <td>${escapeHtml(item.quantidade)} ${escapeHtml(item.uom)}</td>
-                <td>
+                <td data-label="Item">${escapeHtml(item.descricao)}</td>
+                <td class="numeric" data-label="Quantidade">${escapeHtml(item.quantidade)} ${escapeHtml(item.uom)}</td>
+                <td class="numeric" data-label="Preco unitario">
                   <input class="input" type="number" step="0.01" min="0" data-preco-input="${item.rfq_item_id}" placeholder="0.00" />
                 </td>
-                <td>
+                <td class="numeric" data-label="Prazo em dias">
                   <input class="input" type="number" step="1" min="0" data-prazo-input="${item.rfq_item_id}" placeholder="dias" />
                 </td>
               </tr>
