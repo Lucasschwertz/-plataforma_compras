@@ -84,6 +84,19 @@
 
   <section class="card">
     <div class="card-header">
+      <h2 class="card-title">Painel executivo por papel</h2>
+      <span class="badge">Papel {{ ui_role }}</span>
+    </div>
+    <div class="meta" id="rolePanelSummary">Carregando foco operacional</div>
+    <div class="role-panel-grid" id="rolePanelCards">
+      <article class="role-panel-card skeleton">Carregando</article>
+      <article class="role-panel-card skeleton">Carregando</article>
+      <article class="role-panel-card skeleton">Carregando</article>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
       <h2 class="card-title">Filtros rapidos</h2>
       <span class="meta">Abrir inbox com contexto pronto</span>
     </div>
@@ -225,9 +238,12 @@
 {% block page_scripts %}
   <script>
     const workspaceId = "{{ workspace_id }}";
+    const uiRole = "{{ ui_role }}";
     const Platform = window.PlatformUI || {};
     const pendingMeta = document.getElementById("pendingMeta");
     const pendingList = document.getElementById("pendingList");
+    const rolePanelSummary = document.getElementById("rolePanelSummary");
+    const rolePanelCards = document.getElementById("rolePanelCards");
     const quickType = document.getElementById("quickType");
     const quickStatus = document.getElementById("quickStatus");
     const quickPriority = document.getElementById("quickPriority");
@@ -277,6 +293,116 @@
         element.textContent = String(value);
         element.classList.remove("skeleton");
       });
+    }
+
+    function rolePanelDefinition(role, kpis, totalItems) {
+      const pendingRfq = Number(kpis?.pending_rfq || 0);
+      const awaitingQuotes = Number(kpis?.awaiting_quotes || 0);
+      const waitingPo = Number(kpis?.awarded_waiting_po || 0);
+      const awaitingErp = Number(kpis?.awaiting_erp_push || 0);
+
+      if (role === "approver") {
+        return {
+          summary: `${waitingPo} cotacoes com decisao pendente de OC, ${awaitingErp} ordens aguardando ERP`,
+          cards: [
+            {
+              title: "Aprovar cotacoes",
+              value: `${awaitingQuotes}`,
+              detail: "Cotacoes abertas para consolidar decisao",
+              href: withWorkspace("/procurement/aprovacoes"),
+              cta: "Abrir fila",
+            },
+            {
+              title: "Converter decisoes",
+              value: `${waitingPo}`,
+              detail: "Decisoes prontas para gerar ordem de compra",
+              href: withWorkspace("/procurement/inbox?type=rfq&awaiting_po=1"),
+              cta: "Gerar OC",
+            },
+            {
+              title: "Remover gargalo ERP",
+              value: `${awaitingErp}`,
+              detail: "Ordens com envio pendente ou erro",
+              href: withWorkspace("/procurement/inbox?type=purchase_order&status=draft,approved,sent_to_erp,erp_error"),
+              cta: "Revisar OC",
+            },
+          ],
+        };
+      }
+
+      if (role === "admin") {
+        return {
+          summary: `${totalItems} itens ativos no workspace, acompanhe saude operacional e integracoes`,
+          cards: [
+            {
+              title: "Saude da operacao",
+              value: `${totalItems}`,
+              detail: "Itens ativos entre solicitacao, cotacao e ordem",
+              href: withWorkspace("/procurement/inbox"),
+              cta: "Abrir inbox",
+            },
+            {
+              title: "Execucoes de integracao",
+              value: `${awaitingErp}`,
+              detail: "Ordens aguardando retorno ERP",
+              href: withWorkspace("/procurement/integrations/logs"),
+              cta: "Abrir integracoes",
+            },
+            {
+              title: "Governanca de cotacoes",
+              value: `${awaitingQuotes}`,
+              detail: "Cotacoes em andamento para monitorar trilha",
+              href: withWorkspace("/procurement/integrations/logs?scope=rfq"),
+              cta: "Ver trilha",
+            },
+          ],
+        };
+      }
+
+      return {
+        summary: `${pendingRfq} solicitacoes pendentes, ${awaitingQuotes} cotacoes em andamento`,
+        cards: [
+          {
+            title: "Abrir cotacoes",
+            value: `${awaitingQuotes}`,
+            detail: "Cotacoes aguardando proposta de fornecedor",
+            href: withWorkspace("/procurement/inbox?type=rfq&status=open,collecting_quotes"),
+            cta: "Conduzir",
+          },
+          {
+            title: "Iniciar novas cotacoes",
+            value: `${pendingRfq}`,
+            detail: "Solicitacoes prontas para virar cotacao",
+            href: withWorkspace("/procurement/inbox?type=purchase_request&status=pending_rfq"),
+            cta: "Criar cotacao",
+          },
+          {
+            title: "Concluir ciclo de compra",
+            value: `${waitingPo}`,
+            detail: "Cotacoes com decisao pendente de ordem",
+            href: withWorkspace("/procurement/inbox?type=rfq&awaiting_po=1"),
+            cta: "Finalizar",
+          },
+        ],
+      };
+    }
+
+    function renderRolePanel(kpis, items) {
+      if (!rolePanelCards || !rolePanelSummary) return;
+      const definition = rolePanelDefinition(uiRole, kpis, (items || []).length);
+      rolePanelSummary.textContent = definition.summary;
+      rolePanelCards.innerHTML = definition.cards
+        .map(
+          (card) => `
+            <article class="role-panel-card">
+              <div class="role-panel-title">${escapeHtml(card.title)}</div>
+              <div class="role-panel-value">${escapeHtml(card.value)}</div>
+              <div class="role-panel-detail">${escapeHtml(card.detail)}</div>
+              <a class="btn btn-primary btn-small" href="${card.href}">${escapeHtml(card.cta)}</a>
+            </article>
+          `
+        )
+        .join("");
     }
 
     function itemHref(item) {
@@ -332,6 +458,7 @@
         }
         updateKpis(payload.kpis || {});
         renderPending(payload.items || []);
+        renderRolePanel(payload.kpis || {}, payload.items || []);
       } catch (error) {
         pendingMeta.textContent = "Falha ao carregar dados";
         pendingList.innerHTML = `
@@ -342,6 +469,17 @@
         `;
         if (window.showToast) {
           window.showToast("danger", "Falha ao carregar dashboard");
+        }
+        if (rolePanelSummary) {
+          rolePanelSummary.textContent = "Falha ao carregar foco operacional";
+        }
+        if (rolePanelCards) {
+          rolePanelCards.innerHTML = `
+            <article class="role-panel-card">
+              <div class="role-panel-title">Dados indisponiveis</div>
+              <div class="role-panel-detail">Atualize o painel para recarregar os indicadores do papel.</div>
+            </article>
+          `;
         }
       }
     }

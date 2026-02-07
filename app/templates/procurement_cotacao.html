@@ -97,6 +97,13 @@
     </div>
     <div class="stack">
       <div class="meta" id="comparacaoResumo"></div>
+      <section class="decision-assistant">
+        <div class="card-header">
+          <h3 class="card-title">Assistente de decisao por item</h3>
+          <span class="badge" id="decisionAssistantSummary">Aguardando propostas</span>
+        </div>
+        <div class="list" id="decisionAssistantList"></div>
+      </section>
       <div class="grid grid-4" id="comparacaoExecutivaCards">
         <article class="insight-card">
           <div class="insight-label">Fornecedor recomendado</div>
@@ -220,6 +227,8 @@
       const comparacaoTabela = document.getElementById("comparacaoTabela");
       const comparacaoItens = document.getElementById("comparacaoItens");
       const comparacaoDetalhesConteudo = document.getElementById("comparacaoDetalhesConteudo");
+      const decisionAssistantList = document.getElementById("decisionAssistantList");
+      const decisionAssistantSummary = document.getElementById("decisionAssistantSummary");
       const comparacaoDetalhada = document.getElementById("comparacaoDetalhada");
       const toggleDetalheComparacaoBtn = document.getElementById("toggleDetalheComparacaoBtn");
       const roleLeituraPill = document.getElementById("roleLeituraPill");
@@ -486,6 +495,18 @@
           );
           comparacaoItens.innerHTML = "";
           comparacaoDetalhesConteudo.innerHTML = "";
+          if (decisionAssistantList) {
+            decisionAssistantList.innerHTML = `
+              <div class="list-item">
+                <div class="title">Sem itens para analise</div>
+                <div class="meta">Registre propostas para habilitar o assistente de decisao.</div>
+              </div>
+            `;
+          }
+          if (decisionAssistantSummary) {
+            decisionAssistantSummary.textContent = "Sem analise";
+            decisionAssistantSummary.className = "badge";
+          }
           renderExecutiveSummary({}, [], null);
           return;
         }
@@ -557,6 +578,8 @@
             `
           )
           .join("");
+
+        renderDecisionAssistant(data.items || []);
 
         comparacaoItens.innerHTML = data.items
           .map((item) => {
@@ -716,6 +739,172 @@
             `
           )
           .join("");
+      }
+
+      function getQuoteNumber(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+
+      function getBestPriceQuote(quotes) {
+        const marked = quotes.find((quote) => quote.best_price);
+        if (marked) return marked;
+        const candidates = quotes
+          .map((quote) => ({ quote, value: getQuoteNumber(quote.unit_price) }))
+          .filter((row) => row.value != null)
+          .sort((a, b) => Number(a.value) - Number(b.value));
+        return candidates.length ? candidates[0].quote : null;
+      }
+
+      function getBestLeadQuote(quotes) {
+        const marked = quotes.find((quote) => quote.best_lead_time);
+        if (marked) return marked;
+        const candidates = quotes
+          .map((quote) => ({ quote, value: getQuoteNumber(quote.lead_time_days) }))
+          .filter((row) => row.value != null)
+          .sort((a, b) => Number(a.value) - Number(b.value));
+        return candidates.length ? candidates[0].quote : null;
+      }
+
+      function getRecommendedItemQuote(quotes) {
+        const candidates = quotes
+          .map((quote) => ({
+            quote,
+            itemTotal: getQuoteNumber(quote.item_total),
+            unitPrice: getQuoteNumber(quote.unit_price),
+            lead: getQuoteNumber(quote.lead_time_days) ?? 9999,
+          }))
+          .filter((row) => row.itemTotal != null || row.unitPrice != null);
+
+        if (!candidates.length) return null;
+        candidates.sort((a, b) => {
+          const leftCost = Number(a.itemTotal ?? a.unitPrice ?? 999999999);
+          const rightCost = Number(b.itemTotal ?? b.unitPrice ?? 999999999);
+          if (leftCost !== rightCost) return leftCost - rightCost;
+          return Number(a.lead) - Number(b.lead);
+        });
+        return candidates[0].quote;
+      }
+
+      function renderDecisionAssistant(items) {
+        if (!decisionAssistantList || !decisionAssistantSummary) return;
+        if (!items.length) {
+          decisionAssistantSummary.textContent = "Sem analise";
+          decisionAssistantSummary.className = "badge";
+          decisionAssistantList.innerHTML = `
+            <div class="list-item">
+              <div class="title">Sem itens para analise</div>
+              <div class="meta">Registre propostas para habilitar o assistente de decisao.</div>
+            </div>
+          `;
+          return;
+        }
+
+        const analyses = items
+          .map((item) => {
+            const quotes = item.quotes || [];
+            if (!quotes.length) {
+              return {
+                type: "missing",
+                item,
+              };
+            }
+            const bestPrice = getBestPriceQuote(quotes);
+            const bestLead = getBestLeadQuote(quotes);
+            const recommended = getRecommendedItemQuote(quotes);
+            const converged =
+              bestPrice &&
+              bestLead &&
+              String(bestPrice.supplier_id || "") === String(bestLead.supplier_id || "");
+            return {
+              type: converged ? "converged" : "tradeoff",
+              item,
+              bestPrice,
+              bestLead,
+              recommended,
+            };
+          });
+
+        const tradeoffCount = analyses.filter((analysis) => analysis.type === "tradeoff").length;
+        const convergedCount = analyses.filter((analysis) => analysis.type === "converged").length;
+        const missingCount = analyses.filter((analysis) => analysis.type === "missing").length;
+
+        if (tradeoffCount > 0) {
+          decisionAssistantSummary.className = "badge warning";
+          decisionAssistantSummary.textContent = `${tradeoffCount} item(ns) com trade off`;
+        } else if (convergedCount > 0) {
+          decisionAssistantSummary.className = "badge success";
+          decisionAssistantSummary.textContent = `${convergedCount} item(ns) convergentes`;
+        } else {
+          decisionAssistantSummary.className = "badge";
+          decisionAssistantSummary.textContent = "Sem analise consolidada";
+        }
+
+        decisionAssistantList.innerHTML = analyses
+          .map((analysis) => {
+            const itemName = escapeHtml(analysis.item.description || analysis.item.descricao || "Item");
+            if (analysis.type === "missing") {
+              return `
+                <div class="list-item decision-card">
+                  <div class="decision-head">
+                    <div class="title">${itemName}</div>
+                    <span class="pill">Sem proposta</span>
+                  </div>
+                  <div class="meta">Nao ha proposta registrada para este item.</div>
+                </div>
+              `;
+            }
+
+            const recommendedName = escapeHtml(
+              analysis.recommended?.supplier_name || analysis.bestPrice?.supplier_name || "Nao informado"
+            );
+            const recommendedTotal = formatCurrency(
+              analysis.recommended?.item_total != null
+                ? analysis.recommended.item_total
+                : analysis.recommended?.unit_price
+            );
+            const recommendedLead =
+              analysis.recommended?.lead_time_days != null ? `${analysis.recommended.lead_time_days} dias` : "Nao informado";
+
+            const bestPriceName = escapeHtml(analysis.bestPrice?.supplier_name || "Nao informado");
+            const bestPriceValue = formatCurrency(
+              analysis.bestPrice?.unit_price != null ? analysis.bestPrice.unit_price : analysis.bestPrice?.item_total
+            );
+            const bestLeadName = escapeHtml(analysis.bestLead?.supplier_name || "Nao informado");
+            const bestLeadValue =
+              analysis.bestLead?.lead_time_days != null ? `${analysis.bestLead.lead_time_days} dias` : "Nao informado";
+
+            const decisionTone = analysis.type === "tradeoff" ? "warning" : "success";
+            const decisionLabel = analysis.type === "tradeoff" ? "Trade off preco e prazo" : "Convergencia preco e prazo";
+            const explanation =
+              analysis.type === "tradeoff"
+                ? `Menor preco com ${bestPriceName}, menor prazo com ${bestLeadName}.`
+                : `Preco e prazo convergem em ${bestPriceName}.`;
+
+            return `
+              <div class="list-item decision-card">
+                <div class="decision-head">
+                  <div class="title">${itemName}</div>
+                  <span class="pill ${decisionTone}">${decisionLabel}</span>
+                </div>
+                <div class="decision-recommendation">
+                  <strong>Fornecedor sugerido</strong> ${recommendedName}, total ${recommendedTotal}, prazo ${recommendedLead}
+                </div>
+                <div class="chip-row">
+                  <span class="pill">Menor preco ${bestPriceName}, ${bestPriceValue}</span>
+                  <span class="pill">Menor prazo ${bestLeadName}, ${bestLeadValue}</span>
+                </div>
+                <div class="meta">${escapeHtml(explanation)} ${escapeHtml(analysis.item.suggestion_reason || "")}</div>
+              </div>
+            `;
+          })
+          .join("");
+
+        if (missingCount > 0) {
+          decisionAssistantList.innerHTML += `
+            <div class="meta">Itens sem proposta: ${escapeHtml(missingCount)}</div>
+          `;
+        }
       }
 
       function bindConvidar() {

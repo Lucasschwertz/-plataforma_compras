@@ -96,6 +96,18 @@
 
     <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
     <div class="toast-root" id="toastRoot"></div>
+    <nav class="mobile-quick-nav" aria-label="Acoes rapidas">
+      <a class="quick-link {% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Painel</a>
+      <a class="quick-link {% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
+      <a class="quick-link {% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
+      {% if ui_role == "approver" %}
+        <a class="quick-link {% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovar</a>
+      {% elif ui_role == "admin" %}
+        <a class="quick-link {% if active_nav == 'integration' or active_nav == 'governanca' %}active{% endif %}" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Integracoes</a>
+      {% else %}
+        <a class="quick-link {% if active_nav == 'governanca' %}active{% endif %}" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">Trilha</a>
+      {% endif %}
+    </nav>
 
     <script src="{{ url_for('static', filename='js/platform_core.js') }}"></script>
     <script src="{{ url_for('static', filename='js/ui_labels.js') }}"></script>
