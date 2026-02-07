@@ -173,13 +173,13 @@
           <div class="meta">Acompanhar execucoes, falhas e retries</div>
         </a>
         {% endif %}
-        <a class="list-item" href="/procurement/inbox?type=purchase_request&workspace_id={{ workspace_id }}">
+        <a class="list-item" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">
           <div class="title">Capturar solicitacoes</div>
           <div class="meta">Separar itens prontos para abertura de cotacao</div>
         </a>
-        <a class="list-item" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
+        <a class="list-item" href="/procurement/cotacoes/abrir?workspace_id={{ workspace_id }}">
           <div class="title">Executar cotacoes</div>
-          <div class="meta">Convidar fornecedores e registrar propostas</div>
+          <div class="meta">Selecionar itens e convidar fornecedores com link</div>
         </a>
         <a class="list-item" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
           <div class="title">Registrar decisoes</div>
@@ -199,13 +199,13 @@
         <h2 class="card-title">Jornada operacional</h2>
       </div>
       <div class="list">
-        <a class="list-item" href="/procurement/inbox?type=purchase_request&workspace_id={{ workspace_id }}">
+        <a class="list-item" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">
           <div class="title">1. Capturar solicitacoes</div>
-          <div class="meta">Consolidar itens prontos para cotacao</div>
+          <div class="meta">Acompanhar status e origem ERP das solicitacoes</div>
         </a>
-        <a class="list-item" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
+        <a class="list-item" href="/procurement/cotacoes/abrir?workspace_id={{ workspace_id }}">
           <div class="title">2. Executar cotacoes</div>
-          <div class="meta">Convidar fornecedores e registrar propostas</div>
+          <div class="meta">Selecionar itens, convidar fornecedores e gerar links</div>
         </a>
         <a class="list-item" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
           <div class="title">3. Registrar decisoes</div>

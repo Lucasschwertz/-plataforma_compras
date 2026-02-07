@@ -989,6 +989,67 @@ tr.best-overall td {
   margin-bottom: var(--space-2);
 }
 
+.checkbox-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.check-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.check-row input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.summary-chip {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 10px 12px;
+}
+
+.summary-chip .kpi-value {
+  margin-top: 4px;
+  font-size: 24px;
+}
+
+.link-inline {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.link-inline:hover {
+  text-decoration: underline;
+}
+
+.supplier-portal-body {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+}
+
+.supplier-portal {
+  width: min(1024px, 100%);
+  display: grid;
+  gap: var(--space-4);
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1282,7 +1343,7 @@ tr.best-overall td {
     bottom: 0;
     z-index: 40;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 8px;
     padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--border);

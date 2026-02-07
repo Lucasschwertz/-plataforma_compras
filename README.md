@@ -30,7 +30,14 @@ $env:DATABASE_URL="postgresql://postgres:SUA_SENHA@localhost:5432/portal_compras
 python database\init_db.py
 ```
 
-4. Importar dados ERP (CSV):
+4. Criar o espelho completo de tabelas ERP:
+
+```powershell
+$env:PYTHONPATH='.'
+python database\import_erp_csv.py --schema tabelas.csv --mirror-schema-only
+```
+
+5. Importar dados ERP (espelho + dominio):
 
 ```powershell
 $env:PYTHONPATH='.'
@@ -38,7 +45,11 @@ python database\import_erp_csv.py --schema tabelas.csv `
   --e405sol "C:\plataforma_compras\lista solicitações e405sol.csv" `
   --e410cot "C:\plataforma_compras\lista solicitações e410cot.csv" `
   --e410pct "C:\plataforma_compras\lista solicitações e410pct.csv" `
-  --e410fpc "C:\plataforma_compras\lista solicitações e410fpc.csv"
+  --e410fpc "C:\plataforma_compras\lista solicitações e410fpc.csv" `
+  --e420ocp "C:\plataforma_compras\lista solicitações e420ocp.csv" `
+  --e420ipo "C:\plataforma_compras\lista solicitações e420ipo.csv" `
+  --e440nfc "C:\plataforma_compras\lista solicitações e440nfc.csv" `
+  --e440ipc "C:\plataforma_compras\lista solicitações e440ipc.csv"
 ```
 
 ## Production

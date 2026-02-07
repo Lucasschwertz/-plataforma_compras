@@ -165,6 +165,7 @@ def _init_db_sqlite(db: Database):
         CREATE TABLE IF NOT EXISTS suppliers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
+            email TEXT,
             external_id TEXT,
             tax_id TEXT,
             risk_flags TEXT NOT NULL DEFAULT '{"no_supplier_response": false, "late_delivery": false, "sla_breach": false}',
@@ -258,6 +259,27 @@ def _init_db_sqlite(db: Database):
             tenant_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (rfq_item_id, supplier_id, tenant_id)
+        )
+        """
+    )
+
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rfq_supplier_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rfq_id INTEGER NOT NULL,
+            supplier_id INTEGER NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            email TEXT,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (
+                status IN ('pending','opened','submitted','expired','cancelled')
+            ),
+            expires_at TEXT,
+            opened_at TEXT,
+            submitted_at TEXT,
+            tenant_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -548,10 +570,12 @@ def _init_db_sqlite(db: Database):
     _ensure_column(db, "purchase_requests", "erp_num_cot", "TEXT")
     _ensure_column(db, "purchase_requests", "erp_num_pct", "TEXT")
     _ensure_column(db, "purchase_requests", "erp_sent_at", "TEXT")
+    _ensure_column(db, "suppliers", "email", "TEXT")
     _ensure_column(db, "integration_watermarks", "last_success_source_updated_at", "TEXT")
     _ensure_column(db, "integration_watermarks", "last_success_source_id", "TEXT")
     _ensure_column(db, "integration_watermarks", "last_success_cursor", "TEXT")
     _ensure_sync_scope_support(db)
+    _ensure_sqlite_unique_indexes(db)
     _ensure_tenant_backfill(db)
 
     # Padroniza titulos antigos para PT-BR (RFQ -> Cotacao).
@@ -614,6 +638,13 @@ def _init_db_sqlite(db: Database):
         FOR EACH ROW
         BEGIN
             UPDATE quote_items SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_rfq_supplier_invites_updated_at
+        AFTER UPDATE ON rfq_supplier_invites
+        FOR EACH ROW
+        BEGIN
+            UPDATE rfq_supplier_invites SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
         END;
 
         CREATE TRIGGER IF NOT EXISTS trg_awards_updated_at
@@ -726,6 +757,7 @@ def _init_db_postgres(db: Database) -> None:
         CREATE TABLE IF NOT EXISTS suppliers (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
+            email TEXT,
             external_id TEXT,
             tax_id TEXT,
             risk_flags TEXT NOT NULL DEFAULT '{"no_supplier_response": false, "late_delivery": false, "sla_breach": false}',
@@ -819,6 +851,27 @@ def _init_db_postgres(db: Database) -> None:
             tenant_id TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (rfq_item_id, supplier_id, tenant_id)
+        )
+        """
+    )
+
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rfq_supplier_invites (
+            id SERIAL PRIMARY KEY,
+            rfq_id INTEGER NOT NULL,
+            supplier_id INTEGER NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            email TEXT,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (
+                status IN ('pending','opened','submitted','expired','cancelled')
+            ),
+            expires_at TEXT,
+            opened_at TEXT,
+            submitted_at TEXT,
+            tenant_id TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -1108,6 +1161,7 @@ def _init_db_postgres(db: Database) -> None:
     _ensure_column(db, "purchase_requests", "erp_num_cot", "TEXT")
     _ensure_column(db, "purchase_requests", "erp_num_pct", "TEXT")
     _ensure_column(db, "purchase_requests", "erp_sent_at", "TEXT")
+    _ensure_column(db, "suppliers", "email", "TEXT")
     _ensure_column(db, "integration_watermarks", "last_success_source_updated_at", "TEXT")
     _ensure_column(db, "integration_watermarks", "last_success_source_id", "TEXT")
     _ensure_column(db, "integration_watermarks", "last_success_cursor", "TEXT")
@@ -1140,6 +1194,7 @@ def _create_postgres_updated_at_triggers(db: Database) -> None:
         "rfq_items",
         "quotes",
         "quote_items",
+        "rfq_supplier_invites",
         "awards",
         "purchase_orders",
         "receipts",
@@ -1172,6 +1227,23 @@ def _ensure_column(db: Database, table: str, column: str, definition: str) -> No
             db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     except Exception:
         return
+
+
+def _ensure_sqlite_unique_indexes(db: Database) -> None:
+    if db.backend != "sqlite":
+        return
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_quote_items_quote_rfq_tenant
+        ON quote_items (quote_id, rfq_item_id, tenant_id)
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_rfq_item_suppliers_unique
+        ON rfq_item_suppliers (rfq_item_id, supplier_id, tenant_id)
+        """
+    )
 
 
 def _ensure_sync_scope_support(db) -> None:
@@ -1402,6 +1474,7 @@ def _ensure_tenant_backfill(db) -> None:
         "rfqs",
         "rfq_items",
         "rfq_item_suppliers",
+        "rfq_supplier_invites",
         "quotes",
         "quote_items",
         "awards",

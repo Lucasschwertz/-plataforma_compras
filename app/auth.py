@@ -29,6 +29,8 @@ def register_auth(app) -> None:
             return None
         if path in {"/login", "/logout", "/register", "/health"}:
             return None
+        if path.startswith("/fornecedor/convite/") or path.startswith("/api/fornecedor/convite/"):
+            return None
 
         if session.get("user_email"):
             return None

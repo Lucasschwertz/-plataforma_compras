@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portal do fornecedor | Plataforma Compras</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/design_tokens.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}" />
+  </head>
+  <body class="supplier-portal-body">
+    <main class="supplier-portal">
+      <section class="card">
+        <div class="card-header">
+          <h1 class="card-title">Portal do fornecedor</h1>
+          <span class="badge" id="inviteStatusBadge">Validando convite</span>
+        </div>
+        <div class="meta" id="inviteMeta">Aguarde o carregamento dos dados da cotacao.</div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2 class="card-title">Dados da cotacao</h2>
+        </div>
+        <div class="grid grid-2" id="contextData">
+          <div class="list-item">
+            <div class="meta">Cotacao</div>
+            <div class="title" id="rfqTitle">Carregando</div>
+          </div>
+          <div class="list-item">
+            <div class="meta">Fornecedor</div>
+            <div class="title" id="supplierName">Carregando</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2 class="card-title">Enviar proposta</h2>
+          <span class="meta">Preencha preco unitario e prazo por item</span>
+        </div>
+        <form id="proposalForm" class="stack">
+          <div class="table-wrap">
+            <table class="table-mobile-cards table-compact">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th class="numeric">Quantidade</th>
+                  <th class="numeric">Preco unitario</th>
+                  <th class="numeric">Prazo em dias</th>
+                </tr>
+              </thead>
+              <tbody id="proposalItemsBody"></tbody>
+            </table>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-primary" type="submit" id="submitBtn">Enviar proposta</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <div class="toast-root" id="toastRoot"></div>
+    <script src="{{ url_for('static', filename='js/platform_core.js') }}"></script>
+    <script>
+      const token = "{{ invite_token }}";
+      const Platform = window.PlatformUI || {};
+      const proposalForm = document.getElementById("proposalForm");
+      const proposalItemsBody = document.getElementById("proposalItemsBody");
+      const submitBtn = document.getElementById("submitBtn");
+      const inviteStatusBadge = document.getElementById("inviteStatusBadge");
+      const inviteMeta = document.getElementById("inviteMeta");
+      const rfqTitle = document.getElementById("rfqTitle");
+      const supplierName = document.getElementById("supplierName");
+      let loadedItems = [];
+
+      const escapeHtml = Platform.escapeHtml
+        ? Platform.escapeHtml
+        : (value) =>
+            String(value ?? "Nao informado")
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;")
+              .replaceAll('"', "&quot;")
+              .replaceAll("'", "&#039;");
+
+      function renderItems(items) {
+        loadedItems = items || [];
+        if (!loadedItems.length) {
+          proposalItemsBody.innerHTML = `
+            <tr>
+              <td colspan="4" class="empty-row">
+                <div class="empty-state-inline">
+                  <div class="empty-state-title">Sem itens disponiveis</div>
+                  <div class="meta">Contate o comprador para revisar o convite</div>
+                </div>
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        proposalItemsBody.innerHTML = loadedItems
+          .map(
+            (item) => `
+              <tr>
+                <td data-label="Item">
+                  <strong>${escapeHtml(item.description)}</strong>
+                </td>
+                <td class="numeric" data-label="Quantidade">${escapeHtml(item.quantity)} ${escapeHtml(item.uom)}</td>
+                <td class="numeric" data-label="Preco unitario">
+                  <input class="input" type="number" min="0" step="0.01" data-unit-price="${item.rfq_item_id}" value="${item.unit_price ?? ""}" />
+                </td>
+                <td class="numeric" data-label="Prazo em dias">
+                  <input class="input" type="number" min="0" step="1" data-lead-time="${item.rfq_item_id}" value="${item.lead_time_days ?? ""}" />
+                </td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
+      async function loadInvite() {
+        inviteStatusBadge.textContent = "Carregando";
+        inviteMeta.textContent = "Buscando dados da cotacao";
+        try {
+          const response = await fetch(`/api/fornecedor/convite/${encodeURIComponent(token)}`);
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload?.message || payload?.error || "erro");
+          }
+
+          inviteStatusBadge.textContent = payload.invite.status || "aberto";
+          inviteMeta.textContent = `Validade ${payload.invite.expires_at || "nao informada"}`;
+          rfqTitle.textContent = payload.rfq?.title || "Cotacao";
+          supplierName.textContent = payload.supplier?.name || "Fornecedor";
+          renderItems(payload.items || []);
+        } catch (error) {
+          inviteStatusBadge.textContent = "Erro";
+          inviteMeta.textContent = "Convite indisponivel";
+          renderItems([]);
+          if (window.showToast) window.showToast("danger", `Nao foi possivel carregar convite, ${error.message || "erro"}`);
+        }
+      }
+
+      proposalForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const items = loadedItems
+          .map((item) => {
+            const unitInput = document.querySelector(`[data-unit-price='${item.rfq_item_id}']`);
+            const leadInput = document.querySelector(`[data-lead-time='${item.rfq_item_id}']`);
+            return {
+              rfq_item_id: item.rfq_item_id,
+              unit_price: unitInput ? unitInput.value : "",
+              lead_time_days: leadInput ? leadInput.value : "",
+            };
+          })
+          .filter((item) => item.unit_price !== "");
+
+        if (!items.length) {
+          if (window.showToast) window.showToast("warning", "Preencha ao menos um item com preco");
+          return;
+        }
+
+        if (Platform.setButtonBusy) Platform.setButtonBusy(submitBtn, true, { loading: "Enviando proposta", idle: "Enviar proposta" });
+        else submitBtn.disabled = true;
+
+        try {
+          const response = await fetch(`/api/fornecedor/convite/${encodeURIComponent(token)}/propostas`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ items }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload?.message || payload?.error || "erro");
+          }
+          inviteStatusBadge.textContent = "Proposta enviada";
+          if (window.showToast) window.showToast("success", "Proposta enviada com sucesso");
+          await loadInvite();
+        } catch (error) {
+          if (window.showToast) window.showToast("danger", `Falha ao enviar proposta, ${error.message || "erro"}`);
+        } finally {
+          if (Platform.setButtonBusy) Platform.setButtonBusy(submitBtn, false, { idle: "Enviar proposta" });
+          else submitBtn.disabled = false;
+        }
+      });
+
+      loadInvite();
+    </script>
+  </body>
+</html>

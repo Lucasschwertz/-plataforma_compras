@@ -8,3 +8,8 @@ database/*.db
 env.txt
 postgres_data/
 app/templates/*.new.html
+.tmp_rw/
+.tmp_test/
+pc_test_*/
+COLE_A_*
+SUA_STRING_*

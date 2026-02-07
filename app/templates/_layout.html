@@ -14,7 +14,9 @@
   {% set workspace_options = workspace_options | default([{"id": workspace_id, "name": workspace_name}]) %}
   {% set default_breadcrumb_module =
       "Dashboard" if active_nav == "dashboard"
+      else "Solicitacoes" if active_nav == "requests"
       else "Operacao" if active_nav == "procurement"
+      else "Abrir cotacao" if active_nav == "open_quote"
       else "Cotacoes" if active_nav == "sourcing"
       else "Aprovacoes" if active_nav == "approvals"
       else "Analise" if active_nav == "governanca"
@@ -46,7 +48,9 @@
         <nav class="nav">
           <div class="nav-section-title">Operacao</div>
           <a class="{% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Painel</a>
+          <a class="{% if active_nav == 'requests' %}active{% endif %}" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">Solicitacoes</a>
           <a class="{% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
+          <a class="{% if active_nav == 'open_quote' %}active{% endif %}" href="/procurement/cotacoes/abrir?workspace_id={{ workspace_id }}">Abrir cotacao</a>
           <a class="{% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
           {% if ui_role == "approver" or ui_role == "admin" or ui_role == "manager" %}
             <a class="{% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>
@@ -94,6 +98,7 @@
             />
             <div class="role-shortcuts" aria-label="Atalhos por papel">
               {% if ui_role == "buyer" or ui_role == "manager" %}
+                <a class="btn btn-ghost btn-small" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">Solicitacoes</a>
                 <a class="btn btn-ghost btn-small" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
                 <a class="btn btn-ghost btn-small" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
               {% endif %}
@@ -133,6 +138,7 @@
     <div class="toast-root" id="toastRoot"></div>
     <nav class="mobile-quick-nav" aria-label="Acoes rapidas">
       <a class="quick-link {% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Painel</a>
+      <a class="quick-link {% if active_nav == 'requests' %}active{% endif %}" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">Solicitacoes</a>
       <a class="quick-link {% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
       <a class="quick-link {% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
       {% if ui_role == "approver" or ui_role == "manager" %}

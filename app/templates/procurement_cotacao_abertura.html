@@ -1,0 +1,323 @@
+{% extends "_layout.html" %}
+{% set active_nav = "open_quote" %}
+{% block title %}Abrir cotacao | Plataforma Compras{% endblock %}
+{% block page_title %}Abertura de cotacao{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb current">Abrir cotacao</span>
+{% endblock %}
+{% block page_actions %}
+  <button class="btn" id="refreshBtn">Atualizar</button>
+  <a class="btn btn-ghost" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">Ver solicitacoes</a>
+  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Ver cotacoes</a>
+{% endblock %}
+
+{% block content %}
+  <section class="card compact action-strip">
+    <div class="card-header">
+      <h2 class="card-title">Fluxo de abertura</h2>
+      <span class="badge" id="flowSummary">Selecione itens e fornecedores</span>
+    </div>
+    <div class="meta">
+      1) Escolha os itens das solicitacoes, 2) escolha fornecedores, 3) gere links e envie por email para preenchimento da proposta.
+    </div>
+  </section>
+
+  <section class="grid grid-2">
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Itens das solicitacoes</h2>
+        <span class="meta" id="itemsSummary">Carregando itens</span>
+      </div>
+      <div class="list" id="requestGroups"></div>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <h2 class="card-title">Fornecedores para convite</h2>
+        <span class="meta" id="suppliersSummary">Carregando fornecedores</span>
+      </div>
+      <div class="list" id="suppliersList"></div>
+    </article>
+  </section>
+
+  <section class="card">
+    <form id="openRfqForm" class="stack">
+      <div class="grid grid-3">
+        <div>
+          <label class="meta" for="titleInput">Titulo da cotacao</label>
+          <input class="input" id="titleInput" value="Cotacao - nova rodada" required />
+        </div>
+        <div class="summary-chip">
+          <div class="meta">Itens selecionados</div>
+          <div class="kpi-value" id="selectedItemsCount">0</div>
+        </div>
+        <div class="summary-chip">
+          <div class="meta">Fornecedores selecionados</div>
+          <div class="kpi-value" id="selectedSuppliersCount">0</div>
+        </div>
+      </div>
+      <div class="page-actions">
+        <button type="submit" class="btn btn-primary" id="openRfqBtn">Abrir cotacao e gerar convites</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card" id="invitesSection" hidden>
+    <div class="card-header">
+      <h2 class="card-title">Convites de fornecedor</h2>
+      <span class="badge success" id="inviteStatus">Convites gerados</span>
+    </div>
+    <div class="meta" id="inviteMeta"></div>
+    <div class="table-wrap">
+      <table class="table-mobile-cards table-compact">
+        <thead>
+          <tr>
+            <th>Fornecedor</th>
+            <th>Email</th>
+            <th>Validade</th>
+            <th>Link</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody id="invitesBody"></tbody>
+      </table>
+    </div>
+    <div class="page-actions" style="margin-top: 12px">
+      <a class="btn btn-primary" id="openRfqDeskBtn" href="#">Abrir mesa da cotacao</a>
+      <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Voltar para cotacoes</a>
+    </div>
+  </section>
+{% endblock %}
+
+{% block page_scripts %}
+  <script>
+    const workspaceId = "{{ workspace_id }}";
+    const Platform = window.PlatformUI || {};
+    const requestGroups = document.getElementById("requestGroups");
+    const suppliersList = document.getElementById("suppliersList");
+    const itemsSummary = document.getElementById("itemsSummary");
+    const suppliersSummary = document.getElementById("suppliersSummary");
+    const titleInput = document.getElementById("titleInput");
+    const selectedItemsCount = document.getElementById("selectedItemsCount");
+    const selectedSuppliersCount = document.getElementById("selectedSuppliersCount");
+    const openRfqForm = document.getElementById("openRfqForm");
+    const openRfqBtn = document.getElementById("openRfqBtn");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const flowSummary = document.getElementById("flowSummary");
+    const invitesSection = document.getElementById("invitesSection");
+    const invitesBody = document.getElementById("invitesBody");
+    const inviteMeta = document.getElementById("inviteMeta");
+    const openRfqDeskBtn = document.getElementById("openRfqDeskBtn");
+
+    const selectedItems = new Set();
+    const selectedSuppliers = new Set();
+
+    const withWorkspace = (path) =>
+      Platform.withWorkspace
+        ? Platform.withWorkspace(path, workspaceId)
+        : `${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
+
+    const escapeHtml = Platform.escapeHtml
+      ? Platform.escapeHtml
+      : (value) =>
+          String(value ?? "Nao informado")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+
+    function syncCounters() {
+      selectedItemsCount.textContent = String(selectedItems.size);
+      selectedSuppliersCount.textContent = String(selectedSuppliers.size);
+      flowSummary.textContent = `${selectedItems.size} itens, ${selectedSuppliers.size} fornecedores`;
+    }
+
+    function renderRequestGroups(groups) {
+      if (!groups.length) {
+        requestGroups.innerHTML = `
+          <div class="empty-state-inline">
+            <div class="empty-state-title">Sem itens pendentes para cotacao</div>
+            <div class="meta">Verifique se o ERP enviou solicitacoes com status pendente</div>
+          </div>
+        `;
+        itemsSummary.textContent = "Nenhum item aberto";
+        return;
+      }
+
+      itemsSummary.textContent = `${groups.length} solicitacoes com itens disponiveis`;
+      requestGroups.innerHTML = groups
+        .map((group) => {
+          const header = `${group.number || `SR-${group.purchase_request_id}`} | ${group.priority || "-"} | ${group.needed_at || "-"}`;
+          const items = (group.items || [])
+            .map(
+              (item) => `
+                <label class="check-row">
+                  <input type="checkbox" value="${item.id}" data-item-checkbox />
+                  <span>
+                    <strong>${escapeHtml(item.description)}</strong><br />
+                    <span class="meta">${escapeHtml(item.quantity)} ${escapeHtml(item.uom)} | linha ${escapeHtml(item.line_no || "-")}</span>
+                  </span>
+                </label>
+              `
+            )
+            .join("");
+          return `
+            <div class="list-item">
+              <div class="title">${escapeHtml(header)}</div>
+              <div class="meta">Solicitante ${escapeHtml(group.requested_by || "-")} | ${escapeHtml(group.department || "-")}</div>
+              <div class="stack" style="margin-top: 10px">${items}</div>
+            </div>
+          `;
+        })
+        .join("");
+
+      requestGroups.querySelectorAll("[data-item-checkbox]").forEach((input) => {
+        input.addEventListener("change", () => {
+          const value = Number(input.value);
+          if (input.checked) selectedItems.add(value);
+          else selectedItems.delete(value);
+          syncCounters();
+        });
+      });
+    }
+
+    function renderSuppliers(items) {
+      if (!items.length) {
+        suppliersList.innerHTML = `
+          <div class="empty-state-inline">
+            <div class="empty-state-title">Sem fornecedores cadastrados</div>
+            <div class="meta">Cadastre fornecedores para iniciar convites</div>
+          </div>
+        `;
+        suppliersSummary.textContent = "Nenhum fornecedor";
+        return;
+      }
+      suppliersSummary.textContent = `${items.length} fornecedores disponiveis`;
+      suppliersList.innerHTML = items
+        .map(
+          (supplier) => `
+            <label class="check-row">
+              <input type="checkbox" value="${supplier.id}" data-supplier-checkbox />
+              <span>
+                <strong>${escapeHtml(supplier.name)}</strong><br />
+                <span class="meta">${escapeHtml(supplier.email || "sem email cadastrado")}</span>
+              </span>
+            </label>
+          `
+        )
+        .join("");
+
+      suppliersList.querySelectorAll("[data-supplier-checkbox]").forEach((input) => {
+        input.addEventListener("change", () => {
+          const value = Number(input.value);
+          if (input.checked) selectedSuppliers.add(value);
+          else selectedSuppliers.delete(value);
+          syncCounters();
+        });
+      });
+    }
+
+    function renderInvites(data) {
+      invitesSection.hidden = false;
+      inviteMeta.textContent = `${data.supplier_count} fornecedores convidados para ${data.items_invited} itens`;
+      invitesBody.innerHTML = (data.items || [])
+        .map(
+          (invite) => `
+            <tr>
+              <td data-label="Fornecedor"><strong>${escapeHtml(invite.supplier_name)}</strong></td>
+              <td data-label="Email">${escapeHtml(invite.supplier_email || "-")}</td>
+              <td data-label="Validade">${escapeHtml(invite.expires_at || "-")}</td>
+              <td data-label="Link"><a class="link-inline" href="${escapeHtml(invite.access_url)}" target="_blank" rel="noreferrer">Abrir portal</a></td>
+              <td class="cell-actions" data-label="Acoes">
+                <div class="actions-cell">
+                  <a class="btn btn-small btn-ghost" href="${escapeHtml(invite.mailto_url)}">Enviar email</a>
+                  <button class="btn btn-small" type="button" data-copy-link="${escapeHtml(invite.access_url)}">Copiar link</button>
+                </div>
+              </td>
+            </tr>
+          `
+        )
+        .join("");
+
+      invitesBody.querySelectorAll("[data-copy-link]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const link = button.getAttribute("data-copy-link");
+          try {
+            await navigator.clipboard.writeText(link || "");
+            if (window.showToast) window.showToast("success", "Link copiado");
+          } catch (error) {
+            if (window.showToast) window.showToast("warning", "Nao foi possivel copiar o link");
+          }
+        });
+      });
+    }
+
+    async function loadOpeningData() {
+      itemsSummary.textContent = "Atualizando itens";
+      suppliersSummary.textContent = "Atualizando fornecedores";
+      const params = new URLSearchParams({ limit: "300" });
+      const requestId = new URLSearchParams(window.location.search).get("purchase_request_id");
+      if (requestId) params.set("purchase_request_id", requestId);
+
+      try {
+        const response = await fetch(withWorkspace(`/api/procurement/cotacoes/abertura-data?${params.toString()}`));
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.message || payload?.error || "erro");
+        selectedItems.clear();
+        selectedSuppliers.clear();
+        renderRequestGroups(payload.purchase_requests || []);
+        renderSuppliers(payload.suppliers || []);
+        syncCounters();
+      } catch (error) {
+        itemsSummary.textContent = "Falha ao carregar";
+        suppliersSummary.textContent = "Falha ao carregar";
+        requestGroups.innerHTML = `<div class="empty-state-inline"><div class="empty-state-title">Falha ao carregar itens</div></div>`;
+        suppliersList.innerHTML = `<div class="empty-state-inline"><div class="empty-state-title">Falha ao carregar fornecedores</div></div>`;
+        if (window.showToast) window.showToast("danger", "Nao foi possivel carregar dados de abertura");
+      }
+    }
+
+    openRfqForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!selectedItems.size) {
+        if (window.showToast) window.showToast("warning", "Selecione ao menos um item");
+        return;
+      }
+      if (!selectedSuppliers.size) {
+        if (window.showToast) window.showToast("warning", "Selecione ao menos um fornecedor");
+        return;
+      }
+
+      if (Platform.setButtonBusy) Platform.setButtonBusy(openRfqBtn, true, { loading: "Abrindo cotacao", idle: "Abrir cotacao e gerar convites" });
+      else openRfqBtn.disabled = true;
+
+      try {
+        const response = await fetch(withWorkspace("/api/procurement/cotacoes/abertura"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: titleInput.value.trim() || "Cotacao aberta",
+            purchase_request_item_ids: Array.from(selectedItems),
+            supplier_ids: Array.from(selectedSuppliers),
+            invite_valid_days: 7,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.message || payload?.error || "erro");
+
+        renderInvites(payload.invites || { items: [] });
+        openRfqDeskBtn.href = withWorkspace(`/procurement/cotacoes/${payload.rfq.id}`);
+        if (window.showToast) window.showToast("success", "Cotacao criada e convites gerados");
+      } catch (error) {
+        if (window.showToast) window.showToast("danger", `Falha ao abrir cotacao, ${error.message || "erro"}`);
+      } finally {
+        if (Platform.setButtonBusy) Platform.setButtonBusy(openRfqBtn, false, { idle: "Abrir cotacao e gerar convites" });
+        else openRfqBtn.disabled = false;
+      }
+    });
+
+    refreshBtn.addEventListener("click", loadOpeningData);
+    loadOpeningData();
+  </script>
+{% endblock %}

@@ -9,6 +9,8 @@
 {% block page_actions %}
   <button class="btn" id="refreshBtn">Atualizar dados</button>
   <button class="btn" id="seedBtn">Popular dados</button>
+  <a class="btn btn-ghost" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">Solicitacoes</a>
+  <a class="btn btn-ghost" href="/procurement/cotacoes/abrir?workspace_id={{ workspace_id }}">Abrir cotacao</a>
   <button class="btn btn-primary" id="createRfqBtn">Nova cotacao</button>
 {% endblock %}
 {% block content %}
