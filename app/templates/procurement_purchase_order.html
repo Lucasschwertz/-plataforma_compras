@@ -2,17 +2,17 @@
 {% extends "_layout.html" %}
 {% set active_nav = "procurement" %}
 {% block title %}OC {{ purchase_order_id }} | Plataforma Compras{% endblock %}
-{% block page_title %}Detalhe da OC{% endblock %}
-{% block breadcrumb_tail %} / OC {{ purchase_order_id }}{% endblock %}
+{% block page_title %}Ordem de compra{% endblock %}
+{% block breadcrumb_tail %} / Operacao / Ordem de compra {{ purchase_order_id }}{% endblock %}
 {% block page_actions %}
-  <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Voltar para inbox</a>
+  <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Voltar para inbox operacional</a>
   <button class="btn btn-primary" id="pushErpBtn">Enviar ao ERP</button>
 {% endblock %}
 {% block content %}
   <section class="grid grid-2">
     <article class="card">
       <div class="card-header">
-        <h2 class="card-title">Resumo</h2>
+        <h2 class="card-title">Resumo da ordem</h2>
         <span class="badge" id="poStatusBadge">Status</span>
       </div>
       <div class="stack" id="poSummary"></div>
@@ -20,14 +20,14 @@
 
     <article class="card">
       <div class="card-header">
-        <h2 class="card-title">Eventos</h2>
+        <h2 class="card-title">Historico de eventos</h2>
       </div>
       <div class="list" id="eventsList"></div>
     </article>
 
     <article class="card">
       <div class="card-header">
-        <h2 class="card-title">Execucoes de integracao</h2>
+        <h2 class="card-title">Execucoes de integracao ERP</h2>
       </div>
       <div class="list" id="syncRunsList"></div>
     </article>

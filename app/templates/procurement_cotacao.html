@@ -2,17 +2,17 @@
 {% extends "_layout.html" %}
 {% set active_nav = "sourcing" %}
 {% block title %}Cotacao {{ rfq_id }} | Plataforma Compras{% endblock %}
-{% block page_title %}Mesa de cotacao{% endblock %}
-{% block breadcrumb_tail %} / Cotacao {{ rfq_id }}{% endblock %}
+{% block page_title %}Mesa de cotacao e decisao{% endblock %}
+{% block breadcrumb_tail %} / Cotacoes / Mesa {{ rfq_id }}{% endblock %}
 {% block page_actions %}
   <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Voltar para cotacoes</a>
-  <a class="btn btn-primary" href="#decisao">Registrar decisao</a>
+  <a class="btn btn-primary" href="#decisao">Ir para decisao</a>
 {% endblock %}
 {% block content %}
   <section class="grid grid-2">
     <article class="card">
       <div class="card-header">
-        <h2 class="card-title">Resumo da cotacao</h2>
+        <h2 class="card-title">Contexto da cotacao</h2>
         <button class="btn btn-ghost btn-small" id="atualizarBtn">Atualizar</button>
       </div>
       <div class="stack" id="cotacaoResumo"></div>
@@ -20,7 +20,7 @@
 
     <article class="card" id="decisao">
       <div class="card-header">
-        <h2 class="card-title">Decisao</h2>
+        <h2 class="card-title">Decisao de compra</h2>
         <span class="badge" id="decisaoBadge">Aguardando</span>
       </div>
       <div class="stack" id="decisaoResumo"></div>
@@ -42,7 +42,7 @@
 
     <article class="card">
       <div class="card-header">
-        <h2 class="card-title">Ordem de compra</h2>
+        <h2 class="card-title">Ordem de compra associada</h2>
         <span class="badge" id="ocBadge">Nao gerada</span>
       </div>
       <div class="stack" id="ocResumo"></div>
@@ -52,8 +52,8 @@
 
   <section class="card" id="itensFornecedoresSection">
     <div class="card-header">
-      <h2 class="card-title">Itens e fornecedores por item</h2>
-      <span class="meta">Convide fornecedores e acompanhe propostas</span>
+      <h2 class="card-title">Cobertura por item e fornecedor</h2>
+      <span class="meta">Convide fornecedores e acompanhe propostas por item</span>
     </div>
     <div class="table-wrap">
       <table>
@@ -73,7 +73,7 @@
 
   <section class="card" id="comparacao">
     <div class="card-header">
-      <h2 class="card-title">Comparacao por fornecedor</h2>
+      <h2 class="card-title">Painel comparativo da cotacao</h2>
       <div class="page-actions">
         <span class="pill info" id="roleLeituraPill" hidden>Modo executivo</span>
         <button class="btn btn-ghost btn-small" type="button" id="toggleDetalheComparacaoBtn">Ocultar detalhe tecnico</button>
@@ -121,7 +121,7 @@
           </table>
         </div>
         <details class="disclosure" id="comparacaoDetalhes">
-          <summary>Ver detalhes</summary>
+          <summary>Ver detalhes tecnicos</summary>
           <div class="stack" id="comparacaoDetalhesConteudo"></div>
         </details>
         <div class="list" id="comparacaoItens"></div>
@@ -131,7 +131,7 @@
 
   <section class="card" id="propostaSection">
     <div class="card-header">
-      <h2 class="card-title">Registrar proposta por fornecedor</h2>
+      <h2 class="card-title">Registrar proposta por fornecedor convidado</h2>
     </div>
     <form id="propostaForm" class="stack">
       <div style="max-width: 360px">
@@ -160,14 +160,14 @@
   <section class="grid grid-2">
     <article class="card">
       <div class="card-header">
-        <h2 class="card-title">Eventos da cotacao</h2>
+        <h2 class="card-title">Historico da cotacao</h2>
       </div>
       <div class="list" id="eventosCotacao"></div>
     </article>
 
     <article class="card">
       <div class="card-header">
-        <h2 class="card-title">Eventos da decisao</h2>
+        <h2 class="card-title">Historico da decisao</h2>
       </div>
       <div class="list" id="eventosDecisao"></div>
     </article>
@@ -294,8 +294,8 @@
       function setDetalheComparacaoVisivel(visivel) {
         state.detalheComparacaoAberto = Boolean(visivel);
         comparacaoDetalhada.style.display = state.detalheComparacaoAberto ? "grid" : "none";
-        const acaoMostrar = isExecutiveReaderRole ? "Mostrar analise tecnica" : "Mostrar detalhe tecnico";
-        const acaoOcultar = isExecutiveReaderRole ? "Ocultar analise tecnica" : "Ocultar detalhe tecnico";
+        const acaoMostrar = "Mostrar visao tecnica";
+        const acaoOcultar = "Ocultar visao tecnica";
         toggleDetalheComparacaoBtn.textContent = state.detalheComparacaoAberto
           ? acaoOcultar
           : acaoMostrar;
@@ -431,7 +431,7 @@
 
       function renderComparacao(data) {
         if (!data || !data.items || !data.items.length) {
-          comparacaoResumo.textContent = "Sem itens para comparar.";
+          comparacaoResumo.textContent = "Sem dados de propostas para comparar.";
           comparacaoTabela.innerHTML = '<tr><td colspan="5" class="empty-row">Sem propostas.</td></tr>';
           comparacaoItens.innerHTML = "";
           comparacaoDetalhesConteudo.innerHTML = "";
@@ -444,15 +444,15 @@
         const suggestedSupplierId = summary.suggested_supplier_id;
         const suggestionReason = summary.suggestion_reason || "Sem sugestao";
 
-        let suggestionLabel = "Sem propostas cadastradas para comparar.";
+        let suggestionLabel = "Sem propostas cadastradas para comparacao.";
         if (totals.length && suggestedSupplierId) {
           const suggestedSupplier = totals.find((t) => t.supplier_id === suggestedSupplierId);
           const suggestedName = suggestedSupplier?.supplier_name
             ? suggestedSupplier.supplier_name
             : `fornecedor ${suggestedSupplierId || "n/a"}`;
-          suggestionLabel = `Sugestao ${suggestedName}, ${suggestionReason}.`;
+          suggestionLabel = `Recomendacao ${suggestedName}, ${suggestionReason}.`;
         } else if (totals.length) {
-          suggestionLabel = "Sem sugestao geral, cobertura incompleta.";
+          suggestionLabel = "Sem recomendacao geral, cobertura incompleta.";
         }
 
         comparacaoResumo.innerHTML = `

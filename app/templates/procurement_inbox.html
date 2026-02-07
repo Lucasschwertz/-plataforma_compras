@@ -2,12 +2,12 @@
 {% extends "_layout.html" %}
 {% set active_nav = "procurement" %}
 {% block title %}Inbox | Plataforma Compras{% endblock %}
-{% block page_title %}Inbox operacional{% endblock %}
-{% block breadcrumb_tail %} / Operacao / Inbox{% endblock %}
+{% block page_title %}Inbox de operacoes{% endblock %}
+{% block breadcrumb_tail %} / Operacao / Inbox de compras{% endblock %}
 {% block page_actions %}
   <button class="btn" id="refreshBtn">Atualizar</button>
   <button class="btn" id="seedBtn">Popular dados</button>
-  <button class="btn btn-primary" id="createRfqBtn">Criar cotacao</button>
+  <button class="btn btn-primary" id="createRfqBtn">Nova cotacao</button>
 {% endblock %}
 {% block content %}
   <section class="grid">
@@ -63,7 +63,7 @@
 
     <div class="card">
       <div class="card-header">
-        <h2 class="card-title">Fila ativa</h2>
+        <h2 class="card-title">Fila ativa de trabalho</h2>
         <div class="meta" id="summary">Carregando</div>
       </div>
       <div class="table-wrap">
@@ -93,7 +93,7 @@
   <div class="modal-backdrop" id="rfqModalBackdrop" role="dialog" aria-modal="true">
     <div class="card" style="max-width: 620px; margin: 0 auto;">
       <div class="card-header">
-        <h2 class="card-title">Criar cotacao</h2>
+        <h2 class="card-title">Nova cotacao</h2>
         <button class="btn btn-ghost btn-small" data-close-modal="rfq">Fechar</button>
       </div>
       <form id="rfqForm" class="stack">
@@ -805,8 +805,8 @@
         return status || "n/a";
       }
       function prettyType(type) {
-        if (window.UiLabels && window.UiLabels.prettyEntity) {
-          return window.UiLabels.prettyEntity(type);
+        if (window.UiLabels && window.UiLabels.prettyType) {
+          return window.UiLabels.prettyType(type);
         }
         return type || "n/a";
       }
