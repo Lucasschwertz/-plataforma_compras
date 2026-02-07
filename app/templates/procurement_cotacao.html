@@ -12,6 +12,18 @@
   <a class="btn btn-primary" href="#decisao">Ir para decisao</a>
 {% endblock %}
 {% block content %}
+  <section class="card compact action-strip">
+    <div class="card-header">
+      <h2 class="card-title">Proxima acao da mesa</h2>
+      <span class="badge" id="nextActionBadge">Aguardando dados</span>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-primary" type="button" id="nextActionPrimaryBtn">Registrar decisao</button>
+      <a class="btn btn-ghost" href="#comparacao">Revisar comparacao</a>
+    </div>
+    <div class="meta" id="nextActionMeta">Use a comparacao para decidir e seguir para ordem de compra.</div>
+  </section>
+
   <section class="grid grid-2">
     <article class="card">
       <div class="card-header">
@@ -190,6 +202,9 @@
       }
 
       const cotacaoResumo = document.getElementById("cotacaoResumo");
+      const nextActionBadge = document.getElementById("nextActionBadge");
+      const nextActionMeta = document.getElementById("nextActionMeta");
+      const nextActionPrimaryBtn = document.getElementById("nextActionPrimaryBtn");
       const decisaoResumo = document.getElementById("decisaoResumo");
       const decisaoHint = document.getElementById("decisaoHint");
       const decisaoBadge = document.getElementById("decisaoBadge");
@@ -778,6 +793,44 @@
         }
       }
 
+      function renderNextAction(decisao, oc) {
+        if (!nextActionPrimaryBtn || !nextActionBadge || !nextActionMeta) return;
+
+        nextActionPrimaryBtn.disabled = false;
+        nextActionPrimaryBtn.dataset.action = "focus_decision";
+        nextActionPrimaryBtn.dataset.ocId = "";
+        nextActionPrimaryBtn.textContent = "Registrar decisao";
+
+        if (!decisao) {
+          nextActionBadge.textContent = "Aguardando decisao";
+          nextActionMeta.textContent = "Preencha fornecedor e motivo para registrar a decisao.";
+          return;
+        }
+
+        if (decisao && !oc) {
+          nextActionBadge.textContent = "Gerar ordem de compra";
+          nextActionMeta.textContent = "A decisao foi registrada, agora gere a ordem de compra na secao de decisao.";
+          nextActionPrimaryBtn.textContent = "Gerar ordem de compra";
+          nextActionPrimaryBtn.dataset.action = "focus_decision";
+          return;
+        }
+
+        if (oc && oc.status !== "erp_accepted") {
+          nextActionBadge.textContent = "Enviar ao ERP";
+          nextActionMeta.textContent = "A ordem foi gerada, confirme o envio ao ERP para concluir o fluxo.";
+          nextActionPrimaryBtn.textContent = "Enviar OC ao ERP";
+          nextActionPrimaryBtn.dataset.action = "push_erp";
+          nextActionPrimaryBtn.dataset.ocId = String(oc.id);
+          return;
+        }
+
+        nextActionBadge.textContent = "Fluxo concluido";
+        nextActionMeta.textContent = "Decisao e ordem de compra finalizadas com retorno ERP aceito.";
+        nextActionPrimaryBtn.textContent = "Abrir ordem de compra";
+        nextActionPrimaryBtn.dataset.action = "open_po";
+        nextActionPrimaryBtn.dataset.ocId = oc ? String(oc.id) : "";
+      }
+
       function renderDecisao(decisao, oc) {
         if (!decisao) {
           const suggestion = getSuggestedSupplier(state.comparacao);
@@ -876,6 +929,7 @@
         renderItens();
         renderDecisao(state.decisao, state.ordemCompra);
         renderOc(state.ordemCompra);
+        renderNextAction(state.decisao, state.ordemCompra);
         renderEventos(eventosCotacao, cotacaoData.eventos_cotacao, "Sem eventos da cotacao.");
         renderEventos(eventosDecisao, cotacaoData.eventos_decisao, "Sem eventos da decisao.");
         renderComparacao(state.comparacao || {});
@@ -986,6 +1040,22 @@
       propostaForm.addEventListener("submit", salvarProposta);
       atualizarBtn.addEventListener("click", carregar);
       propostaFornecedorSelect.addEventListener("change", renderPropostaItens);
+      nextActionPrimaryBtn.addEventListener("click", async () => {
+        const action = nextActionPrimaryBtn.dataset.action || "focus_decision";
+        if (action === "focus_decision") {
+          window.location.hash = "decisao";
+          fornecedorInput.focus();
+          return;
+        }
+        const ocId = Number(nextActionPrimaryBtn.dataset.ocId || 0);
+        if (action === "push_erp" && ocId) {
+          await enviarOcAoErp(ocId);
+          return;
+        }
+        if (action === "open_po" && ocId) {
+          window.location.href = withWorkspace(`/procurement/purchase-orders/${ocId}`);
+        }
+      });
       toggleDetalheComparacaoBtn.addEventListener("click", () => {
         setDetalheComparacaoVisivel(!state.detalheComparacaoAberto);
       });

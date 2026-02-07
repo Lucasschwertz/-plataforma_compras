@@ -487,6 +487,22 @@ tr.best-overall td {
   display: flex;
 }
 
+.modal-panel {
+  width: min(680px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  margin: 0 auto;
+}
+
+.modal-panel .card-header {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+
 .badge.prio-urgent {
   border-color: rgba(239, 68, 68, 0.4);
   color: var(--danger);
@@ -523,6 +539,15 @@ tr.best-overall td {
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--surface);
+}
+
+.action-strip {
+  display: grid;
+  gap: 8px;
+}
+
+.action-strip .page-actions {
+  margin: 0;
 }
 
 .insight-card {
@@ -715,7 +740,7 @@ tr.best-overall td {
   }
 
   .grid-4 {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .page-head {
@@ -770,6 +795,20 @@ tr.best-overall td {
   .page-actions .btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .modal-panel {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+    border-radius: var(--radius-md);
+  }
+
+  .modal-panel .card-header {
+    margin-bottom: 8px;
+  }
+
+  .modal-panel .page-actions {
+    gap: 8px;
   }
 
   table {
