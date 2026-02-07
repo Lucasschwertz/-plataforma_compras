@@ -117,7 +117,7 @@
   <div class="modal-backdrop" id="awardModalBackdrop" role="dialog" aria-modal="true">
     <div class="card" style="max-width: 620px; margin: 0 auto;">
       <div class="card-header">
-        <h2 class="card-title">Decisao da cotacao</h2>
+        <h2 class="card-title">Registrar decisao da cotacao</h2>
         <button class="btn btn-ghost btn-small" data-close-modal="award">Fechar</button>
       </div>
       <form id="awardForm" class="stack">
@@ -142,7 +142,7 @@
   <div class="modal-backdrop" id="poModalBackdrop" role="dialog" aria-modal="true">
     <div class="card" style="max-width: 620px; margin: 0 auto;">
       <div class="card-header">
-        <h2 class="card-title">Gerar ordem de compra</h2>
+        <h2 class="card-title">Criar ordem de compra</h2>
         <button class="btn btn-ghost btn-small" data-close-modal="po">Fechar</button>
       </div>
       <form id="poForm" class="stack">
@@ -164,7 +164,7 @@
   <div class="modal-backdrop" id="pushModalBackdrop" role="dialog" aria-modal="true">
     <div class="card" style="max-width: 620px; margin: 0 auto;">
       <div class="card-header">
-        <h2 class="card-title">Enviar OC ao ERP</h2>
+        <h2 class="card-title">Enviar ordem ao ERP</h2>
         <button class="btn btn-ghost btn-small" data-close-modal="push">Fechar</button>
       </div>
       <form id="pushForm" class="stack">
@@ -601,7 +601,7 @@
             if (suggestion) {
               awardSupplierInput.value = suggestion.name;
               awardReasonInput.value = `Menor total, ${suggestion.reason}`;
-              awardMeta.innerHTML += `<span class="pill">Sugestao ${escapeHtml(suggestion.name)}</span>`;
+              awardMeta.innerHTML += `<span class="pill">Recomendacao ${escapeHtml(suggestion.name)}</span>`;
             }
           }
         } catch (error) {
@@ -636,7 +636,7 @@
         try {
           await fetch("/api/procurement/seed", { method: "POST" });
           await loadInbox();
-          window.showToast("success", "Dados populados");
+          window.showToast("success", "Dados de exemplo atualizados");
         } finally {
           seedBtn.disabled = false;
           seedBtn.textContent = "Popular dados";
@@ -667,7 +667,7 @@
         if (!title) return;
         const selectedIds = getSelectedRequestItemIds();
         if (!selectedIds.length) {
-          window.showToast("danger", "Selecione ao menos um item de solicitacao em aberto");
+          window.showToast("danger", "Selecione ao menos um item de solicitacao para criar a cotacao");
           return;
         }
 
@@ -680,11 +680,11 @@
             body: JSON.stringify({ title, purchase_request_item_ids: selectedIds }),
           });
           if (!res.ok) {
-            window.showToast("danger", "Nao foi possivel criar a cotacao");
+            window.showToast("danger", "Nao foi possivel criar a cotacao no momento");
             return;
           }
           closeModal(rfqModalBackdrop);
-          window.showToast("success", "Cotacao criada");
+          window.showToast("success", "Cotacao criada com sucesso");
           await loadInbox();
         } finally {
           rfqSubmitBtn.disabled = false;
@@ -709,11 +709,11 @@
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            window.showToast("danger", `Erro ao registrar decisao, ${err.error || "desconhecido"}`);
+            window.showToast("danger", `Nao foi possivel registrar a decisao, ${err.message || err.error || "motivo nao informado"}`);
             return;
           }
           closeModal(awardModalBackdrop);
-          window.showToast("success", "Decisao registrada");
+          window.showToast("success", "Decisao registrada com sucesso");
           await loadInbox();
         } finally {
           awardSubmitBtn.disabled = false;
@@ -734,11 +734,11 @@
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            window.showToast("danger", `Erro ao gerar OC, ${data.error || "desconhecido"}`);
+            window.showToast("danger", `Nao foi possivel criar a ordem de compra, ${data.message || data.error || "motivo nao informado"}`);
             return;
           }
           closeModal(poModalBackdrop);
-          window.showToast("success", "Ordem criada");
+          window.showToast("success", "Ordem de compra criada com sucesso");
           await loadInbox();
           if (data.purchase_order_id) {
             window.location.href = withWorkspace(`/procurement/purchase-orders/${data.purchase_order_id}`);
@@ -762,11 +762,11 @@
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            window.showToast("danger", `Erro no push ERP, ${err.error || "desconhecido"}`);
+            window.showToast("danger", `Nao foi possivel enviar ao ERP, ${err.message || err.error || "motivo nao informado"}`);
             return;
           }
           closeModal(pushModalBackdrop);
-          window.showToast("success", "OC enviada ao ERP");
+          window.showToast("success", "Ordem enviada ao ERP com sucesso");
           await loadInbox();
         } finally {
           pushSubmitBtn.disabled = false;

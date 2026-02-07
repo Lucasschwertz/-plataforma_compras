@@ -868,10 +868,10 @@
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            window.showToast("danger", `Nao foi possivel registrar a decisao, ${err.message || err.error || "erro"}`);
+            window.showToast("danger", `Nao foi possivel registrar a decisao, ${err.message || err.error || "motivo nao informado"}`);
             return;
           }
-          window.showToast("success", "Decisao registrada");
+          window.showToast("success", "Decisao registrada com sucesso");
           await carregar();
         } finally {
           decidirBtn.disabled = false;
@@ -880,10 +880,10 @@
       }
 
       async function enviarOcAoErp(ocId) {
-        const confirmar = window.confirm("Deseja enviar esta OC ao ERP agora?");
+        const confirmar = window.confirm("Deseja enviar esta ordem de compra ao ERP agora?");
         if (!confirmar) return;
         await fetch(`/api/procurement/purchase-orders/${ocId}/push-to-erp`, { method: "POST" });
-        window.showToast("success", "OC enviada ao ERP");
+        window.showToast("success", "Ordem enviada ao ERP com sucesso");
         await carregar();
       }
 
@@ -897,7 +897,7 @@
           (item.fornecedores || []).forEach((f) => invitedIds.add(f.supplier_id));
         });
         if (invitedIds.size > 0 && !invitedIds.has(supplierId)) {
-          window.showToast("danger", "Fornecedor nao convidado para esta cotacao");
+          window.showToast("danger", "Selecione um fornecedor convidado para esta cotacao");
           return;
         }
 
@@ -916,7 +916,7 @@
           .filter((item) => item.unit_price !== null && Number.isFinite(item.unit_price));
 
         if (!itemsPayload.length) {
-          window.showToast("danger", "Informe ao menos um preco unitario para salvar a proposta");
+          window.showToast("danger", "Informe ao menos um preco unitario para registrar a proposta");
           return;
         }
 
@@ -930,10 +930,10 @@
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            window.showToast("danger", `Erro ao salvar proposta, ${err.message || err.error || "erro"}`);
+            window.showToast("danger", `Nao foi possivel registrar a proposta, ${err.message || err.error || "motivo nao informado"}`);
             return;
           }
-          window.showToast("success", "Proposta registrada");
+          window.showToast("success", "Proposta registrada com sucesso");
           await carregar();
         } finally {
           propostaSubmitBtn.disabled = false;

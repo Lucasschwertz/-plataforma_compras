@@ -169,7 +169,7 @@
         renderSyncRuns(data.sync_runs || []);
         renderEvents(data.status_events || []);
       } catch (error) {
-        showToast("danger", "Falha ao carregar logs");
+        window.showToast("danger", "Nao foi possivel carregar os logs");
       }
     }
 
@@ -210,16 +210,16 @@
         const data = await res.json();
 
         if (!res.ok) {
-          syncStatus.textContent = `Falha: ${data.message || data.error || "erro"}`;
-          showToast("danger", syncStatus.textContent);
+          syncStatus.textContent = `Falha, ${data.message || data.error || "motivo nao informado"}`;
+          window.showToast("danger", syncStatus.textContent);
         } else {
-          syncStatus.textContent = `OK: ${data.result.records_in} recebidos, ${data.result.records_upserted} upserted`;
-          showToast("success", "Sincronizacao concluida");
+          syncStatus.textContent = `Concluido, ${data.result.records_in} recebidos, ${data.result.records_upserted} atualizados`;
+          window.showToast("success", "Sincronizacao concluida com sucesso");
           await loadLogs();
         }
       } catch (error) {
-        syncStatus.textContent = "Falha: erro inesperado ao sincronizar";
-        showToast("danger", syncStatus.textContent);
+        syncStatus.textContent = "Falha, erro inesperado na sincronizacao";
+        window.showToast("danger", syncStatus.textContent);
       } finally {
         syncNowBtn.disabled = false;
       }

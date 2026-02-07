@@ -148,10 +148,15 @@
         pushErpBtn.disabled = true;
         pushErpBtn.textContent = "Enviando";
         try {
-          await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, {
+          const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, {
             method: "POST",
           });
-          window.showToast("success", "OC enviada ao ERP");
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            window.showToast("danger", `Nao foi possivel enviar ao ERP, ${err.message || err.error || "motivo nao informado"}`);
+            return;
+          }
+          window.showToast("success", "Ordem enviada ao ERP com sucesso");
         } finally {
           await loadDetail();
         }
