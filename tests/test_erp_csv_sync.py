@@ -32,7 +32,9 @@ class ErpCsvSyncTest(unittest.TestCase):
             ERP_CSV_E410PCT = os.path.join(self._tmpdir.name, "e410pct.csv")
             ERP_CSV_E410FPC = os.path.join(self._tmpdir.name, "e410fpc.csv")
             ERP_CSV_E420OCP = os.path.join(self._tmpdir.name, "e420ocp.csv")
+            ERP_CSV_E420IPO = os.path.join(self._tmpdir.name, "e420ipo.csv")
             ERP_CSV_E440NFC = os.path.join(self._tmpdir.name, "e440nfc.csv")
+            ERP_CSV_E440IPC = os.path.join(self._tmpdir.name, "e440ipc.csv")
 
         self.app = create_app(TempConfig)
         self.client = self.app.test_client()
@@ -66,10 +68,22 @@ class ErpCsvSyncTest(unittest.TestCase):
             _schema_line("E420OCP", "VlrOcp", 4),
             _schema_line("E420OCP", "SitOcp", 5),
             _schema_line("E420OCP", "DatEmi", 6),
+            _schema_line("E420IPO", "NumOcp", 1),
+            _schema_line("E420IPO", "SeqIpo", 2),
+            _schema_line("E420IPO", "CodPro", 3),
+            _schema_line("E420IPO", "DesPro", 4),
+            _schema_line("E420IPO", "QtdPed", 5),
+            _schema_line("E420IPO", "PreUni", 6),
+            _schema_line("E420IPO", "VlrTot", 7),
             _schema_line("E440NFC", "NumNfc", 1),
             _schema_line("E440NFC", "NumOcp", 2),
             _schema_line("E440NFC", "DatRec", 3),
             _schema_line("E440NFC", "SitNfc", 4),
+            _schema_line("E440IPC", "NumNfc", 1),
+            _schema_line("E440IPC", "NumOcp", 2),
+            _schema_line("E440IPC", "SeqIpc", 3),
+            _schema_line("E440IPC", "CodPro", 4),
+            _schema_line("E440IPC", "QtdRec", 5),
         ]
         with open(os.path.join(base_dir, "tabelas.csv"), "w", encoding="utf-8") as handle:
             handle.write("\n".join(schema_lines))
@@ -99,10 +113,22 @@ class ErpCsvSyncTest(unittest.TestCase):
             handle.write("6001;900;BRL;1500,50;approved;2026-01-05\n")
             handle.write("6002;901;BRL;980.00;approved;2026-01-06\n")
 
+        with open(os.path.join(base_dir, "e420ipo.csv"), "w", encoding="utf-8") as handle:
+            handle.write("NumOcp;SeqIpo;CodPro;DesPro;QtdPed;PreUni;VlrTot\n")
+            handle.write("6001;1;ROL-01;Rolamento 6202;10;9,00;90,00\n")
+            handle.write("6001;2;COR-01;Correia dentada;4;12,00;48,00\n")
+            handle.write("6002;1;ROL-02;Rolamento 6203;5;20,00;100,00\n")
+
         with open(os.path.join(base_dir, "e440nfc.csv"), "w", encoding="utf-8") as handle:
             handle.write("NumNfc;NumOcp;DatRec;SitNfc\n")
             handle.write("8001;6001;2026-01-07;partially\n")
             handle.write("8002;6002;2026-01-08;received\n")
+
+        with open(os.path.join(base_dir, "e440ipc.csv"), "w", encoding="utf-8") as handle:
+            handle.write("NumNfc;NumOcp;SeqIpc;CodPro;QtdRec\n")
+            handle.write("8001;6001;1;ROL-01;6\n")
+            handle.write("8001;6001;2;COR-01;2\n")
+            handle.write("8002;6002;1;ROL-02;5\n")
 
     def test_purchase_request_sync_is_incremental(self) -> None:
         first = self.client.post(
@@ -222,6 +248,18 @@ class ErpCsvSyncTest(unittest.TestCase):
                 (self.tenant_id,),
             ).fetchone()["total"]
             self.assertEqual(receipts_total, 2)
+
+            po_items_total = db.execute(
+                "SELECT COUNT(*) AS total FROM erp_purchase_order_items WHERE tenant_id = ?",
+                (self.tenant_id,),
+            ).fetchone()["total"]
+            self.assertEqual(po_items_total, 3)
+
+            receipt_items_total = db.execute(
+                "SELECT COUNT(*) AS total FROM erp_receipt_items WHERE tenant_id = ?",
+                (self.tenant_id,),
+            ).fetchone()["total"]
+            self.assertEqual(receipt_items_total, 3)
 
             po_row = db.execute(
                 """

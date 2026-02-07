@@ -475,6 +475,7 @@ def _load_purchase_order_records_from_csv(schema_path: Path) -> List[dict]:
     index = _build_column_index(schema_path, "E420OCP")
     if "NumOcp" not in index:
         raise ErpError("Schema E420OCP sem coluna NumOcp.")
+    items_by_order = _load_purchase_order_item_records_from_csv(schema_path)
 
     result: List[dict] = []
     for row in _iter_csv_rows(data_path):
@@ -502,6 +503,7 @@ def _load_purchase_order_records_from_csv(schema_path: Path) -> List[dict]:
                 "CodMoe": cod_moe or "BRL",
                 "VlrOcp": _normalize_decimal(total_raw),
                 "CodFor": cod_for,
+                "items": items_by_order.get(num_ocp, []),
             }
         )
     return result
@@ -514,6 +516,7 @@ def _load_receipt_records_from_csv(schema_path: Path) -> List[dict]:
     index = _build_column_index(schema_path, "E440NFC")
     if "NumNfc" not in index:
         raise ErpError("Schema E440NFC sem coluna NumNfc.")
+    items_by_receipt = _load_receipt_item_records_from_csv(schema_path)
 
     result: List[dict] = []
     for row in _iter_csv_rows(data_path):
@@ -540,9 +543,135 @@ def _load_receipt_records_from_csv(schema_path: Path) -> List[dict]:
                 "DatRec": rec_date,
                 "status": _map_receipt_status(status_raw),
                 "received_at": received_at,
+                "items": items_by_receipt.get(num_nfc, []),
             }
         )
     return result
+
+
+def _load_purchase_order_item_records_from_csv(schema_path: Path) -> dict[str, List[dict]]:
+    data_path = _resolve_csv_path(_get_config("ERP_CSV_E420IPO"))
+    if not data_path:
+        return {}
+    index = _build_column_index(schema_path, "E420IPO")
+    if "NumOcp" not in index:
+        return {}
+
+    grouped: dict[str, List[dict]] = {}
+    for row_index, row in enumerate(_iter_csv_rows(data_path), start=1):
+        num_ocp = _safe_value(row, index.get("NumOcp"))
+        if not num_ocp:
+            continue
+        if _is_header_cell(num_ocp, "NumOcp"):
+            continue
+
+        line_no = _value_by_names(row, index, "SeqIpo", "NumSeq", "SeqPed")
+        cod_pro = _value_by_names(row, index, "CodPro")
+        des_pro = _value_by_names(row, index, "DesPro")
+        qty = _normalize_decimal(_value_by_names(row, index, "QtdPed", "QtdAte", "QtdApr"))
+        unit_price = _normalize_decimal(_value_by_names(row, index, "PreUni", "VlrUni"))
+        total_price = _normalize_decimal(_value_by_names(row, index, "VlrTot"))
+        if total_price is None and qty and unit_price:
+            try:
+                total_price = str(float(qty) * float(unit_price))
+            except ValueError:
+                total_price = None
+
+        parsed_line = 0
+        if line_no and line_no.isdigit():
+            parsed_line = int(line_no)
+        elif line_no:
+            try:
+                parsed_line = int(float(line_no))
+            except ValueError:
+                parsed_line = row_index
+        else:
+            parsed_line = row_index
+
+        item = {
+            "line_no": parsed_line,
+            "product_code": cod_pro,
+            "description": des_pro,
+            "quantity": qty,
+            "unit_price": unit_price,
+            "total_price": total_price,
+            "source_table": "E420IPO",
+            "external_id": f"{num_ocp}:{parsed_line}:{cod_pro or 'na'}",
+        }
+        grouped.setdefault(num_ocp, []).append(item)
+    return grouped
+
+
+def _load_receipt_item_records_from_csv(schema_path: Path) -> dict[str, List[dict]]:
+    grouped: dict[str, List[dict]] = {}
+
+    path_ipc = _resolve_csv_path(_get_config("ERP_CSV_E440IPC"))
+    if path_ipc:
+        index = _build_column_index(schema_path, "E440IPC")
+        if "NumNfc" in index:
+            for row_index, row in enumerate(_iter_csv_rows(path_ipc), start=1):
+                num_nfc = _safe_value(row, index.get("NumNfc"))
+                if not num_nfc:
+                    continue
+                if _is_header_cell(num_nfc, "NumNfc"):
+                    continue
+                line_no = _value_by_names(row, index, "SeqIpc", "NumSeq", "SeqNfc")
+                cod_pro = _value_by_names(row, index, "CodPro")
+                qty = _normalize_decimal(_value_by_names(row, index, "QtdRec", "QtdEnt", "QtdIpc"))
+                num_ocp = _value_by_names(row, index, "NumOcp")
+
+                parsed_line = row_index
+                if line_no:
+                    try:
+                        parsed_line = int(float(line_no))
+                    except ValueError:
+                        parsed_line = row_index
+
+                grouped.setdefault(num_nfc, []).append(
+                    {
+                        "line_no": parsed_line,
+                        "product_code": cod_pro,
+                        "quantity_received": qty,
+                        "source_table": "E440IPC",
+                        "external_id": f"{num_nfc}:{parsed_line}:{cod_pro or 'na'}",
+                        "NumOcp": num_ocp,
+                    }
+                )
+
+    path_isc = _resolve_csv_path(_get_config("ERP_CSV_E440ISC"))
+    if path_isc:
+        index = _build_column_index(schema_path, "E440ISC")
+        if "NumNfc" in index:
+            for row_index, row in enumerate(_iter_csv_rows(path_isc), start=1):
+                num_nfc = _safe_value(row, index.get("NumNfc"))
+                if not num_nfc:
+                    continue
+                if _is_header_cell(num_nfc, "NumNfc"):
+                    continue
+                line_no = _value_by_names(row, index, "SeqIsc", "NumSeq", "SeqNfc")
+                cod_pro = _value_by_names(row, index, "CodSer", "CodPro")
+                qty = _normalize_decimal(_value_by_names(row, index, "QtdRec", "QtdEnt", "QtdIsc"))
+                num_ocp = _value_by_names(row, index, "NumOcp")
+
+                parsed_line = row_index
+                if line_no:
+                    try:
+                        parsed_line = int(float(line_no))
+                    except ValueError:
+                        parsed_line = row_index
+
+                grouped.setdefault(num_nfc, []).append(
+                    {
+                        "line_no": parsed_line,
+                        "product_code": cod_pro,
+                        "quantity_received": qty,
+                        "source_table": "E440ISC",
+                        "external_id": f"{num_nfc}:{parsed_line}:{cod_pro or 'na'}",
+                        "NumOcp": num_ocp,
+                    }
+                )
+
+    return grouped
 
 
 def _load_supplier_records_from_csv(schema_path: Path) -> List[dict]:

@@ -2416,7 +2416,8 @@ def _upsert_purchase_order(db, tenant_id: str, record: dict) -> int:
     if not external_id:
         return 0
 
-    number = record.get("number") or _extract_erp_field(record, ("NumOcp", "num_ocp", "numero_ocp", "numero_oc")) or external_id
+    erp_num_ocp = _extract_erp_field(record, ("NumOcp", "num_ocp", "numero_ocp", "numero_oc"))
+    number = record.get("number") or erp_num_ocp or external_id
     status = record.get("status") or "draft"
     if status not in ALLOWED_PO_STATUSES:
         status = "draft"
@@ -2445,6 +2446,12 @@ def _upsert_purchase_order(db, tenant_id: str, record: dict) -> int:
             """,
             (number, status, supplier_name, currency, total_amount, updated_at, existing["id"], tenant_id),
         )
+        _upsert_erp_purchase_order_items(
+            db,
+            tenant_id,
+            erp_num_ocp=erp_num_ocp or str(number),
+            items=record.get("items"),
+        )
         return 1
 
     db.execute(
@@ -2455,6 +2462,13 @@ def _upsert_purchase_order(db, tenant_id: str, record: dict) -> int:
         """,
         (number, status, supplier_name, currency, total_amount, external_id, tenant_id, updated_at, updated_at),
     )
+
+    _upsert_erp_purchase_order_items(
+        db,
+        tenant_id,
+        erp_num_ocp=erp_num_ocp or str(number),
+        items=record.get("items"),
+    )
     return 1
 
 
@@ -2463,6 +2477,7 @@ def _upsert_receipt(db, tenant_id: str, record: dict) -> int:
     if not external_id:
         return 0
 
+    erp_num_nfc = _extract_erp_field(record, ("NumNfc", "num_nfc", "numero_nf"))
     purchase_order_external_id = record.get("purchase_order_external_id") or _extract_erp_field(
         record,
         ("NumOcp", "num_ocp", "numero_ocp", "numero_oc"),
@@ -2524,6 +2539,13 @@ def _upsert_receipt(db, tenant_id: str, record: dict) -> int:
                 tenant_id,
             ),
         )
+        _upsert_erp_receipt_items(
+            db,
+            tenant_id,
+            erp_num_nfc=erp_num_nfc or str(external_id),
+            erp_num_ocp=purchase_order_external_id,
+            items=record.get("items"),
+        )
         return 1
 
     db.execute(
@@ -2543,7 +2565,145 @@ def _upsert_receipt(db, tenant_id: str, record: dict) -> int:
             updated_at,
         ),
     )
+
+    _upsert_erp_receipt_items(
+        db,
+        tenant_id,
+        erp_num_nfc=erp_num_nfc or str(external_id),
+        erp_num_ocp=purchase_order_external_id,
+        items=record.get("items"),
+    )
     return 1
+
+
+def _parse_optional_int(value) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_optional_float(value) -> float | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        text = text.replace(".", "").replace(",", ".")
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _upsert_erp_purchase_order_items(db, tenant_id: str, erp_num_ocp: str, items: object) -> None:
+    if not erp_num_ocp or not isinstance(items, list):
+        return
+    for idx, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        line_no = _parse_optional_int(item.get("line_no")) or idx
+        product_code = item.get("product_code") or item.get("CodPro")
+        description = item.get("description") or item.get("DesPro")
+        quantity = _parse_optional_float(item.get("quantity") or item.get("QtdPed") or item.get("QtdOcp"))
+        unit_price = _parse_optional_float(item.get("unit_price") or item.get("PreUni") or item.get("VlrUni"))
+        total_price = _parse_optional_float(item.get("total_price") or item.get("VlrTot"))
+        source_table = str(item.get("source_table") or "E420IPO")
+        external_id = item.get("external_id")
+
+        db.execute(
+            """
+            INSERT INTO erp_purchase_order_items (
+                tenant_id,
+                erp_num_ocp,
+                line_no,
+                product_code,
+                description,
+                quantity,
+                unit_price,
+                total_price,
+                source_table,
+                external_id,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(tenant_id, erp_num_ocp, line_no, source_table) DO UPDATE SET
+                product_code = excluded.product_code,
+                description = excluded.description,
+                quantity = excluded.quantity,
+                unit_price = excluded.unit_price,
+                total_price = excluded.total_price,
+                external_id = excluded.external_id,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                tenant_id,
+                str(erp_num_ocp),
+                line_no,
+                product_code,
+                description,
+                quantity,
+                unit_price,
+                total_price,
+                source_table,
+                external_id,
+            ),
+        )
+
+
+def _upsert_erp_receipt_items(db, tenant_id: str, erp_num_nfc: str, erp_num_ocp: str | None, items: object) -> None:
+    if not erp_num_nfc or not isinstance(items, list):
+        return
+    for idx, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        line_no = _parse_optional_int(item.get("line_no")) or idx
+        product_code = item.get("product_code") or item.get("CodPro")
+        quantity_received = _parse_optional_float(item.get("quantity_received") or item.get("QtdRec") or item.get("QtdEnt"))
+        source_table = str(item.get("source_table") or "E440IPC")
+        external_id = item.get("external_id")
+        item_erp_num_ocp = item.get("NumOcp") or erp_num_ocp
+
+        db.execute(
+            """
+            INSERT INTO erp_receipt_items (
+                tenant_id,
+                erp_num_nfc,
+                erp_num_ocp,
+                line_no,
+                product_code,
+                quantity_received,
+                source_table,
+                external_id,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(tenant_id, erp_num_nfc, line_no, source_table) DO UPDATE SET
+                erp_num_ocp = excluded.erp_num_ocp,
+                product_code = excluded.product_code,
+                quantity_received = excluded.quantity_received,
+                external_id = excluded.external_id,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                tenant_id,
+                str(erp_num_nfc),
+                item_erp_num_ocp,
+                line_no,
+                product_code,
+                quantity_received,
+                source_table,
+                external_id,
+            ),
+        )
 
 
 def _upsert_erp_supplier_quote(db, tenant_id: str, record: dict) -> int:

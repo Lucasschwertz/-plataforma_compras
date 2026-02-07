@@ -441,6 +441,46 @@ def _init_db_sqlite(db: Database):
 
     db.execute(
         """
+        CREATE TABLE IF NOT EXISTS erp_purchase_order_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL,
+            erp_num_ocp TEXT NOT NULL,
+            line_no INTEGER,
+            product_code TEXT,
+            description TEXT,
+            quantity REAL,
+            unit_price REAL,
+            total_price REAL,
+            source_table TEXT NOT NULL DEFAULT 'E420IPO',
+            external_id TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (tenant_id, erp_num_ocp, line_no, source_table)
+        )
+        """
+    )
+
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS erp_receipt_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL,
+            erp_num_nfc TEXT NOT NULL,
+            erp_num_ocp TEXT,
+            line_no INTEGER,
+            product_code TEXT,
+            quantity_received REAL,
+            source_table TEXT NOT NULL DEFAULT 'E440IPC',
+            external_id TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (tenant_id, erp_num_nfc, line_no, source_table)
+        )
+        """
+    )
+
+    db.execute(
+        """
         CREATE TABLE IF NOT EXISTS sync_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             system TEXT NOT NULL DEFAULT 'senior',
@@ -616,6 +656,20 @@ def _init_db_sqlite(db: Database):
         FOR EACH ROW
         BEGIN
             UPDATE erp_quote_suppliers SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_erp_purchase_order_items_updated_at
+        AFTER UPDATE ON erp_purchase_order_items
+        FOR EACH ROW
+        BEGIN
+            UPDATE erp_purchase_order_items SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_erp_receipt_items_updated_at
+        AFTER UPDATE ON erp_receipt_items
+        FOR EACH ROW
+        BEGIN
+            UPDATE erp_receipt_items SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
         END;
 
         CREATE TRIGGER IF NOT EXISTS trg_auth_users_updated_at
@@ -948,6 +1002,46 @@ def _init_db_postgres(db: Database) -> None:
 
     db.execute(
         """
+        CREATE TABLE IF NOT EXISTS erp_purchase_order_items (
+            id SERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            erp_num_ocp TEXT NOT NULL,
+            line_no INTEGER,
+            product_code TEXT,
+            description TEXT,
+            quantity REAL,
+            unit_price REAL,
+            total_price REAL,
+            source_table TEXT NOT NULL DEFAULT 'E420IPO',
+            external_id TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (tenant_id, erp_num_ocp, line_no, source_table)
+        )
+        """
+    )
+
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS erp_receipt_items (
+            id SERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            erp_num_nfc TEXT NOT NULL,
+            erp_num_ocp TEXT,
+            line_no INTEGER,
+            product_code TEXT,
+            quantity_received REAL,
+            source_table TEXT NOT NULL DEFAULT 'E440IPC',
+            external_id TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (tenant_id, erp_num_nfc, line_no, source_table)
+        )
+        """
+    )
+
+    db.execute(
+        """
         CREATE TABLE IF NOT EXISTS sync_runs (
             id SERIAL PRIMARY KEY,
             system TEXT NOT NULL DEFAULT 'senior',
@@ -1054,6 +1148,8 @@ def _create_postgres_updated_at_triggers(db: Database) -> None:
         "erp_supplier_quotes",
         "erp_quote_processes",
         "erp_quote_suppliers",
+        "erp_purchase_order_items",
+        "erp_receipt_items",
     ]
 
     for table in tables:
@@ -1314,6 +1410,8 @@ def _ensure_tenant_backfill(db) -> None:
         "erp_supplier_quotes",
         "erp_quote_processes",
         "erp_quote_suppliers",
+        "erp_purchase_order_items",
+        "erp_receipt_items",
         "integration_watermarks",
         "sync_runs",
         "status_events",
