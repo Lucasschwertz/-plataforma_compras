@@ -227,7 +227,7 @@ def _parse_users(raw_users: object) -> Iterable[dict]:
         email, password, tenant_id = parts[0].lower(), parts[1], parts[2]
         display_name = parts[3] if len(parts) > 3 and parts[3] else email.split("@")[0]
         role = parts[4].lower() if len(parts) > 4 and parts[4] else "buyer"
-        if role not in {"buyer", "admin", "approver", "supplier"}:
+        if role not in {"buyer", "admin", "approver", "manager", "supplier"}:
             role = "buyer"
         users.append(
             {

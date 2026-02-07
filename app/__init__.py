@@ -109,7 +109,7 @@ def _register_template_context(app: Flask) -> None:
         workspace_id = session_tenant or header_tenant or DEFAULT_TENANT_ID
 
         role = (session.get("user_role") or "buyer").strip().lower()
-        if role not in {"buyer", "admin", "approver", "supplier"}:
+        if role not in {"buyer", "admin", "approver", "manager", "supplier"}:
             role = "buyer"
 
         workspace_name = f"Empresa {workspace_id}"

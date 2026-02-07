@@ -12,6 +12,17 @@
   {% set workspace_id = workspace_id | default(tenant_id | default("default")) %}
   {% set workspace_name = workspace_name | default("Empresa " ~ workspace_id) %}
   {% set workspace_options = workspace_options | default([{"id": workspace_id, "name": workspace_name}]) %}
+  {% if ui_role == "admin" %}
+    {% set role_label = "Administrador" %}
+  {% elif ui_role == "approver" %}
+    {% set role_label = "Aprovador" %}
+  {% elif ui_role == "manager" %}
+    {% set role_label = "Gestor" %}
+  {% elif ui_role == "supplier" %}
+    {% set role_label = "Fornecedor" %}
+  {% else %}
+    {% set role_label = "Comprador" %}
+  {% endif %}
   <body class="role-{{ ui_role }}">
     <div class="app-shell">
       <aside class="sidebar">
@@ -27,14 +38,14 @@
           <a class="{% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Painel</a>
           <a class="{% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
           <a class="{% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
-          {% if ui_role == "approver" or ui_role == "admin" %}
+          {% if ui_role == "approver" or ui_role == "admin" or ui_role == "manager" %}
             <a class="{% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>
           {% endif %}
           <div class="nav-section-title">Analise</div>
           <a class="{% if active_nav == 'governanca' %}active{% endif %}" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">Trilha de cotacoes</a>
           <div class="nav-section-title">Plataforma</div>
           <a class="{% if active_nav == 'integration' %}active{% endif %}" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Integracoes</a>
-          {% if ui_role == "admin" %}
+          {% if ui_role == "admin" or ui_role == "manager" %}
             <a href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Automacao</a>
             <a href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Configuracoes</a>
           {% endif %}
@@ -57,7 +68,7 @@
                 {% endfor %}
               </select>
             </div>
-            <span class="badge">Papel {{ ui_role }}</span>
+            <span class="badge">Papel {{ role_label }}</span>
             <span class="badge success" id="workspaceIndicator">Workspace ativo</span>
             <span class="badge">Tenant {{ workspace_id }}</span>
           </div>
@@ -100,7 +111,7 @@
       <a class="quick-link {% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Painel</a>
       <a class="quick-link {% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
       <a class="quick-link {% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
-      {% if ui_role == "approver" %}
+      {% if ui_role == "approver" or ui_role == "manager" %}
         <a class="quick-link {% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovar</a>
       {% elif ui_role == "admin" %}
         <a class="quick-link {% if active_nav == 'integration' or active_nav == 'governanca' %}active{% endif %}" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Integracoes</a>

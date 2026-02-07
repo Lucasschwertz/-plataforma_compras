@@ -2,7 +2,7 @@
 {% set active_nav = "dashboard" %}
 {% set ui_role = role | default("buyer") %}
 {% block title %}Dashboard | Plataforma Compras{% endblock %}
-{% block page_title %}{% if ui_role == "approver" %}Painel de aprovacoes{% elif ui_role == "admin" %}Painel administrativo{% else %}Dashboard de compras{% endif %}{% endblock %}
+{% block page_title %}{% if ui_role == "approver" %}Painel de aprovacoes{% elif ui_role == "admin" %}Painel administrativo{% elif ui_role == "manager" %}Painel gestor{% else %}Dashboard de compras{% endif %}{% endblock %}
 {% block breadcrumb_tail %}
   <span class="crumb-sep">/</span><span class="crumb current">Painel</span>
 {% endblock %}
@@ -10,6 +10,9 @@
   {% if ui_role == "approver" %}
     <a class="btn btn-primary" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Abrir aprovacoes</a>
     <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
+  {% elif ui_role == "manager" %}
+    <a class="btn btn-primary" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Abrir aprovacoes</a>
+    <a class="btn btn-ghost" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">Abrir trilha</a>
   {% elif ui_role == "admin" %}
     <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir inbox</a>
     <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Abrir integracoes</a>
@@ -27,6 +30,8 @@
     <div class="page-actions">
       {% if ui_role == "approver" %}
         <a class="btn btn-primary" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Priorizar aprovacoes</a>
+      {% elif ui_role == "manager" %}
+        <a class="btn btn-primary" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Priorizar decisoes</a>
       {% elif ui_role == "admin" %}
         <a class="btn btn-primary" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Revisar integracoes</a>
       {% else %}
@@ -37,6 +42,8 @@
     <div class="meta">
       {% if ui_role == "approver" %}
         Foque nas cotacoes sem decisao e nas ordens pendentes de envio ao ERP.
+      {% elif ui_role == "manager" %}
+        Foque em decisao de cotacao, risco de prazo e gargalos da operacao.
       {% elif ui_role == "admin" %}
         Monitore execucoes, erros e trilha operacional por tenant.
       {% else %}
@@ -52,6 +59,8 @@
     </div>
     {% if ui_role == "approver" %}
       <div class="meta">Priorize decisoes de cotacao, geracao de ordem e envio ao ERP.</div>
+    {% elif ui_role == "manager" %}
+      <div class="meta">Conduza decisoes criticas, reduza risco e mantenha ritmo operacional.</div>
     {% elif ui_role == "admin" %}
       <div class="meta">Acompanhe operacao, trilha e integracoes por workspace.</div>
     {% else %}
@@ -152,10 +161,10 @@
         <h2 class="card-title">Proximas acoes</h2>
       </div>
       <div class="list">
-        {% if ui_role == "approver" %}
+        {% if ui_role == "approver" or ui_role == "manager" %}
         <a class="list-item" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">
-          <div class="title">Priorizar fila de aprovacoes</div>
-          <div class="meta">Ordenar por idade e impacto de negocio</div>
+          <div class="title">{% if ui_role == "manager" %}Conduzir decisoes criticas{% else %}Priorizar fila de aprovacoes{% endif %}</div>
+          <div class="meta">{% if ui_role == "manager" %}Ordenar por risco, impacto e prazo de fechamento{% else %}Ordenar por idade e impacto de negocio{% endif %}</div>
         </a>
         {% endif %}
         {% if ui_role == "admin" %}
@@ -300,6 +309,36 @@
       const awaitingQuotes = Number(kpis?.awaiting_quotes || 0);
       const waitingPo = Number(kpis?.awarded_waiting_po || 0);
       const awaitingErp = Number(kpis?.awaiting_erp_push || 0);
+
+      if (role === "manager") {
+        const decisionLoad = awaitingQuotes + waitingPo;
+        return {
+          summary: `${decisionLoad} cotacoes exigem conducao, ${awaitingErp} ordens aguardam retorno ERP`,
+          cards: [
+            {
+              title: "Conducao de cotacoes",
+              value: `${awaitingQuotes}`,
+              detail: "Cotacoes ativas que precisam de fechamento",
+              href: withWorkspace("/procurement/inbox?type=rfq&status=open,collecting_quotes"),
+              cta: "Abrir cotacoes",
+            },
+            {
+              title: "Decisoes sem OC",
+              value: `${waitingPo}`,
+              detail: "Decisoes registradas, aguardando ordem de compra",
+              href: withWorkspace("/procurement/inbox?type=rfq&awaiting_po=1"),
+              cta: "Converter",
+            },
+            {
+              title: "Risco de fluxo",
+              value: `${awaitingErp}`,
+              detail: "Ordens com envio pendente ou retorno com erro",
+              href: withWorkspace("/procurement/inbox?type=purchase_order&status=draft,approved,sent_to_erp,erp_error"),
+              cta: "Atuar no risco",
+            },
+          ],
+        };
+      }
 
       if (role === "approver") {
         return {

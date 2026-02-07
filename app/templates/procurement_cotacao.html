@@ -53,6 +53,13 @@
           <button class="btn btn-primary" type="submit" id="decidirBtn">Registrar decisao</button>
         </div>
       </form>
+      <section class="award-matrix" id="awardMatrixCard">
+        <div class="card-header" style="margin-bottom: 8px">
+          <h3 class="card-title">Matriz de decisao para award</h3>
+          <span class="badge" id="awardMatrixSummary">Aguardando dados</span>
+        </div>
+        <div class="list" id="awardMatrixList"></div>
+      </section>
     </article>
 
     <article class="card">
@@ -71,7 +78,7 @@
       <span class="meta">Convide fornecedores e acompanhe propostas por item</span>
     </div>
     <div class="table-wrap">
-      <table class="table-mobile-cards table-compact">
+      <table class="table-mobile-cards table-compact cotacao-table-tight">
         <thead>
           <tr>
             <th>Item</th>
@@ -129,7 +136,7 @@
       <div class="list" id="execRanking"></div>
       <div id="comparacaoDetalhada">
         <div class="table-wrap">
-          <table class="table-compact">
+          <table class="table-compact cotacao-table-tight">
             <thead>
               <tr>
                 <th>Fornecedor</th>
@@ -161,7 +168,7 @@
         <select class="select" id="propostaFornecedorSelect" required></select>
       </div>
       <div class="table-wrap">
-        <table class="table-mobile-cards table-compact">
+        <table class="table-mobile-cards table-compact cotacao-table-tight">
           <thead>
             <tr>
               <th>Item</th>
@@ -202,7 +209,7 @@
       const workspaceId = "{{ workspace_id }}";
       const Platform = window.PlatformUI || {};
       const currentRole = "{{ role | default('buyer') }}";
-      const isExecutiveReaderRole = ["approver", "admin"].includes(currentRole);
+      const isExecutiveReaderRole = ["approver", "admin", "manager"].includes(currentRole);
 
       const withWorkspace = (path) =>
         Platform.withWorkspace
@@ -229,6 +236,8 @@
       const comparacaoDetalhesConteudo = document.getElementById("comparacaoDetalhesConteudo");
       const decisionAssistantList = document.getElementById("decisionAssistantList");
       const decisionAssistantSummary = document.getElementById("decisionAssistantSummary");
+      const awardMatrixSummary = document.getElementById("awardMatrixSummary");
+      const awardMatrixList = document.getElementById("awardMatrixList");
       const comparacaoDetalhada = document.getElementById("comparacaoDetalhada");
       const toggleDetalheComparacaoBtn = document.getElementById("toggleDetalheComparacaoBtn");
       const roleLeituraPill = document.getElementById("roleLeituraPill");
@@ -507,6 +516,7 @@
             decisionAssistantSummary.textContent = "Sem analise";
             decisionAssistantSummary.className = "badge";
           }
+          renderAwardMatrix([]);
           renderExecutiveSummary({}, [], null);
           return;
         }
@@ -580,6 +590,7 @@
           .join("");
 
         renderDecisionAssistant(data.items || []);
+        renderAwardMatrix(data.items || []);
 
         comparacaoItens.innerHTML = data.items
           .map((item) => {
@@ -786,9 +797,45 @@
         return candidates[0].quote;
       }
 
+      function buildDecisionAnalyses(items) {
+        const analyses = (items || []).map((item) => {
+          const quotes = item.quotes || [];
+          if (!quotes.length) {
+            return {
+              type: "missing",
+              item,
+              quotesCount: 0,
+            };
+          }
+          const bestPrice = getBestPriceQuote(quotes);
+          const bestLead = getBestLeadQuote(quotes);
+          const recommended = getRecommendedItemQuote(quotes);
+          const converged =
+            bestPrice &&
+            bestLead &&
+            String(bestPrice.supplier_id || "") === String(bestLead.supplier_id || "");
+          return {
+            type: converged ? "converged" : "tradeoff",
+            item,
+            bestPrice,
+            bestLead,
+            recommended,
+            quotesCount: quotes.length,
+          };
+        });
+
+        return {
+          analyses,
+          tradeoffCount: analyses.filter((analysis) => analysis.type === "tradeoff").length,
+          convergedCount: analyses.filter((analysis) => analysis.type === "converged").length,
+          missingCount: analyses.filter((analysis) => analysis.type === "missing").length,
+        };
+      }
+
       function renderDecisionAssistant(items) {
         if (!decisionAssistantList || !decisionAssistantSummary) return;
-        if (!items.length) {
+        const { analyses, tradeoffCount, convergedCount, missingCount } = buildDecisionAnalyses(items);
+        if (!analyses.length) {
           decisionAssistantSummary.textContent = "Sem analise";
           decisionAssistantSummary.className = "badge";
           decisionAssistantList.innerHTML = `
@@ -799,35 +846,6 @@
           `;
           return;
         }
-
-        const analyses = items
-          .map((item) => {
-            const quotes = item.quotes || [];
-            if (!quotes.length) {
-              return {
-                type: "missing",
-                item,
-              };
-            }
-            const bestPrice = getBestPriceQuote(quotes);
-            const bestLead = getBestLeadQuote(quotes);
-            const recommended = getRecommendedItemQuote(quotes);
-            const converged =
-              bestPrice &&
-              bestLead &&
-              String(bestPrice.supplier_id || "") === String(bestLead.supplier_id || "");
-            return {
-              type: converged ? "converged" : "tradeoff",
-              item,
-              bestPrice,
-              bestLead,
-              recommended,
-            };
-          });
-
-        const tradeoffCount = analyses.filter((analysis) => analysis.type === "tradeoff").length;
-        const convergedCount = analyses.filter((analysis) => analysis.type === "converged").length;
-        const missingCount = analyses.filter((analysis) => analysis.type === "missing").length;
 
         if (tradeoffCount > 0) {
           decisionAssistantSummary.className = "badge warning";
@@ -904,6 +922,83 @@
           decisionAssistantList.innerHTML += `
             <div class="meta">Itens sem proposta: ${escapeHtml(missingCount)}</div>
           `;
+        }
+      }
+
+      function renderAwardMatrix(items) {
+        if (!awardMatrixList || !awardMatrixSummary) return;
+        const { analyses, tradeoffCount, convergedCount, missingCount } = buildDecisionAnalyses(items);
+
+        if (!analyses.length) {
+          awardMatrixSummary.className = "badge";
+          awardMatrixSummary.textContent = "Sem dados";
+          awardMatrixList.innerHTML = `
+            <div class="list-item">
+              <div class="title">Sem matriz de decisao</div>
+              <div class="meta">Registre propostas para formar recomendacao por item.</div>
+            </div>
+          `;
+          return;
+        }
+
+        if (tradeoffCount > 0) {
+          awardMatrixSummary.className = "badge warning";
+          awardMatrixSummary.textContent = `${tradeoffCount} item(ns) com trade off`;
+        } else if (convergedCount > 0) {
+          awardMatrixSummary.className = "badge success";
+          awardMatrixSummary.textContent = `${convergedCount} item(ns) alinhados`;
+        } else {
+          awardMatrixSummary.className = "badge";
+          awardMatrixSummary.textContent = "Sem recomendacao completa";
+        }
+
+        awardMatrixList.innerHTML = analyses
+          .map((analysis) => {
+            const itemName = escapeHtml(analysis.item.description || analysis.item.descricao || "Item");
+            if (analysis.type === "missing") {
+              return `
+                <article class="award-row">
+                  <div class="award-row-head">
+                    <strong>${itemName}</strong>
+                    <span class="pill">Sem proposta</span>
+                  </div>
+                  <div class="meta">Sem proposta registrada para este item.</div>
+                </article>
+              `;
+            }
+
+            const recommendedName = escapeHtml(
+              analysis.recommended?.supplier_name || analysis.bestPrice?.supplier_name || "Nao informado"
+            );
+            const recommendedTotal = formatCurrency(
+              analysis.recommended?.item_total != null
+                ? analysis.recommended.item_total
+                : analysis.recommended?.unit_price
+            );
+            const bestPriceName = escapeHtml(analysis.bestPrice?.supplier_name || "Nao informado");
+            const bestLeadName = escapeHtml(analysis.bestLead?.supplier_name || "Nao informado");
+            const decisionTone = analysis.type === "tradeoff" ? "warning" : "success";
+            const decisionLabel = analysis.type === "tradeoff" ? "Trade off" : "Convergente";
+
+            return `
+              <article class="award-row">
+                <div class="award-row-head">
+                  <strong>${itemName}</strong>
+                  <span class="pill ${decisionTone}">${decisionLabel}</span>
+                </div>
+                <div class="award-row-grid">
+                  <div><span class="meta">Fornecedor sugerido</span><div>${recommendedName}</div></div>
+                  <div><span class="meta">Total sugerido</span><div>${recommendedTotal}</div></div>
+                  <div><span class="meta">Melhor preco</span><div>${bestPriceName}</div></div>
+                  <div><span class="meta">Melhor prazo</span><div>${bestLeadName}</div></div>
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+
+        if (missingCount > 0) {
+          awardMatrixList.innerHTML += `<div class="meta">Itens sem proposta: ${escapeHtml(missingCount)}</div>`;
         }
       }
 

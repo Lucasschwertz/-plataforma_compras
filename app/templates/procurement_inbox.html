@@ -134,6 +134,16 @@
           <label class="meta" for="awardReasonInput">Motivo</label>
           <textarea class="textarea" id="awardReasonInput" required></textarea>
         </div>
+        <section class="award-matrix" id="awardModalMatrix" hidden>
+          <div class="card-header" style="margin-bottom: 8px">
+            <h3 class="card-title">Matriz por item para decisao</h3>
+            <span class="badge" id="awardModalMatrixSummary">Aguardando dados</span>
+          </div>
+          <div class="list" id="awardModalMatrixList"></div>
+          <div class="page-actions" style="margin-top: 8px">
+            <button type="button" class="btn btn-ghost btn-small" id="awardApplySuggestionBtn">Usar fornecedor recomendado</button>
+          </div>
+        </section>
         <div class="page-actions">
           <button type="button" class="btn btn-ghost" data-close-modal="award">Cancelar</button>
           <button type="submit" class="btn btn-primary" id="awardSubmitBtn">Confirmar decisao</button>
@@ -249,6 +259,10 @@
       const awardReasonInput = document.getElementById("awardReasonInput");
       const awardSubmitBtn = document.getElementById("awardSubmitBtn");
       const awardMeta = document.getElementById("awardMeta");
+      const awardModalMatrix = document.getElementById("awardModalMatrix");
+      const awardModalMatrixSummary = document.getElementById("awardModalMatrixSummary");
+      const awardModalMatrixList = document.getElementById("awardModalMatrixList");
+      const awardApplySuggestionBtn = document.getElementById("awardApplySuggestionBtn");
 
       const poForm = document.getElementById("poForm");
       const poAwardIdInput = document.getElementById("poAwardIdInput");
@@ -274,6 +288,7 @@
         lastItems: [],
         rfqSuggestions: new Map(),
         openRequestItems: [],
+        currentAwardSuggestion: null,
       };
 
       function initFromUrl() {
@@ -625,6 +640,17 @@
         awardRfqIdInput.value = String(rfqId);
         awardSupplierInput.value = "";
         awardReasonInput.value = "";
+        state.currentAwardSuggestion = null;
+        if (awardModalMatrix) {
+          awardModalMatrix.hidden = true;
+        }
+        if (awardModalMatrixSummary) {
+          awardModalMatrixSummary.className = "badge";
+          awardModalMatrixSummary.textContent = "Aguardando dados";
+        }
+        if (awardModalMatrixList) {
+          awardModalMatrixList.innerHTML = "";
+        }
 
         awardMeta.innerHTML = rfqItem
           ? `<span class="pill">Cotacao ${rfqId}</span><span class="pill">${escapeHtml(rfqItem.ref || "Cotacao")}</span>`
@@ -638,11 +664,13 @@
           const data = await res.json().catch(() => ({}));
           if (res.ok) {
             const suggestion = getSuggestedSupplierFromComparison(data);
+            state.currentAwardSuggestion = suggestion;
             if (suggestion) {
               awardSupplierInput.value = suggestion.name;
               awardReasonInput.value = `Menor total, ${suggestion.reason}`;
               awardMeta.innerHTML += `<span class="pill">Recomendacao ${escapeHtml(suggestion.name)}</span>`;
             }
+            renderAwardModalMatrix(data.items || []);
           }
         } catch (error) {
         }
@@ -807,6 +835,19 @@
       refreshBtn.addEventListener("click", loadInbox);
       seedBtn.addEventListener("click", seedData);
       createRfqBtn.addEventListener("click", () => openRfqModal());
+      if (awardApplySuggestionBtn) {
+        awardApplySuggestionBtn.addEventListener("click", () => {
+          if (!state.currentAwardSuggestion) {
+            window.showToast("danger", "Nao ha recomendacao consolidada para esta cotacao");
+            return;
+          }
+          awardSupplierInput.value = state.currentAwardSuggestion.name;
+          if (!(awardReasonInput.value || "").trim()) {
+            awardReasonInput.value = `Menor total, ${state.currentAwardSuggestion.reason}`;
+          }
+          awardSupplierInput.focus();
+        });
+      }
 
       applyFiltersBtn.addEventListener("click", applyFiltersFromUi);
       clearFiltersBtn.addEventListener("click", clearFilters);
@@ -852,6 +893,159 @@
           name: total.supplier_name || `Fornecedor ${suggestedId}`,
           reason: data.summary.suggestion_reason || "menor total",
         };
+      }
+
+      function getQuoteNumber(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+
+      function getBestPriceQuote(quotes) {
+        const marked = quotes.find((quote) => quote.best_price);
+        if (marked) return marked;
+        const candidates = quotes
+          .map((quote) => ({ quote, value: getQuoteNumber(quote.unit_price) }))
+          .filter((row) => row.value != null)
+          .sort((a, b) => Number(a.value) - Number(b.value));
+        return candidates.length ? candidates[0].quote : null;
+      }
+
+      function getBestLeadQuote(quotes) {
+        const marked = quotes.find((quote) => quote.best_lead_time);
+        if (marked) return marked;
+        const candidates = quotes
+          .map((quote) => ({ quote, value: getQuoteNumber(quote.lead_time_days) }))
+          .filter((row) => row.value != null)
+          .sort((a, b) => Number(a.value) - Number(b.value));
+        return candidates.length ? candidates[0].quote : null;
+      }
+
+      function getRecommendedItemQuote(quotes) {
+        const candidates = quotes
+          .map((quote) => ({
+            quote,
+            itemTotal: getQuoteNumber(quote.item_total),
+            unitPrice: getQuoteNumber(quote.unit_price),
+            lead: getQuoteNumber(quote.lead_time_days) ?? 9999,
+          }))
+          .filter((row) => row.itemTotal != null || row.unitPrice != null);
+
+        if (!candidates.length) return null;
+        candidates.sort((a, b) => {
+          const leftCost = Number(a.itemTotal ?? a.unitPrice ?? 999999999);
+          const rightCost = Number(b.itemTotal ?? b.unitPrice ?? 999999999);
+          if (leftCost !== rightCost) return leftCost - rightCost;
+          return Number(a.lead) - Number(b.lead);
+        });
+        return candidates[0].quote;
+      }
+
+      function formatCurrency(value) {
+        const amount = Number(value);
+        if (!Number.isFinite(amount)) return "Nao informado";
+        return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      }
+
+      function renderAwardModalMatrix(items) {
+        if (!awardModalMatrix || !awardModalMatrixSummary || !awardModalMatrixList) return;
+        if (!items || !items.length) {
+          awardModalMatrix.hidden = true;
+          awardModalMatrixSummary.className = "badge";
+          awardModalMatrixSummary.textContent = "Sem dados";
+          awardModalMatrixList.innerHTML = "";
+          return;
+        }
+
+        const analyses = items.map((item) => {
+          const quotes = item.quotes || [];
+          if (!quotes.length) {
+            return {
+              type: "missing",
+              item,
+            };
+          }
+
+          const bestPrice = getBestPriceQuote(quotes);
+          const bestLead = getBestLeadQuote(quotes);
+          const recommended = getRecommendedItemQuote(quotes);
+          const converged =
+            bestPrice &&
+            bestLead &&
+            String(bestPrice.supplier_id || "") === String(bestLead.supplier_id || "");
+
+          return {
+            type: converged ? "converged" : "tradeoff",
+            item,
+            bestPrice,
+            bestLead,
+            recommended,
+          };
+        });
+
+        const tradeoffCount = analyses.filter((analysis) => analysis.type === "tradeoff").length;
+        const convergedCount = analyses.filter((analysis) => analysis.type === "converged").length;
+        const missingCount = analyses.filter((analysis) => analysis.type === "missing").length;
+
+        awardModalMatrix.hidden = false;
+        if (tradeoffCount > 0) {
+          awardModalMatrixSummary.className = "badge warning";
+          awardModalMatrixSummary.textContent = `${tradeoffCount} item(ns) com trade off`;
+        } else if (convergedCount > 0) {
+          awardModalMatrixSummary.className = "badge success";
+          awardModalMatrixSummary.textContent = `${convergedCount} item(ns) convergentes`;
+        } else {
+          awardModalMatrixSummary.className = "badge";
+          awardModalMatrixSummary.textContent = "Sem analise consolidada";
+        }
+
+        awardModalMatrixList.innerHTML = analyses
+          .map((analysis) => {
+            const itemName = escapeHtml(analysis.item.description || analysis.item.descricao || "Item");
+            if (analysis.type === "missing") {
+              return `
+                <article class="award-row">
+                  <div class="award-row-head">
+                    <strong>${itemName}</strong>
+                    <span class="pill">Sem proposta</span>
+                  </div>
+                  <div class="meta">Sem proposta registrada para este item.</div>
+                </article>
+              `;
+            }
+
+            const recommendedName = escapeHtml(
+              analysis.recommended?.supplier_name || analysis.bestPrice?.supplier_name || "Nao informado"
+            );
+            const recommendedTotal = formatCurrency(
+              analysis.recommended?.item_total != null
+                ? analysis.recommended.item_total
+                : analysis.recommended?.unit_price
+            );
+            const bestPriceName = escapeHtml(analysis.bestPrice?.supplier_name || "Nao informado");
+            const bestLeadName = escapeHtml(analysis.bestLead?.supplier_name || "Nao informado");
+            const typePill = analysis.type === "tradeoff" ? "warning" : "success";
+            const typeLabel = analysis.type === "tradeoff" ? "Trade off" : "Convergente";
+
+            return `
+              <article class="award-row">
+                <div class="award-row-head">
+                  <strong>${itemName}</strong>
+                  <span class="pill ${typePill}">${typeLabel}</span>
+                </div>
+                <div class="award-row-grid">
+                  <div><span class="meta">Fornecedor sugerido</span><div>${recommendedName}</div></div>
+                  <div><span class="meta">Total sugerido</span><div>${recommendedTotal}</div></div>
+                  <div><span class="meta">Melhor preco</span><div>${bestPriceName}</div></div>
+                  <div><span class="meta">Melhor prazo</span><div>${bestLeadName}</div></div>
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+
+        if (missingCount > 0) {
+          awardModalMatrixList.innerHTML += `<div class="meta">Itens sem proposta: ${escapeHtml(missingCount)}</div>`;
+        }
       }
 
       async function loadRfqSuggestions(items) {
