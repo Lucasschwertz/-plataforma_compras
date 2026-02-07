@@ -1237,7 +1237,16 @@
           awardModalMatrixSummary.textContent = "Sem analise consolidada";
         }
 
-        awardModalMatrixList.innerHTML = analyses
+        let matrixHint = "A matriz compara item a item para apoiar a decisao final.";
+        if (tradeoffCount > 0) {
+          matrixHint = "Existe trade off entre preco e prazo. A melhor opcao geral pode diferir da melhor opcao por item.";
+        } else if (missingCount > 0) {
+          matrixHint = "Existem itens sem proposta. A recomendacao geral pode mudar com cobertura completa.";
+        }
+
+        awardModalMatrixList.innerHTML =
+          `<div class="meta">${escapeHtml(matrixHint)}</div>` +
+          analyses
           .map((analysis) => {
             const itemName = escapeHtml(analysis.item.description || analysis.item.descricao || "Item");
             if (analysis.type === "missing") {

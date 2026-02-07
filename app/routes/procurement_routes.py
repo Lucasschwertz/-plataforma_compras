@@ -230,7 +230,11 @@ def cotacao_item_fornecedores_api(rfq_id: int, rfq_item_id: int):
     valid_supplier_ids = {s["id"] for s in _load_suppliers(db, tenant_id)}
 
     for supplier_id in supplier_ids:
-        if supplier_id not in valid_supplier_ids:
+        try:
+            parsed_supplier_id = int(supplier_id)
+        except (TypeError, ValueError):
+            continue
+        if parsed_supplier_id not in valid_supplier_ids:
             continue
         db.execute(
             """
@@ -238,7 +242,7 @@ def cotacao_item_fornecedores_api(rfq_id: int, rfq_item_id: int):
             VALUES (?, ?, ?)
             ON CONFLICT DO NOTHING
             """,
-            (rfq_item_id, supplier_id, tenant_id),
+            (rfq_item_id, parsed_supplier_id, tenant_id),
         )
 
     db.commit()
@@ -264,45 +268,123 @@ def cotacao_propostas_api(rfq_id: int):
     if not isinstance(items, list) or not items:
         return jsonify({"error": "items_required", "message": "Informe items."}), 400
 
+    try:
+        supplier_id = int(supplier_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "supplier_id_invalid", "message": "supplier_id invalido."}), 400
+
     valid_supplier_ids = {s["id"] for s in _load_suppliers(db, tenant_id)}
     if supplier_id not in valid_supplier_ids:
         return jsonify({"error": "supplier_not_found", "message": "Fornecedor nao encontrado."}), 404
 
-    quote_id = _get_or_create_quote(db, rfq_id, supplier_id, tenant_id)
-
+    normalized_items_by_id: Dict[int, dict] = {}
     for item in items:
         rfq_item_id = item.get("rfq_item_id")
         unit_price = item.get("unit_price")
         lead_time_days = item.get("lead_time_days")
 
-        if not rfq_item_id or unit_price is None:
+        if rfq_item_id in (None, "") or unit_price in (None, ""):
             continue
 
-        rfq_item = _load_rfq_item(db, tenant_id, int(rfq_item_id))
-        if not rfq_item or int(rfq_item["rfq_id"]) != rfq_id:
+        try:
+            parsed_rfq_item_id = int(rfq_item_id)
+            parsed_unit_price = float(unit_price)
+        except (TypeError, ValueError):
             continue
 
-        db.execute(
-            """
-            INSERT INTO rfq_item_suppliers (rfq_item_id, supplier_id, tenant_id)
-            VALUES (?, ?, ?)
-            ON CONFLICT DO NOTHING
-            """,
-            (rfq_item_id, supplier_id, tenant_id),
+        if parsed_unit_price < 0:
+            continue
+
+        parsed_lead_time_days = None
+        if lead_time_days not in (None, ""):
+            try:
+                parsed_lead_time_days = int(lead_time_days)
+            except (TypeError, ValueError):
+                continue
+            if parsed_lead_time_days < 0:
+                continue
+
+        normalized_items_by_id[parsed_rfq_item_id] = {
+            "rfq_item_id": parsed_rfq_item_id,
+            "unit_price": parsed_unit_price,
+            "lead_time_days": parsed_lead_time_days,
+        }
+
+    normalized_items = list(normalized_items_by_id.values())
+    if not normalized_items:
+        return (
+            jsonify(
+                {
+                    "error": "valid_items_required",
+                    "message": "Informe ao menos um item valido com preco unitario.",
+                }
+            ),
+            400,
         )
 
+    requested_item_ids = sorted(normalized_items_by_id.keys())
+    placeholders = ",".join("?" for _ in requested_item_ids)
+
+    valid_item_rows = db.execute(
+        f"""
+        SELECT id
+        FROM rfq_items
+        WHERE rfq_id = ? AND tenant_id = ? AND id IN ({placeholders})
+        """,
+        (rfq_id, tenant_id, *requested_item_ids),
+    ).fetchall()
+    valid_item_ids = {int(row["id"]) for row in valid_item_rows}
+    invalid_item_ids = [item_id for item_id in requested_item_ids if item_id not in valid_item_ids]
+    if invalid_item_ids:
+        return (
+            jsonify(
+                {
+                    "error": "rfq_items_not_found",
+                    "message": "Um ou mais itens da cotacao nao foram encontrados.",
+                    "rfq_item_ids": invalid_item_ids,
+                }
+            ),
+            400,
+        )
+
+    invited_rows = db.execute(
+        f"""
+        SELECT rfq_item_id
+        FROM rfq_item_suppliers
+        WHERE tenant_id = ? AND supplier_id = ? AND rfq_item_id IN ({placeholders})
+        """,
+        (tenant_id, supplier_id, *requested_item_ids),
+    ).fetchall()
+    invited_item_ids = {int(row["rfq_item_id"]) for row in invited_rows}
+    uninvited_item_ids = [item_id for item_id in requested_item_ids if item_id not in invited_item_ids]
+    if uninvited_item_ids:
+        return (
+            jsonify(
+                {
+                    "error": "supplier_not_invited_for_items",
+                    "message": "Fornecedor nao convidado para um ou mais itens desta cotacao.",
+                    "rfq_item_ids": uninvited_item_ids,
+                    "supplier_id": supplier_id,
+                }
+            ),
+            400,
+        )
+
+    quote_id = _get_or_create_quote(db, rfq_id, supplier_id, tenant_id)
+
+    for item in normalized_items:
         _upsert_quote_item(
             db,
             quote_id=int(quote_id),
-            rfq_item_id=int(rfq_item_id),
-            unit_price=float(unit_price),
-            lead_time_days=lead_time_days,
+            rfq_item_id=int(item["rfq_item_id"]),
+            unit_price=float(item["unit_price"]),
+            lead_time_days=item["lead_time_days"],
             tenant_id=tenant_id,
         )
 
     db.commit()
     itens = _load_rfq_items_with_quotes(db, tenant_id, rfq_id)
-    return jsonify({"itens": itens, "quote_id": quote_id})
+    return jsonify({"itens": itens, "quote_id": quote_id, "saved_items": len(normalized_items)})
 
 
 def _upsert_quote_item(

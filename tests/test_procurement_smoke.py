@@ -102,6 +102,115 @@ class ProcurementSmokeTest(unittest.TestCase):
             "expected at least one purchase_order sync run",
         )
 
+    def test_proposal_requires_supplier_invite_per_item(self) -> None:
+        seed_res = self.client.post("/api/procurement/seed", headers=self.headers)
+        self.assertIn(seed_res.status_code, (200, 201))
+
+        items_res = self.client.get(
+            "/api/procurement/purchase-request-items/open",
+            headers=self.headers,
+        )
+        self.assertEqual(items_res.status_code, 200)
+        item_ids = [item["id"] for item in self._json(items_res).get("items", [])][:2]
+        self.assertEqual(len(item_ids), 2, "expected at least two items for invitation flow test")
+
+        rfq_res = self.client.post(
+            "/api/procurement/rfqs",
+            headers=self.headers,
+            json={"title": "RFQ convite por item", "purchase_request_item_ids": item_ids},
+        )
+        self.assertEqual(rfq_res.status_code, 201)
+        rfq_id = self._json(rfq_res)["id"]
+
+        suppliers_res = self.client.get("/api/procurement/fornecedores", headers=self.headers)
+        self.assertEqual(suppliers_res.status_code, 200)
+        suppliers = self._json(suppliers_res).get("items", [])
+        self.assertTrue(suppliers, "expected at least one supplier")
+        supplier_id = suppliers[0]["id"]
+
+        detail_res = self.client.get(f"/api/procurement/cotacoes/{rfq_id}", headers=self.headers)
+        self.assertEqual(detail_res.status_code, 200)
+        rfq_items = self._json(detail_res).get("itens", [])
+        self.assertEqual(len(rfq_items), 2)
+        rfq_item_ids = [item["rfq_item_id"] for item in rfq_items]
+        first_item_id, second_item_id = rfq_item_ids[0], rfq_item_ids[1]
+
+        blocked_res = self.client.post(
+            f"/api/procurement/cotacoes/{rfq_id}/propostas",
+            headers=self.headers,
+            json={
+                "supplier_id": supplier_id,
+                "items": [
+                    {"rfq_item_id": first_item_id, "unit_price": 10, "lead_time_days": 7},
+                    {"rfq_item_id": second_item_id, "unit_price": 20, "lead_time_days": 8},
+                ],
+            },
+        )
+        self.assertEqual(blocked_res.status_code, 400)
+        blocked_payload = self._json(blocked_res)
+        self.assertEqual(blocked_payload.get("error"), "supplier_not_invited_for_items")
+        self.assertIn(first_item_id, blocked_payload.get("rfq_item_ids", []))
+        self.assertIn(second_item_id, blocked_payload.get("rfq_item_ids", []))
+
+        invite_res = self.client.post(
+            f"/api/procurement/cotacoes/{rfq_id}/itens/{first_item_id}/fornecedores",
+            headers=self.headers,
+            json={"supplier_ids": [supplier_id]},
+        )
+        self.assertEqual(invite_res.status_code, 200)
+
+        partial_block_res = self.client.post(
+            f"/api/procurement/cotacoes/{rfq_id}/propostas",
+            headers=self.headers,
+            json={
+                "supplier_id": supplier_id,
+                "items": [
+                    {"rfq_item_id": first_item_id, "unit_price": 11, "lead_time_days": 6},
+                    {"rfq_item_id": second_item_id, "unit_price": 21, "lead_time_days": 9},
+                ],
+            },
+        )
+        self.assertEqual(partial_block_res.status_code, 400)
+        partial_block_payload = self._json(partial_block_res)
+        self.assertEqual(partial_block_payload.get("error"), "supplier_not_invited_for_items")
+        self.assertIn(second_item_id, partial_block_payload.get("rfq_item_ids", []))
+        self.assertNotIn(first_item_id, partial_block_payload.get("rfq_item_ids", []))
+
+        success_res = self.client.post(
+            f"/api/procurement/cotacoes/{rfq_id}/propostas",
+            headers=self.headers,
+            json={
+                "supplier_id": supplier_id,
+                "items": [
+                    {"rfq_item_id": first_item_id, "unit_price": 12, "lead_time_days": 5},
+                ],
+            },
+        )
+        self.assertEqual(success_res.status_code, 200)
+        success_payload = self._json(success_res)
+        self.assertEqual(success_payload.get("saved_items"), 1)
+
+        updated_detail_res = self.client.get(f"/api/procurement/cotacoes/{rfq_id}", headers=self.headers)
+        self.assertEqual(updated_detail_res.status_code, 200)
+        updated_items = self._json(updated_detail_res).get("itens", [])
+        by_item_id = {item["rfq_item_id"]: item for item in updated_items}
+
+        first_item_suppliers = by_item_id[first_item_id].get("fornecedores", [])
+        self.assertTrue(
+            any(
+                supplier["supplier_id"] == supplier_id and supplier.get("unit_price") is not None
+                for supplier in first_item_suppliers
+            )
+        )
+
+        second_item_suppliers = by_item_id[second_item_id].get("fornecedores", [])
+        self.assertFalse(
+            any(
+                supplier["supplier_id"] == supplier_id and supplier.get("unit_price") is not None
+                for supplier in second_item_suppliers
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

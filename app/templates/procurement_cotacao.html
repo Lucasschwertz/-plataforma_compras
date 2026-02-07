@@ -680,18 +680,22 @@
         const suggestionReason = summary.suggestion_reason || "Sem sugestao";
 
         let suggestionLabel = "Sem propostas cadastradas para comparacao.";
+        let decisionScopeHint = "Use o assistente por item para validar preco e prazo antes da decisao final.";
         if (totals.length && suggestedSupplierId) {
           const suggestedSupplier = totals.find((t) => t.supplier_id === suggestedSupplierId);
           const suggestedName = suggestedSupplier?.supplier_name
             ? suggestedSupplier.supplier_name
             : `fornecedor ${suggestedSupplierId || "Nao informado"}`;
           suggestionLabel = `Recomendacao ${suggestedName}, ${suggestionReason}.`;
+          decisionScopeHint = "Melhor opcao geral considera total consolidado com cobertura completa. A melhor opcao por item pode ser diferente.";
         } else if (totals.length) {
           suggestionLabel = "Sem recomendacao geral, cobertura incompleta.";
+          decisionScopeHint = "Nenhum fornecedor cobre todos os itens. A decisao deve considerar sugestoes por item.";
         }
 
         comparacaoResumo.innerHTML = `
           <div class="meta">${escapeHtml(suggestionLabel)}</div>
+          <div class="meta">${escapeHtml(decisionScopeHint)}</div>
           <div class="meta">${renderSlaResumo(summary)}</div>
         `;
         renderExecutiveSummary(summary, totals, suggestedSupplierId);
@@ -1105,7 +1109,16 @@
           awardMatrixSummary.textContent = "Sem recomendacao completa";
         }
 
-        awardMatrixList.innerHTML = analyses
+        let matrixHint = "A matriz compara item a item. Use esta visao para validar a decisao final.";
+        if (tradeoffCount > 0) {
+          matrixHint = "Existe trade off entre preco e prazo. O melhor fornecedor geral pode diferir do melhor fornecedor por item.";
+        } else if (missingCount > 0) {
+          matrixHint = "Existem itens sem proposta. O resultado geral pode mudar quando a cobertura estiver completa.";
+        }
+
+        awardMatrixList.innerHTML =
+          `<div class="meta">${escapeHtml(matrixHint)}</div>` +
+          analyses
           .map((analysis) => {
             const itemName = escapeHtml(analysis.item.description || analysis.item.descricao || "Item");
             if (analysis.type === "missing") {
@@ -1191,12 +1204,9 @@
           return;
         }
 
-        const fornecedoresDisponiveis =
-          invitedIds.size > 0
-            ? state.fornecedores.filter((f) => invitedIds.has(f.id))
-            : state.fornecedores;
+        const fornecedoresDisponiveis = state.fornecedores.filter((f) => invitedIds.has(f.id));
 
-        if (!fornecedoresDisponiveis.length) {
+        if (!invitedIds.size || !fornecedoresDisponiveis.length) {
           propostaFornecedorSelect.innerHTML = '<option value="">Convide um fornecedor primeiro</option>';
           propostaFornecedorSelect.disabled = true;
           propostaSubmitBtn.disabled = true;
@@ -1483,6 +1493,15 @@
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
+            if (err.error === "supplier_not_invited_for_items") {
+              const blockedItems = Array.isArray(err.rfq_item_ids) ? err.rfq_item_ids.join(", ") : "nao informado";
+              window.showToast(
+                "danger",
+                `Fornecedor nao convidado para item(ns) ${blockedItems}. Convide o fornecedor antes de salvar.`
+              );
+              await carregar();
+              return;
+            }
             window.showToast("danger", `Nao foi possivel registrar a proposta, ${err.message || err.error || "motivo nao informado"}`);
             return;
           }
