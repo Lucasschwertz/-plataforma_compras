@@ -19,6 +19,32 @@
   {% endif %}
 {% endblock %}
 {% block content %}
+  <section class="card compact action-strip">
+    <div class="card-header">
+      <h2 class="card-title">Proxima acao recomendada</h2>
+      <span class="badge success">Workspace {{ workspace_id }}</span>
+    </div>
+    <div class="page-actions">
+      {% if ui_role == "approver" %}
+        <a class="btn btn-primary" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Priorizar aprovacoes</a>
+      {% elif ui_role == "admin" %}
+        <a class="btn btn-primary" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Revisar integracoes</a>
+      {% else %}
+        <a class="btn btn-primary" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">Conduzir cotacoes</a>
+      {% endif %}
+      <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir inbox</a>
+    </div>
+    <div class="meta">
+      {% if ui_role == "approver" %}
+        Foque nas cotacoes sem decisao e nas ordens pendentes de envio ao ERP.
+      {% elif ui_role == "admin" %}
+        Monitore execucoes, erros e trilha operacional por tenant.
+      {% else %}
+        Execute o fluxo de solicitacao, cotacao, decisao e ordem de compra sem sair do workspace.
+      {% endif %}
+    </div>
+  </section>
+
   <section class="card compact">
     <div class="card-header">
       <h2 class="card-title">Contexto do papel</h2>
@@ -267,7 +293,12 @@
     function renderPending(items) {
       if (!items.length) {
         pendingMeta.textContent = "Sem pendencias para este workspace";
-        pendingList.innerHTML = '<div class="list-item"><div class="meta">Nenhuma pendencia no momento</div></div>';
+        pendingList.innerHTML = `
+          <div class="list-item">
+            <div class="title">Nenhuma pendencia no momento</div>
+            <div class="meta">A operacao deste workspace esta em dia para os filtros padrao.</div>
+          </div>
+        `;
         return;
       }
 
@@ -276,11 +307,14 @@
         .slice(0, 8)
         .map(
           (item) => `
-            <a class="list-item" href="${itemHref(item)}">
+            <a class="list-item link" href="${itemHref(item)}">
               <div class="title">${escapeHtml(item.ref || "Sem referencia")} | ${escapeHtml(prettyType(item.type))}</div>
-              <div class="meta">${escapeHtml(prettyStatus(item.status))}, prioridade ${escapeHtml(item.priority || "n/a")}, idade ${escapeHtml(
-            item.age_days ?? 0
-          )} dias</div>
+              <div class="chip-row">
+                <span class="pill">${escapeHtml(prettyStatus(item.status))}</span>
+                <span class="pill">Prioridade ${escapeHtml(item.priority || "n/a")}</span>
+                <span class="pill">Idade ${escapeHtml(item.age_days ?? 0)}d</span>
+              </div>
+              <div class="meta">Atualizado em ${escapeHtml(item.updated_at || "n/a")}</div>
             </a>
           `
         )
@@ -298,7 +332,12 @@
         renderPending(payload.items || []);
       } catch (error) {
         pendingMeta.textContent = "Falha ao carregar dados";
-        pendingList.innerHTML = '<div class="list-item"><div class="meta">Nao foi possivel carregar pendencias</div></div>';
+        pendingList.innerHTML = `
+          <div class="list-item">
+            <div class="title">Falha ao carregar pendencias</div>
+            <div class="meta">Tente atualizar o painel em alguns segundos.</div>
+          </div>
+        `;
         if (window.showToast) {
           window.showToast("danger", "Falha ao carregar dashboard");
         }

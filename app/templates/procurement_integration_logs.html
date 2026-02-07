@@ -51,6 +51,25 @@
     </article>
   </section>
 
+  <section class="ops-metrics" id="logsMetrics">
+    <article class="ops-metric">
+      <div class="label">Execucoes</div>
+      <div class="value" id="metricRuns">0</div>
+    </article>
+    <article class="ops-metric">
+      <div class="label">Falhas</div>
+      <div class="value" id="metricFailures">0</div>
+    </article>
+    <article class="ops-metric">
+      <div class="label">Eventos</div>
+      <div class="value" id="metricEvents">0</div>
+    </article>
+    <article class="ops-metric">
+      <div class="label">Ultimo status</div>
+      <div class="value" id="metricLastStatus">n/a</div>
+    </article>
+  </section>
+
   <section class="grid grid-2">
     <article class="card">
       <div class="card-header">
@@ -79,6 +98,10 @@
 
     const syncRunsList = document.getElementById("syncRunsList");
     const eventsList = document.getElementById("eventsList");
+    const metricRuns = document.getElementById("metricRuns");
+    const metricFailures = document.getElementById("metricFailures");
+    const metricEvents = document.getElementById("metricEvents");
+    const metricLastStatus = document.getElementById("metricLastStatus");
 
     const syncScope = document.getElementById("syncScope");
     const syncLimit = document.getElementById("syncLimit");
@@ -114,6 +137,31 @@
       return scope || "-";
     }
 
+    function statusTone(status) {
+      const normalized = String(status || "").toLowerCase();
+      if (
+        normalized.includes("failed") ||
+        normalized.includes("error") ||
+        normalized.includes("rejected")
+      ) return "danger";
+      if (
+        normalized.includes("running") ||
+        normalized.includes("pending") ||
+        normalized.includes("retry")
+      ) return "warning";
+      if (
+        normalized.includes("success") ||
+        normalized.includes("completed") ||
+        normalized.includes("accepted")
+      ) return "success";
+      return "info";
+    }
+
+    function renderStatusPill(status) {
+      const tone = statusTone(status);
+      return `<span class="pill ${tone}">${escapeHtml(prettyStatus(status))}</span>`;
+    }
+
     function buildUrl() {
       const params = new URLSearchParams();
       params.set("limit", String(state.limit));
@@ -123,21 +171,31 @@
 
     function renderSyncRuns(items) {
       if (!items.length) {
-        syncRunsList.innerHTML = '<div class="meta">Sem execucoes de integracao.</div>';
+        syncRunsList.innerHTML = `
+          <div class="list-item">
+            <div class="title">Sem execucoes de integracao</div>
+            <div class="meta">Execute uma sincronizacao manual para gerar eventos.</div>
+          </div>
+        `;
         return;
       }
 
       syncRunsList.innerHTML = items
         .map(
           (s) => `
-            <div class="list-item">
-              <div class="title">Execucao #${escapeHtml(s.id)} | ${escapeHtml(prettyStatus(s.status))}</div>
-              <div class="meta">inicio ${escapeHtml(s.started_at)} | escopo ${escapeHtml(prettyScope(s.scope))}</div>
-              <div class="meta">tentativa ${escapeHtml(s.attempt)} | duracao ms ${escapeHtml(s.duration_ms || "-")}</div>
-              <div class="meta">registros in ${escapeHtml(s.records_in)} | upserted ${escapeHtml(s.records_upserted)} | failed ${escapeHtml(
-                s.records_failed
-              )}</div>
-              ${s.error_summary ? `<div class="meta">erro ${escapeHtml(s.error_summary)}</div>` : ""}
+            <div class="list-item log-row">
+              <div class="head">
+                <div class="title">Execucao #${escapeHtml(s.id)}</div>
+                ${renderStatusPill(s.status)}
+                <span class="pill">${escapeHtml(prettyScope(s.scope))}</span>
+              </div>
+              <div class="meta">Inicio ${escapeHtml(s.started_at)} | tentativa ${escapeHtml(s.attempt)} | duracao ${escapeHtml(s.duration_ms || "-")} ms</div>
+              <div class="chip-row">
+                <span class="pill">In ${escapeHtml(s.records_in)}</span>
+                <span class="pill">Upsert ${escapeHtml(s.records_upserted)}</span>
+                <span class="pill ${Number(s.records_failed || 0) > 0 ? "danger" : "success"}">Falhas ${escapeHtml(s.records_failed)}</span>
+              </div>
+              ${s.error_summary ? `<div class="meta">Erro ${escapeHtml(s.error_summary)}</div>` : ""}
             </div>
           `
         )
@@ -146,31 +204,53 @@
 
     function renderEvents(items) {
       if (!items.length) {
-        eventsList.innerHTML = '<div class="meta">Sem eventos recentes.</div>';
+        eventsList.innerHTML = `
+          <div class="list-item">
+            <div class="title">Sem eventos recentes</div>
+            <div class="meta">A trilha sera exibida conforme novos status forem registrados.</div>
+          </div>
+        `;
         return;
       }
 
       eventsList.innerHTML = items
         .map(
           (e) => `
-            <div class="list-item">
-              <div class="title">${escapeHtml(prettyScope(e.entity))} #${escapeHtml(e.entity_id)} -> ${escapeHtml(
-                prettyStatus(e.to_status)
-              )}</div>
+            <div class="list-item timeline-row">
+              <div class="head">
+                <div class="title">${escapeHtml(prettyScope(e.entity))} #${escapeHtml(e.entity_id)}</div>
+                ${renderStatusPill(e.to_status)}
+              </div>
               <div class="meta">${escapeHtml(e.occurred_at)}</div>
-              <div class="meta">de ${escapeHtml(prettyStatus(e.from_status || "-"))} | motivo ${escapeHtml(e.reason || "-")}</div>
+              <div class="chip-row">
+                <span class="pill">De ${escapeHtml(prettyStatus(e.from_status || "-"))}</span>
+                <span class="pill">Motivo ${escapeHtml(e.reason || "-")}</span>
+              </div>
             </div>
           `
         )
         .join("");
     }
 
+    function updateMetrics(syncRuns, events) {
+      const runItems = syncRuns || [];
+      const eventItems = events || [];
+      const failures = runItems.filter((s) => statusTone(s.status) === "danger").length;
+      metricRuns.textContent = String(runItems.length);
+      metricFailures.textContent = String(failures);
+      metricEvents.textContent = String(eventItems.length);
+      metricLastStatus.textContent = runItems.length ? prettyStatus(runItems[0].status) : "n/a";
+    }
+
     async function loadLogs() {
       try {
+        syncRunsList.innerHTML = '<div class="list-item skeleton">Carregando execucoes</div>';
+        eventsList.innerHTML = '<div class="list-item skeleton">Carregando eventos</div>';
         const res = await fetch(buildUrl());
         const data = await res.json();
         renderSyncRuns(data.sync_runs || []);
         renderEvents(data.status_events || []);
+        updateMetrics(data.sync_runs || [], data.status_events || []);
       } catch (error) {
         window.showToast("danger", "Nao foi possivel carregar os logs");
       }

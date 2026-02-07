@@ -12,13 +12,25 @@
   <button class="btn btn-primary" id="pushErpBtn">Enviar ao ERP</button>
 {% endblock %}
 {% block content %}
+  <section class="card compact action-strip">
+    <div class="card-header">
+      <h2 class="card-title">Proxima acao da ordem</h2>
+      <span class="badge" id="nextPoActionBadge">Aguardando dados</span>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-primary" id="nextPoActionBtn">Enviar ao ERP</button>
+      <a class="btn btn-ghost" href="/procurement/inbox?type=purchase_order&workspace_id={{ workspace_id }}">Abrir fila de OC</a>
+    </div>
+    <div class="meta" id="nextPoActionMeta">Valide o status e conclua o envio ao ERP.</div>
+  </section>
+
   <section class="grid grid-2">
     <article class="card">
       <div class="card-header">
         <h2 class="card-title">Resumo da ordem</h2>
         <span class="badge" id="poStatusBadge">Status</span>
       </div>
-      <div class="stack" id="poSummary"></div>
+      <div class="kv-grid" id="poSummary"></div>
     </article>
 
     <article class="card">
@@ -46,6 +58,9 @@
       const syncRunsList = document.getElementById("syncRunsList");
       const pushErpBtn = document.getElementById("pushErpBtn");
       const poStatusBadge = document.getElementById("poStatusBadge");
+      const nextPoActionBadge = document.getElementById("nextPoActionBadge");
+      const nextPoActionBtn = document.getElementById("nextPoActionBtn");
+      const nextPoActionMeta = document.getElementById("nextPoActionMeta");
 
       function escapeHtml(value) {
         return String(value ?? "n/a")
@@ -68,6 +83,23 @@
         }
         return scope || "n/a";
       }
+
+      function formatCurrency(value) {
+        if (value == null || Number.isNaN(Number(value))) return "n/a";
+        return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
+      }
+
+      function statusTone(status) {
+        const normalized = String(status || "").toLowerCase();
+        if (normalized.includes("error") || normalized.includes("failed") || normalized.includes("rejected")) return "danger";
+        if (normalized.includes("sent") || normalized.includes("running") || normalized.includes("pending")) return "warning";
+        if (normalized.includes("accepted") || normalized.includes("success") || normalized.includes("approved")) return "success";
+        return "info";
+      }
+
+      function renderStatusPill(status) {
+        return `<span class="pill ${statusTone(status)}">${escapeHtml(prettyStatus(status))}</span>`;
+      }
       function renderSummary(po) {
         const rows = [
           ["Numero", po.number || `OC ${po.id}`],
@@ -75,7 +107,7 @@
           ["Fornecedor", po.supplier_name || "n/a"],
           ["Decisao", po.award_id ?? "n/a"],
           ["Moeda", po.currency || "BRL"],
-          ["Total", po.total_amount ?? "n/a"],
+          ["Total", formatCurrency(po.total_amount)],
           ["ID externo", po.external_id || "n/a"],
           ["Erro ERP", po.erp_last_error || "n/a"],
           ["Criada em", po.created_at || "n/a"],
@@ -83,26 +115,76 @@
         ];
 
         poSummary.innerHTML = rows
-          .map(([k, v]) => `<div class="meta">${escapeHtml(k)}</div><div>${escapeHtml(v)}</div>`)
+          .map(([k, v]) => `<div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div>`)
           .join("");
 
         pushErpBtn.disabled = po.status === "erp_accepted";
         pushErpBtn.textContent = po.status === "erp_accepted" ? "ERP ok" : "Enviar ao ERP";
         poStatusBadge.textContent = prettyStatus(po.status);
+        poStatusBadge.className = `badge ${statusTone(po.status)}`;
+        renderNextPoAction(po);
+      }
+
+      function renderNextPoAction(po) {
+        if (!nextPoActionBtn || !nextPoActionBadge || !nextPoActionMeta) return;
+        nextPoActionBtn.disabled = false;
+        nextPoActionBtn.dataset.action = "push";
+        nextPoActionBtn.textContent = "Enviar ao ERP";
+        nextPoActionBadge.className = "badge";
+
+        if (po.status === "erp_accepted") {
+          nextPoActionBadge.textContent = "Concluido";
+          nextPoActionBadge.classList.add("success");
+          nextPoActionMeta.textContent = "Ordem enviada com retorno aceito pelo ERP.";
+          nextPoActionBtn.textContent = "Atualizar dados";
+          nextPoActionBtn.dataset.action = "refresh";
+          return;
+        }
+
+        if (po.status === "erp_error") {
+          nextPoActionBadge.textContent = "Falha ERP";
+          nextPoActionBadge.classList.add("danger");
+          nextPoActionMeta.textContent = "Revise o erro e execute novo envio da ordem.";
+          nextPoActionBtn.textContent = "Reenviar ao ERP";
+          return;
+        }
+
+        if (po.status === "sent_to_erp") {
+          nextPoActionBadge.textContent = "Aguardando retorno";
+          nextPoActionBadge.classList.add("warning");
+          nextPoActionMeta.textContent = "A ordem foi enviada, acompanhe o retorno nas execucoes de integracao.";
+          nextPoActionBtn.textContent = "Atualizar dados";
+          nextPoActionBtn.dataset.action = "refresh";
+          return;
+        }
+
+        nextPoActionBadge.textContent = "Enviar";
+        nextPoActionMeta.textContent = "Envie a ordem ao ERP para concluir o fluxo operacional.";
       }
 
       function renderEvents(events) {
         if (!events.length) {
-          eventsList.innerHTML = '<div class="meta">Sem eventos ainda.</div>';
+          eventsList.innerHTML = `
+            <div class="list-item">
+              <div class="title">Sem eventos ainda</div>
+              <div class="meta">A trilha de status aparecera conforme novas mudancas ocorrerem.</div>
+            </div>
+          `;
           return;
         }
         eventsList.innerHTML = events
           .map(
             (e) => `
-              <div class="list-item">
-                <div class="meta">${escapeHtml(prettyStatus(e.to_status))}</div>
-                <div>${escapeHtml(e.occurred_at)}</div>
-                <div class="meta">de ${escapeHtml(e.from_status || "n/a")}, motivo ${escapeHtml(e.reason || "n/a")}</div>
+              <div class="list-item timeline-row">
+                <div class="head">
+                  <div class="title">Evento de status</div>
+                  ${renderStatusPill(e.to_status)}
+                </div>
+                <div class="meta">${escapeHtml(e.occurred_at)}</div>
+                <div class="chip-row">
+                  <span class="pill">De ${escapeHtml(prettyStatus(e.from_status || "n/a"))}</span>
+                  <span class="pill">Motivo ${escapeHtml(e.reason || "n/a")}</span>
+                </div>
               </div>
             `
           )
@@ -111,19 +193,29 @@
 
       function renderSyncRuns(syncRuns) {
         if (!syncRuns.length) {
-          syncRunsList.innerHTML = '<div class="meta">Sem execucoes de integracao ainda.</div>';
+          syncRunsList.innerHTML = `
+            <div class="list-item">
+              <div class="title">Sem execucoes de integracao</div>
+              <div class="meta">Use Enviar ao ERP para iniciar uma execucao.</div>
+            </div>
+          `;
           return;
         }
         syncRunsList.innerHTML = syncRuns
           .map(
             (s) => `
-              <div class="list-item">
-                <div class="meta">execucao ${escapeHtml(s.id)} | ${escapeHtml(prettyStatus(s.status))}</div>
-                <div>${escapeHtml(s.started_at)}</div>
-                <div class="meta">escopo ${escapeHtml(prettyScope(s.scope))} | duracao ${escapeHtml(s.duration_ms || "n/a")}</div>
-                <div class="meta">registros in ${escapeHtml(s.records_in)} upserted ${escapeHtml(s.records_upserted)} failed ${escapeHtml(
-              s.records_failed
-            )}</div>
+              <div class="list-item log-row">
+                <div class="head">
+                  <div class="title">Execucao ${escapeHtml(s.id)}</div>
+                  ${renderStatusPill(s.status)}
+                  <span class="pill">${escapeHtml(prettyScope(s.scope))}</span>
+                </div>
+                <div class="meta">${escapeHtml(s.started_at)} | duracao ${escapeHtml(s.duration_ms || "n/a")} ms</div>
+                <div class="chip-row">
+                  <span class="pill">In ${escapeHtml(s.records_in)}</span>
+                  <span class="pill">Upsert ${escapeHtml(s.records_upserted)}</span>
+                  <span class="pill ${Number(s.records_failed || 0) > 0 ? "danger" : "success"}">Falhas ${escapeHtml(s.records_failed)}</span>
+                </div>
               </div>
             `
           )
@@ -163,6 +255,15 @@
         } finally {
           await loadDetail();
         }
+      });
+
+      nextPoActionBtn.addEventListener("click", async () => {
+        const action = nextPoActionBtn.dataset.action || "push";
+        if (action === "refresh") {
+          await loadDetail();
+          return;
+        }
+        pushErpBtn.click();
       });
 
       loadDetail();
