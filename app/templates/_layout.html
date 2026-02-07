@@ -62,6 +62,14 @@
             <span class="badge">Tenant {{ workspace_id }}</span>
           </div>
           <div class="topbar-right">
+            <input
+              class="input topbar-search"
+              id="globalSearchInput"
+              type="search"
+              data-global-search
+              placeholder="Buscar na operacao (/)"
+              aria-label="Buscar na operacao"
+            />
             <button class="btn btn-ghost" id="themeToggle">Alternar tema</button>
             <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Logs</a>
             <a class="btn btn-ghost" href="/logout">Sair</a>
@@ -89,9 +97,11 @@
     <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
     <div class="toast-root" id="toastRoot"></div>
 
+    <script src="{{ url_for('static', filename='js/platform_core.js') }}"></script>
     <script src="{{ url_for('static', filename='js/ui_labels.js') }}"></script>
     <script>
       (function () {
+        const Platform = window.PlatformUI || null;
         const stored = localStorage.getItem("theme");
         const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
         const startTheme = stored || (prefersDark ? "dark" : "light");
@@ -111,6 +121,7 @@
         const workspaceFromUrl = params.get("workspace_id");
         const workspaceSelect = document.getElementById("workspaceSelect");
         const workspaceIndicator = document.getElementById("workspaceIndicator");
+        const globalSearchInput = document.getElementById("globalSearchInput");
         const currentWorkspace = workspaceFromUrl || (workspaceSelect ? workspaceSelect.value : null);
         const sidebarToggle = document.getElementById("sidebarToggle");
         const sidebarBackdrop = document.getElementById("sidebarBackdrop");
@@ -169,6 +180,27 @@
           });
         } else {
           appendWorkspaceToLinks(currentWorkspace);
+        }
+
+        if (globalSearchInput) {
+          globalSearchInput.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            const term = (globalSearchInput.value || "").trim();
+            const selectedWorkspace = workspaceSelect ? workspaceSelect.value : currentWorkspace;
+            const nextUrl = new URL("/procurement/inbox", window.location.origin);
+            if (term) {
+              nextUrl.searchParams.set("search", term);
+            }
+            if (selectedWorkspace) {
+              nextUrl.searchParams.set("workspace_id", selectedWorkspace);
+            }
+            window.location.href = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+          });
+        }
+
+        if (Platform && typeof Platform.setupGlobalShortcuts === "function") {
+          Platform.setupGlobalShortcuts();
         }
 
         window.showToast = function (type, message) {

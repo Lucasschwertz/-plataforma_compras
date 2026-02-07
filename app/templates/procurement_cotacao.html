@@ -193,13 +193,14 @@
   <script>
       const rfqId = Number({{ rfq_id }});
       const workspaceId = "{{ workspace_id }}";
+      const Platform = window.PlatformUI || {};
       const currentRole = "{{ role | default('buyer') }}";
       const isExecutiveReaderRole = ["approver", "admin"].includes(currentRole);
 
-      function withWorkspace(path) {
-        const separator = path.includes("?") ? "&" : "?";
-        return `${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
-      }
+      const withWorkspace = (path) =>
+        Platform.withWorkspace
+          ? Platform.withWorkspace(path, workspaceId)
+          : `${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
 
       const cotacaoResumo = document.getElementById("cotacaoResumo");
       const nextActionBadge = document.getElementById("nextActionBadge");
@@ -252,14 +253,29 @@
         detalheComparacaoAberto: true,
       };
 
-      function escapeHtml(value) {
-        return String(value ?? "Nao informado")
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#039;");
-      }
+      const escapeHtml = Platform.escapeHtml
+        ? Platform.escapeHtml
+        : (value) =>
+            String(value ?? "Nao informado")
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;")
+              .replaceAll('"', "&quot;")
+              .replaceAll("'", "&#039;");
+
+      const setBusy = (button, busy, labels) => {
+        if (!button) return;
+        if (Platform.setButtonBusy) {
+          Platform.setButtonBusy(button, busy, labels);
+          return;
+        }
+        const idleLabel = labels?.idle || button.dataset.idleLabel || button.textContent || "";
+        if (!button.dataset.idleLabel) {
+          button.dataset.idleLabel = idleLabel;
+        }
+        button.disabled = Boolean(busy);
+        button.textContent = busy ? labels?.loading || "Processando" : button.dataset.idleLabel;
+      };
 
       function prettyStatus(status) {
         if (window.UiLabels && window.UiLabels.prettyStatus) {
@@ -949,8 +965,7 @@
         const motivo = (motivoInput.value || "").trim();
         if (!fornecedor || !motivo) return;
 
-        decidirBtn.disabled = true;
-        decidirBtn.textContent = "Registrando";
+        setBusy(decidirBtn, true, { idle: "Registrar decisao", loading: "Registrando" });
         try {
           const res = await fetch(`/api/procurement/rfqs/${rfqId}/award`, {
             method: "POST",
@@ -965,8 +980,7 @@
           window.showToast("success", "Decisao registrada com sucesso");
           await carregar();
         } finally {
-          decidirBtn.disabled = false;
-          decidirBtn.textContent = "Registrar decisao";
+          setBusy(decidirBtn, false, { idle: "Registrar decisao", loading: "Registrando" });
         }
       }
 
@@ -1011,8 +1025,7 @@
           return;
         }
 
-        propostaSubmitBtn.disabled = true;
-        propostaSubmitBtn.textContent = "Salvando";
+        setBusy(propostaSubmitBtn, true, { idle: "Salvar proposta", loading: "Salvando" });
         try {
           const res = await fetch(`/api/procurement/cotacoes/${rfqId}/propostas`, {
             method: "POST",
@@ -1027,8 +1040,7 @@
           window.showToast("success", "Proposta registrada com sucesso");
           await carregar();
         } finally {
-          propostaSubmitBtn.disabled = false;
-          propostaSubmitBtn.textContent = "Salvar proposta";
+          setBusy(propostaSubmitBtn, false, { idle: "Salvar proposta", loading: "Salvando" });
         }
       }
 

@@ -91,6 +91,7 @@
 
 {% block page_scripts %}
   <script>
+    const Platform = window.PlatformUI || {};
     const scopeFilter = document.getElementById("scopeFilter");
     const limitInput = document.getElementById("limitInput");
     const applyLogsFiltersBtn = document.getElementById("applyLogsFiltersBtn");
@@ -113,14 +114,29 @@
       limit: 80,
     };
 
-    function escapeHtml(value) {
-      return String(value ?? "Nao informado")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
+    const escapeHtml = Platform.escapeHtml
+      ? Platform.escapeHtml
+      : (value) =>
+          String(value ?? "Nao informado")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+
+    const setBusy = (button, busy, labels) => {
+      if (!button) return;
+      if (Platform.setButtonBusy) {
+        Platform.setButtonBusy(button, busy, labels);
+        return;
+      }
+      const idleLabel = labels?.idle || button.dataset.idleLabel || button.textContent || "";
+      if (!button.dataset.idleLabel) {
+        button.dataset.idleLabel = idleLabel;
+      }
+      button.disabled = Boolean(busy);
+      button.textContent = busy ? labels?.loading || "Processando" : button.dataset.idleLabel;
+    };
 
     function prettyStatus(status) {
       if (window.UiLabels && window.UiLabels.prettyStatus) {
@@ -278,7 +294,7 @@
         return;
       }
 
-      syncNowBtn.disabled = true;
+      setBusy(syncNowBtn, true, { idle: "Sincronizar agora", loading: "Sincronizando" });
       syncStatus.textContent = "Sincronizando";
 
       const limitValue = Math.min(500, Math.max(1, Number(syncLimit.value || 100)));
@@ -304,7 +320,7 @@
         syncStatus.textContent = "Falha, erro inesperado na sincronizacao";
         window.showToast("danger", syncStatus.textContent);
       } finally {
-        syncNowBtn.disabled = false;
+        setBusy(syncNowBtn, false, { idle: "Sincronizar agora", loading: "Sincronizando" });
       }
     }
 

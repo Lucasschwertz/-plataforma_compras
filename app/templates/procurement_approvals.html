@@ -71,23 +71,25 @@
 {% block page_scripts %}
   <script>
     const workspaceId = "{{ workspace_id }}";
+    const Platform = window.PlatformUI || {};
     const refreshBtn = document.getElementById("refreshBtn");
     const queueMeta = document.getElementById("queueMeta");
     const queueBody = document.getElementById("queueBody");
 
-    function withWorkspace(path) {
-      const separator = path.includes("?") ? "&" : "?";
-      return `${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
-    }
+    const withWorkspace = (path) =>
+      Platform.withWorkspace
+        ? Platform.withWorkspace(path, workspaceId)
+        : `${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
 
-    function escapeHtml(value) {
-      return String(value ?? "Nao informado")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
+    const escapeHtml = Platform.escapeHtml
+      ? Platform.escapeHtml
+      : (value) =>
+          String(value ?? "Nao informado")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
 
     function prettyType(type) {
       if (window.UiLabels && window.UiLabels.prettyType) {

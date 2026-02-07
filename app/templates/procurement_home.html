@@ -225,6 +225,7 @@
 {% block page_scripts %}
   <script>
     const workspaceId = "{{ workspace_id }}";
+    const Platform = window.PlatformUI || {};
     const pendingMeta = document.getElementById("pendingMeta");
     const pendingList = document.getElementById("pendingList");
     const quickType = document.getElementById("quickType");
@@ -234,10 +235,10 @@
     const applyQuickFiltersBtn = document.getElementById("applyQuickFiltersBtn");
     const clearQuickFiltersBtn = document.getElementById("clearQuickFiltersBtn");
 
-    function withWorkspace(path) {
-      const separator = path.includes("?") ? "&" : "?";
-      return `${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
-    }
+    const withWorkspace = (path) =>
+      Platform.withWorkspace
+        ? Platform.withWorkspace(path, workspaceId)
+        : `${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
 
     function prettyType(type) {
       if (window.UiLabels && window.UiLabels.prettyType) {
@@ -253,14 +254,15 @@
       return status || "Nao informado";
     }
 
-    function escapeHtml(value) {
-      return String(value ?? "Nao informado")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
+    const escapeHtml = Platform.escapeHtml
+      ? Platform.escapeHtml
+      : (value) =>
+          String(value ?? "Nao informado")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
 
     function updateKpis(kpis) {
       const kpiMap = {

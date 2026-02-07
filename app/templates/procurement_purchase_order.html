@@ -52,6 +52,7 @@
 {% block page_scripts %}
   <script>
       const purchaseOrderId = Number({{ purchase_order_id }});
+      const Platform = window.PlatformUI || {};
 
       const poSummary = document.getElementById("poSummary");
       const eventsList = document.getElementById("eventsList");
@@ -62,14 +63,29 @@
       const nextPoActionBtn = document.getElementById("nextPoActionBtn");
       const nextPoActionMeta = document.getElementById("nextPoActionMeta");
 
-      function escapeHtml(value) {
-        return String(value ?? "Nao informado")
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#039;");
-      }
+      const escapeHtml = Platform.escapeHtml
+        ? Platform.escapeHtml
+        : (value) =>
+            String(value ?? "Nao informado")
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;")
+              .replaceAll('"', "&quot;")
+              .replaceAll("'", "&#039;");
+
+      const setBusy = (button, busy, labels) => {
+        if (!button) return;
+        if (Platform.setButtonBusy) {
+          Platform.setButtonBusy(button, busy, labels);
+          return;
+        }
+        const idleLabel = labels?.idle || button.dataset.idleLabel || button.textContent || "";
+        if (!button.dataset.idleLabel) {
+          button.dataset.idleLabel = idleLabel;
+        }
+        button.disabled = Boolean(busy);
+        button.textContent = busy ? labels?.loading || "Processando" : button.dataset.idleLabel;
+      };
 
       function prettyStatus(status) {
         if (window.UiLabels && window.UiLabels.prettyStatus) {
@@ -240,8 +256,7 @@
       }
 
       pushErpBtn.addEventListener("click", async () => {
-        pushErpBtn.disabled = true;
-        pushErpBtn.textContent = "Enviando";
+        setBusy(pushErpBtn, true, { idle: "Enviar ao ERP", loading: "Enviando" });
         try {
           const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, {
             method: "POST",
@@ -253,6 +268,7 @@
           }
           window.showToast("success", "Ordem enviada ao ERP com sucesso");
         } finally {
+          setBusy(pushErpBtn, false, { idle: "Enviar ao ERP", loading: "Enviando" });
           await loadDetail();
         }
       });

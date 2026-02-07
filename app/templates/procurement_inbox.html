@@ -186,11 +186,36 @@
 {% block page_scripts %}
   <script>
       const workspaceId = "{{ workspace_id }}";
+      const Platform = window.PlatformUI || {};
 
-      function withWorkspace(path) {
-        const separator = path.includes("?") ? "&" : "?";
-        return `${path}${separator}workspace_id=${encodeURIComponent(workspaceId)}`;
-      }
+      const withWorkspace = (path) =>
+        Platform.withWorkspace
+          ? Platform.withWorkspace(path, workspaceId)
+          : `${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
+
+      const escapeHtml = Platform.escapeHtml
+        ? Platform.escapeHtml
+        : (value) =>
+            String(value ?? "Nao informado")
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;")
+              .replaceAll('"', "&quot;")
+              .replaceAll("'", "&#039;");
+
+      const setBusy = (button, busy, labels) => {
+        if (!button) return;
+        if (Platform.setButtonBusy) {
+          Platform.setButtonBusy(button, busy, labels);
+          return;
+        }
+        const idleLabel = labels?.idle || button.dataset.idleLabel || button.textContent || "";
+        if (!button.dataset.idleLabel) {
+          button.dataset.idleLabel = idleLabel;
+        }
+        button.disabled = Boolean(busy);
+        button.textContent = busy ? labels?.loading || "Processando" : button.dataset.idleLabel;
+      };
 
       const inboxBody = document.getElementById("inboxBody");
       const summary = document.getElementById("summary");
@@ -646,15 +671,13 @@
       }
 
       async function seedData() {
-        seedBtn.disabled = true;
-        seedBtn.textContent = "Populando";
+        setBusy(seedBtn, true, { idle: "Popular dados", loading: "Populando" });
         try {
           await fetch("/api/procurement/seed", { method: "POST" });
           await loadInbox();
           window.showToast("success", "Dados de exemplo atualizados");
         } finally {
-          seedBtn.disabled = false;
-          seedBtn.textContent = "Popular dados";
+          setBusy(seedBtn, false, { idle: "Popular dados", loading: "Populando" });
         }
       }
 
@@ -686,8 +709,7 @@
           return;
         }
 
-        rfqSubmitBtn.disabled = true;
-        rfqSubmitBtn.textContent = "Criando";
+        setBusy(rfqSubmitBtn, true, { idle: "Criar", loading: "Criando" });
         try {
           const res = await fetch("/api/procurement/rfqs", {
             method: "POST",
@@ -702,8 +724,7 @@
           window.showToast("success", "Cotacao criada com sucesso");
           await loadInbox();
         } finally {
-          rfqSubmitBtn.disabled = false;
-          rfqSubmitBtn.textContent = "Criar";
+          setBusy(rfqSubmitBtn, false, { idle: "Criar", loading: "Criando" });
         }
       });
 
@@ -714,8 +735,7 @@
         const reason = (awardReasonInput.value || "").trim();
         if (!rfqId || !supplier_name || !reason) return;
 
-        awardSubmitBtn.disabled = true;
-        awardSubmitBtn.textContent = "Aplicando";
+        setBusy(awardSubmitBtn, true, { idle: "Confirmar decisao", loading: "Aplicando" });
         try {
           const res = await fetch(`/api/procurement/rfqs/${rfqId}/award`, {
             method: "POST",
@@ -731,8 +751,7 @@
           window.showToast("success", "Decisao registrada com sucesso");
           await loadInbox();
         } finally {
-          awardSubmitBtn.disabled = false;
-          awardSubmitBtn.textContent = "Confirmar decisao";
+          setBusy(awardSubmitBtn, false, { idle: "Confirmar decisao", loading: "Aplicando" });
         }
       });
 
@@ -741,8 +760,7 @@
         const awardId = Number(poAwardIdInput.value);
         if (!awardId) return;
 
-        poSubmitBtn.disabled = true;
-        poSubmitBtn.textContent = "Gerando";
+        setBusy(poSubmitBtn, true, { idle: "Gerar OC", loading: "Gerando" });
         try {
           const res = await fetch(`/api/procurement/awards/${awardId}/purchase-orders`, {
             method: "POST",
@@ -759,8 +777,7 @@
             window.location.href = withWorkspace(`/procurement/purchase-orders/${data.purchase_order_id}`);
           }
         } finally {
-          poSubmitBtn.disabled = false;
-          poSubmitBtn.textContent = "Gerar OC";
+          setBusy(poSubmitBtn, false, { idle: "Gerar OC", loading: "Gerando" });
         }
       });
 
@@ -769,8 +786,7 @@
         const purchaseOrderId = Number(pushPoIdInput.value);
         if (!purchaseOrderId) return;
 
-        pushSubmitBtn.disabled = true;
-        pushSubmitBtn.textContent = "Enviando";
+        setBusy(pushSubmitBtn, true, { idle: "Enviar agora", loading: "Enviando" });
         try {
           const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, {
             method: "POST",
@@ -784,8 +800,7 @@
           window.showToast("success", "Ordem enviada ao ERP com sucesso");
           await loadInbox();
         } finally {
-          pushSubmitBtn.disabled = false;
-          pushSubmitBtn.textContent = "Enviar agora";
+          setBusy(pushSubmitBtn, false, { idle: "Enviar agora", loading: "Enviando" });
         }
       });
 
@@ -875,15 +890,6 @@
         if (changed) {
           renderRows(state.lastItems);
         }
-      }
-
-      function escapeHtml(value) {
-        return String(value)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#039;");
       }
 
       function skeletonRows(count) {

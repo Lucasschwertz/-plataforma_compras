@@ -109,6 +109,10 @@
   gap: var(--space-3);
 }
 
+.topbar-search {
+  min-width: 260px;
+}
+
 .workspace-select {
   display: flex;
   flex-direction: column;
@@ -841,6 +845,11 @@ tr.best-overall td {
     width: 100%;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .topbar-search {
+    min-width: 0;
+    flex: 1 1 220px;
   }
 
   .topbar-left {
