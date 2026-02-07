@@ -9,7 +9,11 @@ from app.db import close_db
 
 class ProcurementSmokeTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self._tmpdir = tempfile.TemporaryDirectory(
+            prefix="pc_test_",
+            dir=os.getcwd(),
+            ignore_cleanup_errors=True,
+        )
         db_path = os.path.join(self._tmpdir.name, "plataforma_compras_test.db")
 
         class TempConfig(Config):
@@ -210,6 +214,146 @@ class ProcurementSmokeTest(unittest.TestCase):
                 for supplier in second_item_suppliers
             )
         )
+
+    def test_purchase_request_crud_api(self) -> None:
+        create_res = self.client.post(
+            "/api/procurement/solicitacoes",
+            headers=self.headers,
+            json={
+                "number": "SR-CRUD-1",
+                "priority": "high",
+                "requested_by": "Comprador Teste",
+                "department": "Compras",
+                "needed_at": "2026-02-15",
+                "items": [
+                    {"description": "Rolamento 6202", "quantity": 3, "uom": "UN"},
+                ],
+            },
+        )
+        self.assertEqual(create_res.status_code, 201)
+        request_id = self._json(create_res)["id"]
+
+        list_res = self.client.get("/api/procurement/solicitacoes", headers=self.headers)
+        self.assertEqual(list_res.status_code, 200)
+        listed = self._json(list_res).get("items", [])
+        created_row = next((row for row in listed if row["id"] == request_id), None)
+        self.assertIsNotNone(created_row)
+        self.assertEqual(created_row["priority"], "high")
+
+        update_res = self.client.patch(
+            f"/api/procurement/solicitacoes/{request_id}",
+            headers=self.headers,
+            json={"priority": "urgent", "requested_by": "Comprador Atualizado"},
+        )
+        self.assertEqual(update_res.status_code, 200)
+
+        add_item_res = self.client.post(
+            f"/api/procurement/solicitacoes/{request_id}/itens",
+            headers=self.headers,
+            json={"description": "Correia dentada", "quantity": 2, "uom": "UN"},
+        )
+        self.assertEqual(add_item_res.status_code, 201)
+        item_id = self._json(add_item_res)["id"]
+
+        patch_item_res = self.client.patch(
+            f"/api/procurement/solicitacoes/{request_id}/itens/{item_id}",
+            headers=self.headers,
+            json={"quantity": 4},
+        )
+        self.assertEqual(patch_item_res.status_code, 200)
+
+        delete_item_res = self.client.delete(
+            f"/api/procurement/solicitacoes/{request_id}/itens/{item_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(delete_item_res.status_code, 200)
+
+        cancel_res = self.client.delete(
+            f"/api/procurement/solicitacoes/{request_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(cancel_res.status_code, 200)
+        self.assertEqual(self._json(cancel_res)["status"], "cancelled")
+
+    def test_invite_and_proposal_crud_api(self) -> None:
+        seed_res = self.client.post("/api/procurement/seed", headers=self.headers)
+        self.assertIn(seed_res.status_code, (200, 201))
+
+        items_res = self.client.get("/api/procurement/purchase-request-items/open", headers=self.headers)
+        self.assertEqual(items_res.status_code, 200)
+        item_ids = [item["id"] for item in self._json(items_res).get("items", [])][:2]
+        self.assertGreaterEqual(len(item_ids), 1)
+
+        rfq_res = self.client.post(
+            "/api/procurement/rfqs",
+            headers=self.headers,
+            json={"title": "RFQ CRUD", "purchase_request_item_ids": item_ids},
+        )
+        self.assertEqual(rfq_res.status_code, 201)
+        rfq_id = self._json(rfq_res)["id"]
+
+        detail_res = self.client.get(f"/api/procurement/cotacoes/{rfq_id}", headers=self.headers)
+        self.assertEqual(detail_res.status_code, 200)
+        rfq_items = self._json(detail_res).get("itens", [])
+        self.assertTrue(rfq_items)
+        rfq_item_id = rfq_items[0]["rfq_item_id"]
+
+        suppliers_res = self.client.get("/api/procurement/fornecedores", headers=self.headers)
+        self.assertEqual(suppliers_res.status_code, 200)
+        supplier_id = self._json(suppliers_res)["items"][0]["id"]
+
+        create_invite_res = self.client.post(
+            f"/api/procurement/cotacoes/{rfq_id}/convites",
+            headers=self.headers,
+            json={"supplier_ids": [supplier_id], "rfq_item_ids": [rfq_item_id]},
+        )
+        self.assertEqual(create_invite_res.status_code, 200)
+
+        list_invites_res = self.client.get(
+            f"/api/procurement/cotacoes/{rfq_id}/convites",
+            headers=self.headers,
+        )
+        self.assertEqual(list_invites_res.status_code, 200)
+        invites = self._json(list_invites_res)["items"]
+        self.assertTrue(invites)
+        invite_id = invites[0]["id"]
+
+        reopen_invite_res = self.client.patch(
+            f"/api/procurement/cotacoes/{rfq_id}/convites/{invite_id}",
+            headers=self.headers,
+            json={"action": "reopen", "invite_valid_days": 5},
+        )
+        self.assertEqual(reopen_invite_res.status_code, 200)
+
+        save_quote_res = self.client.post(
+            f"/api/procurement/cotacoes/{rfq_id}/propostas",
+            headers=self.headers,
+            json={
+                "supplier_id": supplier_id,
+                "items": [{"rfq_item_id": rfq_item_id, "unit_price": 15.5, "lead_time_days": 6}],
+            },
+        )
+        self.assertEqual(save_quote_res.status_code, 200)
+
+        get_quote_res = self.client.get(
+            f"/api/procurement/cotacoes/{rfq_id}/propostas/{supplier_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(get_quote_res.status_code, 200)
+        quote_items = self._json(get_quote_res)["items"]
+        self.assertTrue(any(item["unit_price"] is not None for item in quote_items))
+
+        delete_quote_res = self.client.delete(
+            f"/api/procurement/cotacoes/{rfq_id}/propostas/{supplier_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(delete_quote_res.status_code, 200)
+
+        cancel_invite_res = self.client.delete(
+            f"/api/procurement/cotacoes/{rfq_id}/convites/{invite_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(cancel_invite_res.status_code, 200)
 
 
 if __name__ == "__main__":

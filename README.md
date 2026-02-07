@@ -2,6 +2,7 @@
 
 - SLA de Cotacao (RFQ) documentado em docs/domain/sla.md
 - Linguagem da interface documentada em docs/domain/linguagem.md
+- Fluxo ERP SR -> Cotacao -> OC documentado em docs/domain/erp_sr_rfq_oc.md
 - Modelo UX concorrente documentado em docs/procurement/06_competitor_mode_ux.md
 
 ## Banco de Dados (PostgreSQL)

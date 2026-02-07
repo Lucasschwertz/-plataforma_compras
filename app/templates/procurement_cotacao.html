@@ -108,6 +108,27 @@
     </div>
   </section>
 
+  <section class="card" id="convitesSection">
+    <div class="card-header">
+      <h2 class="card-title">Convites de fornecedores</h2>
+      <span class="meta">Gerencie validade, reabertura e cancelamento de convite</span>
+    </div>
+    <div class="table-wrap">
+      <table class="table-mobile-cards table-compact cotacao-table-tight">
+        <thead>
+          <tr>
+            <th>Fornecedor</th>
+            <th>Email</th>
+            <th>Status</th>
+            <th>Validade</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody id="convitesBody"></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="card" id="comparacao">
     <div class="card-header">
       <h2 class="card-title">Painel comparativo da cotacao</h2>
@@ -196,6 +217,7 @@
         </table>
       </div>
       <div class="page-actions">
+        <button class="btn btn-ghost" type="button" id="propostaDeleteBtn">Excluir proposta do fornecedor</button>
         <button class="btn btn-primary" type="submit" id="propostaSubmitBtn">Salvar proposta</button>
       </div>
     </form>
@@ -242,6 +264,7 @@
       const ocAcoes = document.getElementById("ocAcoes");
       const ocBadge = document.getElementById("ocBadge");
       const itensBody = document.getElementById("itensBody");
+      const convitesBody = document.getElementById("convitesBody");
       const propostaItensBody = document.getElementById("propostaItensBody");
       const eventosCotacao = document.getElementById("eventosCotacao");
       const eventosDecisao = document.getElementById("eventosDecisao");
@@ -277,6 +300,7 @@
       const propostaForm = document.getElementById("propostaForm");
       const propostaFornecedorSelect = document.getElementById("propostaFornecedorSelect");
       const propostaSubmitBtn = document.getElementById("propostaSubmitBtn");
+      const propostaDeleteBtn = document.getElementById("propostaDeleteBtn");
 
       const state = {
         cotacao: null,
@@ -285,6 +309,7 @@
         decisao: null,
         ordemCompra: null,
         comparacao: null,
+        convites: [],
         detalheComparacaoAberto: true,
       };
 
@@ -892,21 +917,75 @@
         }
 
         propostaItensBody.innerHTML = itensFiltrados
-          .map(
-            (item) => `
+          .map((item) => {
+            const fornecedorAtual = (item.fornecedores || []).find(
+              (f) => Number(f.supplier_id) === selectedSupplierId
+            );
+            const currentUnitPrice =
+              fornecedorAtual && fornecedorAtual.unit_price !== null && fornecedorAtual.unit_price !== undefined
+                ? fornecedorAtual.unit_price
+                : "";
+            const currentLeadTime =
+              fornecedorAtual && fornecedorAtual.lead_time_days !== null && fornecedorAtual.lead_time_days !== undefined
+                ? fornecedorAtual.lead_time_days
+                : "";
+            return `
               <tr>
                 <td data-label="Item">${escapeHtml(item.descricao)}</td>
                 <td class="numeric" data-label="Quantidade">${escapeHtml(item.quantidade)} ${escapeHtml(item.uom)}</td>
                 <td class="numeric" data-label="Preco unitario">
-                  <input class="input" type="number" step="0.01" min="0" data-preco-input="${item.rfq_item_id}" placeholder="0.00" />
+                  <input class="input" type="number" step="0.01" min="0" data-preco-input="${item.rfq_item_id}" placeholder="0.00" value="${escapeHtml(currentUnitPrice)}" />
                 </td>
                 <td class="numeric" data-label="Prazo em dias">
-                  <input class="input" type="number" step="1" min="0" data-prazo-input="${item.rfq_item_id}" placeholder="dias" />
+                  <input class="input" type="number" step="1" min="0" data-prazo-input="${item.rfq_item_id}" placeholder="dias" value="${escapeHtml(currentLeadTime)}" />
                 </td>
               </tr>
             `
-          )
+          })
           .join("");
+      }
+
+      function renderConvites(convites) {
+        if (!convitesBody) return;
+        if (!Array.isArray(convites) || !convites.length) {
+          convitesBody.innerHTML = renderEmptyRow(
+            "Sem convites ativos",
+            "Convide fornecedores para receber propostas pela plataforma",
+            5
+          );
+          return;
+        }
+
+        convitesBody.innerHTML = convites
+          .map((invite) => {
+            const statusLabelText = prettyStatus(invite.status || "pending");
+            return `
+              <tr>
+                <td data-label="Fornecedor"><strong>${escapeHtml(invite.supplier_name || `Fornecedor ${invite.supplier_id}`)}</strong></td>
+                <td data-label="Email">${escapeHtml(invite.supplier_email || "-")}</td>
+                <td data-label="Status"><span class="pill">${escapeHtml(statusLabelText)}</span></td>
+                <td data-label="Validade">${escapeHtml(invite.expires_at || "-")}</td>
+                <td class="cell-actions" data-label="Acoes">
+                  <div class="actions-cell">
+                    <a class="btn btn-small btn-ghost" href="${escapeHtml(invite.access_url || "#")}" target="_blank" rel="noreferrer">Portal</a>
+                    <button class="btn btn-small btn-ghost" type="button" data-invite-action="reopen" data-invite-id="${invite.id}">Reabrir</button>
+                    <button class="btn btn-small btn-ghost" type="button" data-invite-action="extend" data-invite-id="${invite.id}">+7 dias</button>
+                    <button class="btn btn-small" type="button" data-invite-action="cancel" data-invite-id="${invite.id}">Cancelar</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        convitesBody.querySelectorAll("[data-invite-action]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const inviteId = Number(button.getAttribute("data-invite-id"));
+            const action = button.getAttribute("data-invite-action") || "";
+            if (!inviteId || !action) return;
+            await executarAcaoConvite(inviteId, action);
+          });
+        });
       }
 
       function getQuoteNumber(value) {
@@ -1187,6 +1266,8 @@
           propostaFornecedorSelect.disabled = true;
           propostaSubmitBtn.disabled = true;
           propostaSubmitBtn.textContent = "Somente leitura";
+          propostaDeleteBtn.disabled = true;
+          propostaDeleteBtn.textContent = "Somente leitura";
           renderPropostaItens();
           return;
         }
@@ -1201,6 +1282,8 @@
           propostaFornecedorSelect.disabled = true;
           propostaSubmitBtn.disabled = true;
           propostaSubmitBtn.textContent = "Sem fornecedores";
+          propostaDeleteBtn.disabled = true;
+          propostaDeleteBtn.textContent = "Excluir proposta do fornecedor";
           return;
         }
 
@@ -1211,12 +1294,16 @@
           propostaFornecedorSelect.disabled = true;
           propostaSubmitBtn.disabled = true;
           propostaSubmitBtn.textContent = "Convide fornecedores";
+          propostaDeleteBtn.disabled = true;
+          propostaDeleteBtn.textContent = "Excluir proposta do fornecedor";
           return;
         }
 
         propostaFornecedorSelect.disabled = false;
         propostaSubmitBtn.disabled = false;
         propostaSubmitBtn.textContent = "Salvar proposta";
+        propostaDeleteBtn.disabled = false;
+        propostaDeleteBtn.textContent = "Excluir proposta do fornecedor";
         propostaFornecedorSelect.innerHTML = fornecedoresDisponiveis
           .map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`)
           .join("");
@@ -1396,6 +1483,7 @@
         state.itens = cotacaoData.itens || [];
         state.decisao = cotacaoData.decisao;
         state.ordemCompra = cotacaoData.ordem_compra;
+        state.convites = cotacaoData.convites || [];
         state.fornecedores = fornecedoresData.items || [];
         state.comparacao = comparacaoRes.ok ? comparacaoData : null;
 
@@ -1405,6 +1493,7 @@
         renderDecisao(state.decisao, state.ordemCompra);
         renderOc(state.ordemCompra);
         renderNextAction(state.decisao, state.ordemCompra);
+        renderConvites(state.convites);
         renderEventos(eventosCotacao, cotacaoData.eventos_cotacao, "Sem eventos da cotacao.");
         renderEventos(eventosDecisao, cotacaoData.eventos_decisao, "Sem eventos da decisao.");
         renderComparacao(state.comparacao || {});
@@ -1416,6 +1505,32 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ supplier_ids: [supplierId] }),
         });
+        await carregar();
+      }
+
+      async function executarAcaoConvite(inviteId, action) {
+        const labels = {
+          reopen: "reabrir",
+          extend: "estender",
+          cancel: "cancelar",
+        };
+        const label = labels[action] || action;
+        const confirmed = window.confirm(`Deseja ${label} este convite?`);
+        if (!confirmed) return;
+        const res = await fetch(`/api/procurement/cotacoes/${rfqId}/convites/${inviteId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action,
+            invite_valid_days: action === "extend" ? 7 : 7,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          window.showToast("danger", `Falha ao ${label} convite, ${err.message || err.error || "erro"}`);
+          return;
+        }
+        window.showToast("success", `Convite atualizado, acao ${label}`);
         await carregar();
       }
 
@@ -1465,7 +1580,12 @@
           return;
         }
 
-        const itemsPayload = state.itens
+        const itensFiltrados = state.itens.filter((item) => {
+          const fornecedores = item.fornecedores || [];
+          return fornecedores.some((f) => Number(f.supplier_id) === supplierId);
+        });
+
+        const itemsPayload = itensFiltrados
           .map((item) => {
             const precoInput = document.querySelector(`[data-preco-input="${item.rfq_item_id}"]`);
             const prazoInput = document.querySelector(`[data-prazo-input="${item.rfq_item_id}"]`);
@@ -1512,12 +1632,35 @@
         }
       }
 
+      async function excluirPropostaFornecedor() {
+        const supplierId = Number(propostaFornecedorSelect.value);
+        if (!supplierId) return;
+        const confirmed = window.confirm("Deseja excluir a proposta deste fornecedor?");
+        if (!confirmed) return;
+        setBusy(propostaDeleteBtn, true, { idle: "Excluir proposta do fornecedor", loading: "Excluindo" });
+        try {
+          const res = await fetch(`/api/procurement/cotacoes/${rfqId}/propostas/${supplierId}`, {
+            method: "DELETE",
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            window.showToast("danger", `Falha ao excluir proposta, ${err.message || err.error || "erro"}`);
+            return;
+          }
+          window.showToast("success", "Proposta excluida com sucesso");
+          await carregar();
+        } finally {
+          setBusy(propostaDeleteBtn, false, { idle: "Excluir proposta do fornecedor", loading: "Excluindo" });
+        }
+      }
+
       decisaoForm.addEventListener("submit", (event) => {
         event.preventDefault();
         registrarDecisao();
       });
 
       propostaForm.addEventListener("submit", salvarProposta);
+      propostaDeleteBtn.addEventListener("click", excluirPropostaFornecedor);
       atualizarBtn.addEventListener("click", carregar);
       propostaFornecedorSelect.addEventListener("change", renderPropostaItens);
       fillReasonPresetOptions();

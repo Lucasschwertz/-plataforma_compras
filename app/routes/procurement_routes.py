@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
+from urllib.parse import quote
 
 from flask import Blueprint, current_app, jsonify, render_template, request
 
@@ -79,6 +81,18 @@ def procurement_inbox_page():
     return render_template("procurement_inbox.html", tenant_id=tenant_id)
 
 
+@procurement_bp.route("/procurement/solicitacoes", methods=["GET"])
+def purchase_requests_page():
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    return render_template("procurement_solicitacoes.html", tenant_id=tenant_id)
+
+
+@procurement_bp.route("/procurement/cotacoes/abrir", methods=["GET"])
+def cotacao_open_page():
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    return render_template("procurement_cotacao_abertura.html", tenant_id=tenant_id)
+
+
 @procurement_bp.route("/procurement/cotacoes/<int:rfq_id>", methods=["GET"])
 def cotacao_detail_page(rfq_id: int):
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
@@ -105,6 +119,11 @@ def integration_logs_page():
 def approvals_page():
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     return render_template("procurement_approvals.html", tenant_id=tenant_id)
+
+
+@procurement_bp.route("/fornecedor/convite/<string:token>", methods=["GET"])
+def supplier_invite_page(token: str):
+    return render_template("supplier_quote_portal.html", invite_token=token.strip())
 
 
 @procurement_bp.route("/api/procurement/inbox", methods=["GET"])
@@ -152,6 +171,421 @@ def purchase_request_items_open():
     return jsonify({"items": items})
 
 
+@procurement_bp.route("/api/procurement/solicitacoes", methods=["GET", "POST"])
+def procurement_solicitacoes_api():
+    if request.method == "POST":
+        db = get_db()
+        tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+        payload = request.get_json(silent=True) or {}
+
+        status = str(payload.get("status") or "pending_rfq").strip()
+        if status not in ALLOWED_PR_STATUSES:
+            return jsonify({"error": "status_invalid", "message": "Status da solicitacao invalido."}), 400
+
+        priority = str(payload.get("priority") or "medium").strip()
+        if priority not in ALLOWED_PRIORITIES:
+            return jsonify({"error": "priority_invalid", "message": "Prioridade invalida."}), 400
+
+        number = (payload.get("number") or "").strip() or None
+        requested_by = (payload.get("requested_by") or "").strip() or None
+        department = (payload.get("department") or "").strip() or None
+        needed_at = (payload.get("needed_at") or "").strip() or None
+        items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        if not items:
+            return jsonify({"error": "items_required", "message": "Informe ao menos um item da solicitacao."}), 400
+
+        cursor = db.execute(
+            """
+            INSERT INTO purchase_requests (number, status, priority, requested_by, department, needed_at, tenant_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+            """,
+            (number, status, priority, requested_by, department, needed_at, tenant_id),
+        )
+        row = cursor.fetchone()
+        purchase_request_id = int(row["id"] if isinstance(row, dict) else row[0])
+
+        created_items = 0
+        for idx, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                continue
+            description = (item.get("description") or "").strip()
+            if not description:
+                continue
+            line_no = _parse_optional_int(item.get("line_no")) or idx
+            quantity = _parse_optional_float(item.get("quantity"))
+            if quantity is None or quantity <= 0:
+                quantity = 1
+            uom = (item.get("uom") or "UN").strip() or "UN"
+            category = (item.get("category") or "").strip() or None
+
+            db.execute(
+                """
+                INSERT INTO purchase_request_items (
+                    purchase_request_id, line_no, description, quantity, uom, category, tenant_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (purchase_request_id, line_no, description, quantity, uom, category, tenant_id),
+            )
+            created_items += 1
+
+        if created_items == 0:
+            db.execute(
+                "DELETE FROM purchase_requests WHERE id = ? AND tenant_id = ?",
+                (purchase_request_id, tenant_id),
+            )
+            db.commit()
+            return jsonify({"error": "items_required", "message": "Nenhum item valido informado."}), 400
+
+        db.execute(
+            """
+            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
+            VALUES ('purchase_request', ?, NULL, ?, 'purchase_request_created', ?)
+            """,
+            (purchase_request_id, status, tenant_id),
+        )
+        db.commit()
+        return (
+            jsonify(
+                {
+                    "id": purchase_request_id,
+                    "status": status,
+                    "priority": priority,
+                    "items_created": created_items,
+                }
+            ),
+            201,
+        )
+
+    db = get_read_db()
+    tenant_id = current_tenant_id()
+    limit = _parse_int(request.args.get("limit"), default=120, min_value=1, max_value=300)
+    status_values = _parse_csv_values(request.args.get("status"))
+    erp_only = request.args.get("erp_only") == "1"
+    items = _load_purchase_requests_panel(
+        db,
+        tenant_id=tenant_id,
+        limit=limit,
+        status_values=status_values,
+        erp_only=erp_only,
+    )
+    return jsonify({"items": items})
+
+
+@procurement_bp.route("/api/procurement/solicitacoes/<int:purchase_request_id>", methods=["PATCH", "DELETE"])
+def procurement_solicitacao_crud_api(purchase_request_id: int):
+    db = get_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    row = db.execute(
+        """
+        SELECT id, status, external_id, erp_num_cot, erp_num_pct
+        FROM purchase_requests
+        WHERE id = ? AND tenant_id = ?
+        LIMIT 1
+        """,
+        (purchase_request_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return (
+            jsonify(
+                {
+                    "error": "purchase_request_not_found",
+                    "message": "Solicitacao nao encontrada.",
+                    "purchase_request_id": purchase_request_id,
+                }
+            ),
+            404,
+        )
+
+    previous_status = row["status"]
+    is_erp_managed = bool(row["external_id"] or row["erp_num_cot"] or row["erp_num_pct"])
+    if is_erp_managed:
+        return (
+            jsonify(
+                {
+                    "error": "erp_managed_request_readonly",
+                    "message": "Solicitacao com origem ERP e somente leitura na plataforma.",
+                }
+            ),
+            409,
+        )
+
+    if request.method == "DELETE":
+        if previous_status == "cancelled":
+            return jsonify({"status": "cancelled", "purchase_request_id": purchase_request_id}), 200
+        db.execute(
+            """
+            UPDATE purchase_requests
+            SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (purchase_request_id, tenant_id),
+        )
+        db.execute(
+            """
+            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
+            VALUES ('purchase_request', ?, ?, 'cancelled', 'purchase_request_cancelled', ?)
+            """,
+            (purchase_request_id, previous_status, tenant_id),
+        )
+        db.commit()
+        return jsonify({"status": "cancelled", "purchase_request_id": purchase_request_id}), 200
+
+    payload = request.get_json(silent=True) or {}
+    updates: List[str] = []
+    params: List[object] = []
+
+    if "number" in payload:
+        updates.append("number = ?")
+        params.append((payload.get("number") or "").strip() or None)
+
+    if "requested_by" in payload:
+        updates.append("requested_by = ?")
+        params.append((payload.get("requested_by") or "").strip() or None)
+
+    if "department" in payload:
+        updates.append("department = ?")
+        params.append((payload.get("department") or "").strip() or None)
+
+    if "needed_at" in payload:
+        updates.append("needed_at = ?")
+        params.append((payload.get("needed_at") or "").strip() or None)
+
+    if "priority" in payload:
+        priority = str(payload.get("priority") or "").strip()
+        if priority and priority not in ALLOWED_PRIORITIES:
+            return jsonify({"error": "priority_invalid", "message": "Prioridade invalida."}), 400
+        updates.append("priority = ?")
+        params.append(priority or "medium")
+
+    next_status = previous_status
+    if "status" in payload:
+        candidate = str(payload.get("status") or "").strip()
+        if candidate not in ALLOWED_PR_STATUSES:
+            return jsonify({"error": "status_invalid", "message": "Status da solicitacao invalido."}), 400
+        next_status = candidate
+        updates.append("status = ?")
+        params.append(candidate)
+
+    if not updates:
+        return jsonify({"error": "no_changes", "message": "Nenhum campo enviado para atualizacao."}), 400
+
+    params.extend([purchase_request_id, tenant_id])
+    db.execute(
+        f"""
+        UPDATE purchase_requests
+        SET {", ".join(updates)}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND tenant_id = ?
+        """,
+        tuple(params),
+    )
+
+    if next_status != previous_status:
+        db.execute(
+            """
+            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
+            VALUES ('purchase_request', ?, ?, ?, 'purchase_request_updated', ?)
+            """,
+            (purchase_request_id, previous_status, next_status, tenant_id),
+        )
+
+    db.commit()
+    return jsonify({"purchase_request_id": purchase_request_id, "status": next_status}), 200
+
+
+@procurement_bp.route("/api/procurement/solicitacoes/<int:purchase_request_id>/itens", methods=["POST"])
+def procurement_solicitacao_item_create_api(purchase_request_id: int):
+    db = get_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    request_row = db.execute(
+        """
+        SELECT id, status, external_id, erp_num_cot, erp_num_pct
+        FROM purchase_requests
+        WHERE id = ? AND tenant_id = ?
+        LIMIT 1
+        """,
+        (purchase_request_id, tenant_id),
+    ).fetchone()
+    if not request_row:
+        return jsonify({"error": "purchase_request_not_found", "message": "Solicitacao nao encontrada."}), 404
+    if request_row["external_id"] or request_row["erp_num_cot"] or request_row["erp_num_pct"]:
+        return (
+            jsonify(
+                {
+                    "error": "erp_managed_request_readonly",
+                    "message": "Solicitacao com origem ERP e somente leitura na plataforma.",
+                }
+            ),
+            409,
+        )
+    if request_row["status"] != "pending_rfq":
+        return jsonify({"error": "request_locked", "message": "Somente solicitacoes pendentes aceitam novos itens."}), 400
+
+    payload = request.get_json(silent=True) or {}
+    description = (payload.get("description") or "").strip()
+    if not description:
+        return jsonify({"error": "description_required", "message": "Descricao do item e obrigatoria."}), 400
+    quantity = _parse_optional_float(payload.get("quantity"))
+    if quantity is None or quantity <= 0:
+        quantity = 1
+    uom = (payload.get("uom") or "UN").strip() or "UN"
+    category = (payload.get("category") or "").strip() or None
+    line_no = _parse_optional_int(payload.get("line_no"))
+    if line_no is None:
+        next_line = db.execute(
+            "SELECT COALESCE(MAX(line_no), 0) + 1 AS next_line FROM purchase_request_items WHERE purchase_request_id = ? AND tenant_id = ?",
+            (purchase_request_id, tenant_id),
+        ).fetchone()
+        line_no = int(next_line["next_line"] or 1)
+
+    cursor = db.execute(
+        """
+        INSERT INTO purchase_request_items (
+            purchase_request_id, line_no, description, quantity, uom, category, tenant_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        RETURNING id
+        """,
+        (purchase_request_id, line_no, description, quantity, uom, category, tenant_id),
+    )
+    item_row = cursor.fetchone()
+    db.commit()
+    return jsonify({"id": int(item_row["id"] if isinstance(item_row, dict) else item_row[0])}), 201
+
+
+@procurement_bp.route(
+    "/api/procurement/solicitacoes/<int:purchase_request_id>/itens/<int:item_id>",
+    methods=["PATCH", "DELETE"],
+)
+def procurement_solicitacao_item_crud_api(purchase_request_id: int, item_id: int):
+    db = get_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    request_row = db.execute(
+        """
+        SELECT id, status, external_id, erp_num_cot, erp_num_pct
+        FROM purchase_requests
+        WHERE id = ? AND tenant_id = ?
+        LIMIT 1
+        """,
+        (purchase_request_id, tenant_id),
+    ).fetchone()
+    if not request_row:
+        return jsonify({"error": "purchase_request_not_found", "message": "Solicitacao nao encontrada."}), 404
+    if request_row["external_id"] or request_row["erp_num_cot"] or request_row["erp_num_pct"]:
+        return (
+            jsonify(
+                {
+                    "error": "erp_managed_request_readonly",
+                    "message": "Solicitacao com origem ERP e somente leitura na plataforma.",
+                }
+            ),
+            409,
+        )
+    if request_row["status"] != "pending_rfq":
+        return jsonify({"error": "request_locked", "message": "Somente solicitacoes pendentes aceitam alteracao de itens."}), 400
+
+    item_row = db.execute(
+        """
+        SELECT id
+        FROM purchase_request_items
+        WHERE id = ? AND purchase_request_id = ? AND tenant_id = ?
+        LIMIT 1
+        """,
+        (item_id, purchase_request_id, tenant_id),
+    ).fetchone()
+    if not item_row:
+        return jsonify({"error": "item_not_found", "message": "Item da solicitacao nao encontrado."}), 404
+
+    if request.method == "DELETE":
+        db.execute(
+            "DELETE FROM purchase_request_items WHERE id = ? AND purchase_request_id = ? AND tenant_id = ?",
+            (item_id, purchase_request_id, tenant_id),
+        )
+        db.commit()
+        return jsonify({"deleted": True, "item_id": item_id}), 200
+
+    payload = request.get_json(silent=True) or {}
+    updates: List[str] = []
+    params: List[object] = []
+    if "description" in payload:
+        description = (payload.get("description") or "").strip()
+        if not description:
+            return jsonify({"error": "description_required", "message": "Descricao nao pode ser vazia."}), 400
+        updates.append("description = ?")
+        params.append(description)
+    if "quantity" in payload:
+        quantity = _parse_optional_float(payload.get("quantity"))
+        if quantity is None or quantity <= 0:
+            return jsonify({"error": "quantity_invalid", "message": "Quantidade invalida."}), 400
+        updates.append("quantity = ?")
+        params.append(quantity)
+    if "uom" in payload:
+        updates.append("uom = ?")
+        params.append((payload.get("uom") or "UN").strip() or "UN")
+    if "line_no" in payload:
+        line_no = _parse_optional_int(payload.get("line_no"))
+        if line_no is None or line_no <= 0:
+            return jsonify({"error": "line_no_invalid", "message": "Linha do item invalida."}), 400
+        updates.append("line_no = ?")
+        params.append(line_no)
+    if "category" in payload:
+        updates.append("category = ?")
+        params.append((payload.get("category") or "").strip() or None)
+
+    if not updates:
+        return jsonify({"error": "no_changes", "message": "Nenhuma alteracao informada."}), 400
+
+    params.extend([item_id, purchase_request_id, tenant_id])
+    db.execute(
+        f"""
+        UPDATE purchase_request_items
+        SET {", ".join(updates)}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND purchase_request_id = ? AND tenant_id = ?
+        """,
+        tuple(params),
+    )
+    db.commit()
+    return jsonify({"item_id": item_id, "updated": True}), 200
+
+
+@procurement_bp.route("/api/procurement/cotacoes/abertura-data", methods=["GET"])
+def rfq_opening_data_api():
+    db = get_read_db()
+    tenant_id = current_tenant_id()
+    limit = _parse_int(request.args.get("limit"), default=200, min_value=1, max_value=400)
+    request_id = _parse_optional_int(request.args.get("purchase_request_id"))
+
+    items = _load_open_purchase_request_items(db, tenant_id, limit)
+    if request_id is not None:
+        items = [item for item in items if int(item["purchase_request_id"]) == request_id]
+
+    suppliers = _load_suppliers(db, tenant_id)
+    grouped: Dict[int, dict] = {}
+    for item in items:
+        key = int(item["purchase_request_id"])
+        group = grouped.get(key)
+        if not group:
+            group = {
+                "purchase_request_id": key,
+                "number": item.get("number"),
+                "priority": item.get("priority"),
+                "needed_at": item.get("needed_at"),
+                "requested_by": item.get("requested_by"),
+                "department": item.get("department"),
+                "items": [],
+            }
+            grouped[key] = group
+        group["items"].append(item)
+
+    return jsonify(
+        {
+            "purchase_requests": list(grouped.values()),
+            "items": items,
+            "suppliers": suppliers,
+        }
+    )
+
+
 @procurement_bp.route("/api/procurement/fornecedores", methods=["GET"])
 def fornecedores_api():
     db = get_read_db()
@@ -178,6 +612,7 @@ def cotacao_detail_api(rfq_id: int):
         purchase_order = _load_purchase_order(db, tenant_id, int(award["purchase_order_id"]))
 
     itens = _load_rfq_items_with_quotes(db, tenant_id, rfq_id)
+    convites = _load_rfq_supplier_invites(db, tenant_id, rfq_id)
     events = _load_status_events(db, tenant_id, entity="rfq", entity_id=rfq_id, limit=80)
     award_events: List[dict] = []
     if award:
@@ -193,6 +628,7 @@ def cotacao_detail_api(rfq_id: int):
                 "atualizada_em": rfq["updated_at"],
             },
             "itens": itens,
+            "convites": convites,
             "decisao": award,
             "ordem_compra": _serialize_purchase_order(purchase_order) if purchase_order else None,
             "eventos_cotacao": events,
@@ -250,7 +686,7 @@ def cotacao_item_fornecedores_api(rfq_id: int, rfq_item_id: int):
     return jsonify({"itens": itens})
 
 
-@procurement_bp.route("/api/procurement/cotacoes/<int:rfq_id>/propostas", methods=["POST"])
+@procurement_bp.route("/api/procurement/cotacoes/<int:rfq_id>/propostas", methods=["POST", "PATCH"])
 def cotacao_propostas_api(rfq_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
@@ -385,6 +821,261 @@ def cotacao_propostas_api(rfq_id: int):
     db.commit()
     itens = _load_rfq_items_with_quotes(db, tenant_id, rfq_id)
     return jsonify({"itens": itens, "quote_id": quote_id, "saved_items": len(normalized_items)})
+
+
+@procurement_bp.route(
+    "/api/procurement/cotacoes/<int:rfq_id>/propostas/<int:supplier_id>",
+    methods=["GET", "DELETE"],
+)
+def cotacao_supplier_proposta_api(rfq_id: int, supplier_id: int):
+    db = get_db() if request.method == "DELETE" else get_read_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+
+    rfq = _load_rfq(db, tenant_id, rfq_id)
+    if not rfq:
+        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}), 404
+
+    supplier = db.execute(
+        "SELECT id, name FROM suppliers WHERE id = ? AND tenant_id = ? LIMIT 1",
+        (supplier_id, tenant_id),
+    ).fetchone()
+    if not supplier:
+        return jsonify({"error": "supplier_not_found", "message": "Fornecedor nao encontrado."}), 404
+
+    quote = db.execute(
+        """
+        SELECT id
+        FROM quotes
+        WHERE rfq_id = ? AND supplier_id = ? AND tenant_id = ?
+        LIMIT 1
+        """,
+        (rfq_id, supplier_id, tenant_id),
+    ).fetchone()
+
+    if request.method == "GET":
+        quote_id = int(quote["id"]) if quote else None
+        rows = db.execute(
+            """
+            SELECT
+                ri.id AS rfq_item_id,
+                ri.description,
+                ri.quantity,
+                ri.uom,
+                qi.unit_price,
+                qi.lead_time_days
+            FROM rfq_items ri
+            JOIN rfq_item_suppliers ris
+              ON ris.rfq_item_id = ri.id
+             AND ris.supplier_id = ?
+             AND ris.tenant_id = ri.tenant_id
+            LEFT JOIN quote_items qi
+              ON qi.rfq_item_id = ri.id
+             AND qi.quote_id = ?
+             AND qi.tenant_id = ri.tenant_id
+            WHERE ri.rfq_id = ? AND ri.tenant_id = ?
+            ORDER BY ri.id
+            """,
+            (supplier_id, quote_id, rfq_id, tenant_id),
+        ).fetchall()
+        return jsonify(
+            {
+                "rfq_id": rfq_id,
+                "supplier": {"id": supplier_id, "name": supplier["name"]},
+                "quote_id": quote_id,
+                "items": [
+                    {
+                        "rfq_item_id": int(row["rfq_item_id"]),
+                        "description": row["description"],
+                        "quantity": row["quantity"],
+                        "uom": row["uom"],
+                        "unit_price": row["unit_price"],
+                        "lead_time_days": row["lead_time_days"],
+                    }
+                    for row in rows
+                ],
+            }
+        )
+
+    if not quote:
+        return jsonify({"error": "quote_not_found", "message": "Proposta nao encontrada para este fornecedor."}), 404
+
+    quote_id = int(quote["id"])
+    db.execute("DELETE FROM quote_items WHERE quote_id = ? AND tenant_id = ?", (quote_id, tenant_id))
+    db.execute("DELETE FROM quotes WHERE id = ? AND tenant_id = ?", (quote_id, tenant_id))
+    db.execute(
+        """
+        UPDATE rfq_supplier_invites
+        SET status = CASE WHEN status = 'submitted' THEN 'opened' ELSE status END,
+            submitted_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE rfq_id = ? AND supplier_id = ? AND tenant_id = ?
+        """,
+        (rfq_id, supplier_id, tenant_id),
+    )
+    db.commit()
+    return jsonify({"deleted": True, "rfq_id": rfq_id, "supplier_id": supplier_id}), 200
+
+
+@procurement_bp.route("/api/fornecedor/convite/<string:token>", methods=["GET"])
+def supplier_invite_detail_api(token: str):
+    db = get_db()
+    invite = _load_supplier_invite_by_token(db, token)
+    if not invite:
+        return jsonify({"error": "invite_not_found", "message": "Convite nao encontrado."}), 404
+
+    if _invite_is_expired(invite):
+        db.execute(
+            "UPDATE rfq_supplier_invites SET status = 'expired', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (invite["id"],),
+        )
+        db.commit()
+        return jsonify({"error": "invite_expired", "message": "Convite expirado."}), 410
+
+    if invite["status"] == "pending":
+        db.execute(
+            """
+            UPDATE rfq_supplier_invites
+            SET status = 'opened', opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (invite["id"],),
+        )
+        db.commit()
+
+    payload = _build_supplier_invite_payload(db, invite)
+    return jsonify(payload)
+
+
+@procurement_bp.route("/api/fornecedor/convite/<string:token>/propostas", methods=["POST"])
+def supplier_invite_submit_api(token: str):
+    db = get_db()
+    invite = _load_supplier_invite_by_token(db, token)
+    if not invite:
+        return jsonify({"error": "invite_not_found", "message": "Convite nao encontrado."}), 404
+    if _invite_is_expired(invite):
+        db.execute(
+            "UPDATE rfq_supplier_invites SET status = 'expired', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (invite["id"],),
+        )
+        db.commit()
+        return jsonify({"error": "invite_expired", "message": "Convite expirado."}), 410
+
+    payload = request.get_json(silent=True) or {}
+    items = payload.get("items") or []
+    if not isinstance(items, list) or not items:
+        return jsonify({"error": "items_required", "message": "Informe itens com preco e prazo."}), 400
+
+    rfq_id = int(invite["rfq_id"])
+    supplier_id = int(invite["supplier_id"])
+    tenant_id = str(invite["tenant_id"])
+    rfq = _load_rfq(db, tenant_id, rfq_id)
+    if not rfq:
+        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada."}), 404
+    if rfq["status"] not in {"open", "collecting_quotes"}:
+        return (
+            jsonify(
+                {
+                    "error": "rfq_closed_for_quotes",
+                    "message": "Cotacao nao aceita novas propostas neste status.",
+                }
+            ),
+            400,
+        )
+
+    rfq_item_rows = db.execute(
+        """
+        SELECT id
+        FROM rfq_items
+        WHERE rfq_id = ? AND tenant_id = ?
+        ORDER BY id
+        """,
+        (rfq_id, tenant_id),
+    ).fetchall()
+    all_rfq_item_ids = {int(row["id"]) for row in rfq_item_rows}
+    if not all_rfq_item_ids:
+        return jsonify({"error": "rfq_items_not_found", "message": "Cotacao sem itens disponiveis."}), 400
+
+    invited_rows = db.execute(
+        """
+        SELECT rfq_item_id
+        FROM rfq_item_suppliers
+        WHERE rfq_item_id IN ({placeholders}) AND supplier_id = ? AND tenant_id = ?
+        """.format(placeholders=",".join("?" for _ in all_rfq_item_ids)),
+        (*sorted(all_rfq_item_ids), supplier_id, tenant_id),
+    ).fetchall()
+    invited_item_ids = {int(row["rfq_item_id"]) for row in invited_rows}
+    if not invited_item_ids:
+        return (
+            jsonify(
+                {
+                    "error": "supplier_not_invited",
+                    "message": "Fornecedor nao esta convidado para itens desta cotacao.",
+                }
+            ),
+            400,
+        )
+
+    normalized_by_id: Dict[int, dict] = {}
+    for item in items:
+        rfq_item_id = _parse_optional_int(item.get("rfq_item_id"))
+        unit_price = _parse_optional_float(item.get("unit_price"))
+        lead_time_days = _parse_optional_int(item.get("lead_time_days"))
+
+        if rfq_item_id is None or unit_price is None:
+            continue
+        if rfq_item_id not in invited_item_ids:
+            continue
+        if unit_price < 0:
+            continue
+        if lead_time_days is not None and lead_time_days < 0:
+            continue
+
+        normalized_by_id[rfq_item_id] = {
+            "rfq_item_id": rfq_item_id,
+            "unit_price": unit_price,
+            "lead_time_days": lead_time_days,
+        }
+
+    normalized_items = list(normalized_by_id.values())
+    if not normalized_items:
+        return jsonify({"error": "valid_items_required", "message": "Nenhum item valido para envio."}), 400
+
+    quote_id = _get_or_create_quote(db, rfq_id, supplier_id, tenant_id)
+    for item in normalized_items:
+        _upsert_quote_item(
+            db=db,
+            quote_id=int(quote_id),
+            rfq_item_id=int(item["rfq_item_id"]),
+            unit_price=float(item["unit_price"]),
+            lead_time_days=item["lead_time_days"],
+            tenant_id=tenant_id,
+        )
+
+    db.execute(
+        """
+        UPDATE rfq_supplier_invites
+        SET status = 'submitted',
+            submitted_at = CURRENT_TIMESTAMP,
+            opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (invite["id"],),
+    )
+    db.execute(
+        """
+        INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
+        VALUES ('rfq', ?, ?, ?, 'supplier_quote_received', ?)
+        """,
+        (rfq_id, rfq["status"], "collecting_quotes", tenant_id),
+    )
+    db.execute(
+        "UPDATE rfqs SET status = 'collecting_quotes', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ?",
+        (rfq_id, tenant_id),
+    )
+    db.commit()
+
+    return jsonify({"status": "submitted", "quote_id": quote_id, "saved_items": len(normalized_items)})
 
 
 def _upsert_quote_item(
@@ -769,123 +1460,201 @@ def create_rfq():
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     payload = request.get_json(silent=True) or {}
-
-    item_ids_raw = payload.get("purchase_request_item_ids") or []
-    if not isinstance(item_ids_raw, list):
-        return (
-            jsonify(
-                {
-                    "error": "purchase_request_item_ids_invalid",
-                    "message": "purchase_request_item_ids deve ser lista.",
-                }
-            ),
-            400,
-        )
-
-    item_ids: List[int] = []
-    for item in item_ids_raw:
-        try:
-            item_ids.append(int(item))
-        except (TypeError, ValueError):
-            continue
-    item_ids = list(dict.fromkeys(item_ids))
-
-    if not item_ids:
-        return (
-            jsonify(
-                {
-                    "error": "purchase_request_item_ids_required",
-                    "message": "Selecione ao menos um item de solicitacao.",
-                }
-            ),
-            400,
-        )
-
-    request_items = _load_purchase_request_items_by_ids(db, tenant_id, item_ids)
-    if not request_items:
-        return (
-            jsonify(
-                {
-                    "error": "purchase_request_items_not_found",
-                    "message": "Itens de solicitacao nao encontrados ou ja em cotacao.",
-                }
-            ),
-            400,
-        )
-
     title = (payload.get("title") or "Nova Cotacao").strip()
-    status = "open"
-
-    cursor = db.execute(
-        "INSERT INTO rfqs (title, status, tenant_id) VALUES (?, ?, ?) RETURNING id",
-        (title, status, tenant_id),
-    )
-    rfq_row = cursor.fetchone()
-    rfq_id = rfq_row["id"] if isinstance(rfq_row, dict) else rfq_row[0]
-
-    db.execute(
-        """
-        INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-        VALUES ('rfq', ?, NULL, ?, 'rfq_created', ?)
-        """,
-        (rfq_id, status, tenant_id),
-    )
-
-    rfq_items_payload: List[dict] = []
-    for item in request_items:
-        cursor = db.execute(
-            """
-            INSERT INTO rfq_items (
-                rfq_id,
-                purchase_request_item_id,
-                description,
-                quantity,
-                uom,
-                tenant_id
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            RETURNING id
-            """,
-            (
-                rfq_id,
-                item["id"],
-                item["description"],
-                item["quantity"],
-                item["uom"],
-                tenant_id,
-            ),
-        )
-        rfq_item_row = cursor.fetchone()
-        rfq_items_payload.append(
-            {
-                "rfq_item_id": rfq_item_row["id"] if isinstance(rfq_item_row, dict) else rfq_item_row[0],
-                "purchase_request_item_id": item["id"],
-                "description": item["description"],
-                "quantity": item["quantity"],
-                "uom": item["uom"],
-            }
-        )
-
-    request_ids = sorted({item["purchase_request_id"] for item in request_items})
-    _mark_purchase_requests_in_rfq(db, tenant_id, request_ids)
-
-    created_row = db.execute(
-        "SELECT created_at FROM rfqs WHERE id = ? AND tenant_id = ?",
-        (rfq_id, tenant_id),
-    ).fetchone()
+    item_ids = _normalize_int_list(payload.get("purchase_request_item_ids"))
+    created, error_payload, status_code = _create_rfq_core(db, tenant_id, title, item_ids)
+    if error_payload:
+        return jsonify(error_payload), status_code
 
     db.commit()
-    return (
-        jsonify(
-            {
-                "id": rfq_id,
-                "status": status,
-                "title": title,
-                "created_at": created_row["created_at"] if created_row else None,
-                "rfq_items": rfq_items_payload,
-            }
-        ),
-        201,
+    return jsonify(created), 201
+
+
+@procurement_bp.route("/api/procurement/cotacoes/abertura", methods=["POST"])
+def open_rfq_with_suppliers():
+    db = get_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    payload = request.get_json(silent=True) or {}
+
+    title = (payload.get("title") or "Cotacao aberta").strip()
+    item_ids = _normalize_int_list(payload.get("purchase_request_item_ids"))
+    supplier_ids = _normalize_int_list(payload.get("supplier_ids"))
+    if not supplier_ids:
+        return (
+            jsonify(
+                {
+                    "error": "supplier_ids_required",
+                    "message": "Selecione ao menos um fornecedor para convite.",
+                }
+            ),
+            400,
+        )
+    valid_supplier_ids = {int(item["id"]) for item in _load_suppliers(db, tenant_id)}
+    if not any(supplier_id in valid_supplier_ids for supplier_id in supplier_ids):
+        return jsonify({"error": "suppliers_not_found", "message": "Nenhum fornecedor valido para convite."}), 400
+
+    created, error_payload, status_code = _create_rfq_core(db, tenant_id, title, item_ids)
+    if error_payload:
+        return jsonify(error_payload), status_code
+
+    invite_result = _create_rfq_supplier_invites(
+        db=db,
+        tenant_id=tenant_id,
+        rfq_id=int(created["id"]),
+        rfq_items=created["rfq_items"],
+        supplier_ids=supplier_ids,
+        valid_days=_parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30),
     )
+    db.commit()
+    return jsonify({"rfq": created, "invites": invite_result}), 201
+
+
+@procurement_bp.route("/api/procurement/cotacoes/<int:rfq_id>/convites", methods=["POST"])
+def create_rfq_invites(rfq_id: int):
+    db = get_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    payload = request.get_json(silent=True) or {}
+
+    rfq = _load_rfq(db, tenant_id, rfq_id)
+    if not rfq:
+        return (
+            jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}),
+            404,
+        )
+
+    supplier_ids = _normalize_int_list(payload.get("supplier_ids"))
+    if not supplier_ids:
+        return (
+            jsonify({"error": "supplier_ids_required", "message": "Informe supplier_ids para convite."}),
+            400,
+        )
+
+    requested_item_ids = _normalize_int_list(payload.get("rfq_item_ids"))
+    all_items = _load_rfq_items(db, tenant_id, rfq_id)
+    if requested_item_ids:
+        items = [item for item in all_items if int(item["id"]) in set(requested_item_ids)]
+    else:
+        items = all_items
+    if not items:
+        return jsonify({"error": "rfq_items_required", "message": "Nenhum item valido para convite."}), 400
+
+    invite_result = _create_rfq_supplier_invites(
+        db=db,
+        tenant_id=tenant_id,
+        rfq_id=rfq_id,
+        rfq_items=[
+            {
+                "rfq_item_id": int(item["id"]),
+                "purchase_request_item_id": item.get("purchase_request_item_id"),
+                "description": item.get("description"),
+                "quantity": item.get("quantity"),
+                "uom": item.get("uom"),
+            }
+            for item in items
+        ],
+        supplier_ids=supplier_ids,
+        valid_days=_parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30),
+    )
+    if invite_result["supplier_count"] == 0:
+        return jsonify({"error": "suppliers_not_found", "message": "Nenhum fornecedor valido para convite."}), 400
+    db.commit()
+    return jsonify({"rfq_id": rfq_id, "invites": invite_result}), 200
+
+
+@procurement_bp.route("/api/procurement/cotacoes/<int:rfq_id>/convites", methods=["GET"])
+def list_rfq_invites(rfq_id: int):
+    db = get_read_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    rfq = _load_rfq(db, tenant_id, rfq_id)
+    if not rfq:
+        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}), 404
+    invites = _load_rfq_supplier_invites(db, tenant_id, rfq_id)
+    return jsonify({"rfq_id": rfq_id, "items": invites})
+
+
+@procurement_bp.route(
+    "/api/procurement/cotacoes/<int:rfq_id>/convites/<int:invite_id>",
+    methods=["PATCH", "DELETE"],
+)
+def rfq_invite_crud_api(rfq_id: int, invite_id: int):
+    db = get_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    rfq = _load_rfq(db, tenant_id, rfq_id)
+    if not rfq:
+        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}), 404
+
+    invite = _load_rfq_supplier_invite_by_id(db, tenant_id, rfq_id, invite_id)
+    if not invite:
+        return jsonify({"error": "invite_not_found", "message": "Convite nao encontrado."}), 404
+
+    if request.method == "DELETE":
+        _remove_supplier_from_rfq(db, tenant_id, rfq_id, int(invite["supplier_id"]))
+        db.execute(
+            """
+            UPDATE rfq_supplier_invites
+            SET status = 'cancelled',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (invite_id, tenant_id),
+        )
+        db.commit()
+        return jsonify({"deleted": True, "invite_id": invite_id}), 200
+
+    payload = request.get_json(silent=True) or {}
+    action = str(payload.get("action") or "").strip().lower()
+    valid_days = _parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30)
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=valid_days)).replace(microsecond=0).isoformat()
+
+    if action == "reopen":
+        new_token = secrets.token_urlsafe(24)
+        db.execute(
+            """
+            UPDATE rfq_supplier_invites
+            SET token = ?,
+                status = 'pending',
+                expires_at = ?,
+                opened_at = NULL,
+                submitted_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (new_token, expires_at, invite_id, tenant_id),
+        )
+    elif action == "extend":
+        db.execute(
+            """
+            UPDATE rfq_supplier_invites
+            SET expires_at = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (expires_at, invite_id, tenant_id),
+        )
+    elif action == "cancel":
+        db.execute(
+            """
+            UPDATE rfq_supplier_invites
+            SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (invite_id, tenant_id),
+        )
+    else:
+        return (
+            jsonify(
+                {
+                    "error": "action_invalid",
+                    "message": "Acao invalida, use reopen, extend ou cancel.",
+                }
+            ),
+            400,
+        )
+
+    db.commit()
+    updated = _load_rfq_supplier_invite_by_id(db, tenant_id, rfq_id, invite_id)
+    if not updated:
+        return jsonify({"error": "invite_not_found", "message": "Convite nao encontrado apos atualizacao."}), 404
+    return jsonify({"invite": _serialize_rfq_invite_row(updated)}), 200
 
 
 @procurement_bp.route("/api/procurement/rfqs/<int:rfq_id>/comparison", methods=["GET"])
@@ -1206,6 +1975,84 @@ def _load_open_purchase_request_items(db, tenant_id: str | None, limit: int = 12
     ]
 
 
+def _load_purchase_requests_panel(
+    db,
+    tenant_id: str | None,
+    limit: int = 120,
+    status_values: List[str] | None = None,
+    erp_only: bool = False,
+) -> List[dict]:
+    effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
+    params: List[object] = [effective_tenant_id]
+    filters: List[str] = []
+
+    allowed_statuses = status_values or []
+    if allowed_statuses:
+        normalized = [status for status in allowed_statuses if status in ALLOWED_PR_STATUSES]
+        if normalized:
+            filters.append(f"pr.status IN ({','.join('?' for _ in normalized)})")
+            params.extend(normalized)
+
+    if erp_only:
+        filters.append("(pr.external_id IS NOT NULL OR pr.erp_num_cot IS NOT NULL OR pr.erp_num_pct IS NOT NULL)")
+
+    where_sql = " AND ".join(filters) if filters else "1=1"
+    params.append(limit)
+
+    rows = db.execute(
+        f"""
+        SELECT
+            pr.id,
+            pr.number,
+            pr.status,
+            pr.priority,
+            pr.requested_by,
+            pr.department,
+            pr.needed_at,
+            pr.external_id,
+            pr.erp_num_cot,
+            pr.erp_num_pct,
+            pr.erp_sent_at,
+            pr.created_at,
+            pr.updated_at,
+            COUNT(pri.id) AS item_count
+        FROM purchase_requests pr
+        LEFT JOIN purchase_request_items pri
+          ON pri.purchase_request_id = pr.id AND pri.tenant_id = pr.tenant_id
+        WHERE pr.tenant_id = ? AND {where_sql}
+        GROUP BY
+            pr.id, pr.number, pr.status, pr.priority, pr.requested_by, pr.department, pr.needed_at,
+            pr.external_id, pr.erp_num_cot, pr.erp_num_pct, pr.erp_sent_at, pr.created_at, pr.updated_at
+        ORDER BY pr.needed_at IS NULL, pr.needed_at, pr.updated_at DESC, pr.id DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    ).fetchall()
+
+    result = []
+    for row in rows:
+        result.append(
+            {
+                "id": row["id"],
+                "number": row["number"],
+                "status": row["status"],
+                "priority": row["priority"],
+                "requested_by": row["requested_by"],
+                "department": row["department"],
+                "needed_at": row["needed_at"],
+                "item_count": int(row["item_count"] or 0),
+                "erp_num_cot": row["erp_num_cot"],
+                "erp_num_pct": row["erp_num_pct"],
+                "erp_sent_at": row["erp_sent_at"],
+                "external_id": row["external_id"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "source": "erp" if row["external_id"] or row["erp_num_cot"] or row["erp_num_pct"] else "local",
+            }
+        )
+    return result
+
+
 def _load_purchase_request_items_by_ids(db, tenant_id: str, item_ids: List[int]) -> List[dict]:
     if not item_ids:
         return []
@@ -1238,6 +2085,116 @@ def _load_purchase_request_items_by_ids(db, tenant_id: str, item_ids: List[int])
         }
         for row in rows
     ]
+
+
+def _load_rfq_items(db, tenant_id: str, rfq_id: int) -> List[dict]:
+    rows = db.execute(
+        """
+        SELECT id, rfq_id, purchase_request_item_id, description, quantity, uom
+        FROM rfq_items
+        WHERE rfq_id = ? AND tenant_id = ?
+        ORDER BY id
+        """,
+        (rfq_id, tenant_id),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _create_rfq_core(
+    db,
+    tenant_id: str,
+    title: str,
+    item_ids: List[int],
+) -> Tuple[dict | None, dict | None, int]:
+    if not item_ids:
+        return (
+            None,
+            {
+                "error": "purchase_request_item_ids_required",
+                "message": "Selecione ao menos um item de solicitacao.",
+            },
+            400,
+        )
+
+    request_items = _load_purchase_request_items_by_ids(db, tenant_id, item_ids)
+    if not request_items:
+        return (
+            None,
+            {
+                "error": "purchase_request_items_not_found",
+                "message": "Itens de solicitacao nao encontrados ou ja em cotacao.",
+            },
+            400,
+        )
+
+    status = "open"
+    cursor = db.execute(
+        "INSERT INTO rfqs (title, status, tenant_id) VALUES (?, ?, ?) RETURNING id",
+        (title, status, tenant_id),
+    )
+    rfq_row = cursor.fetchone()
+    rfq_id = rfq_row["id"] if isinstance(rfq_row, dict) else rfq_row[0]
+
+    db.execute(
+        """
+        INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
+        VALUES ('rfq', ?, NULL, ?, 'rfq_created', ?)
+        """,
+        (rfq_id, status, tenant_id),
+    )
+
+    rfq_items_payload: List[dict] = []
+    for item in request_items:
+        cursor = db.execute(
+            """
+            INSERT INTO rfq_items (
+                rfq_id,
+                purchase_request_item_id,
+                description,
+                quantity,
+                uom,
+                tenant_id
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id
+            """,
+            (
+                rfq_id,
+                item["id"],
+                item["description"],
+                item["quantity"],
+                item["uom"],
+                tenant_id,
+            ),
+        )
+        rfq_item_row = cursor.fetchone()
+        rfq_items_payload.append(
+            {
+                "rfq_item_id": rfq_item_row["id"] if isinstance(rfq_item_row, dict) else rfq_item_row[0],
+                "purchase_request_item_id": item["id"],
+                "description": item["description"],
+                "quantity": item["quantity"],
+                "uom": item["uom"],
+            }
+        )
+
+    request_ids = sorted({item["purchase_request_id"] for item in request_items})
+    _mark_purchase_requests_in_rfq(db, tenant_id, request_ids)
+    created_row = db.execute(
+        "SELECT created_at FROM rfqs WHERE id = ? AND tenant_id = ?",
+        (rfq_id, tenant_id),
+    ).fetchone()
+
+    return (
+        {
+            "id": rfq_id,
+            "status": status,
+            "title": title,
+            "created_at": created_row["created_at"] if created_row else None,
+            "rfq_items": rfq_items_payload,
+        },
+        None,
+        201,
+    )
 
 
 def _mark_purchase_requests_in_rfq(db, tenant_id: str, request_ids: List[int]) -> None:
@@ -1275,7 +2232,7 @@ def _load_suppliers(db, tenant_id: str | None) -> List[dict]:
     clause, params = _tenant_clause(tenant_id)
     rows = db.execute(
         f"""
-        SELECT id, name, external_id, tax_id, tenant_id
+        SELECT id, name, email, external_id, tax_id, tenant_id
         FROM suppliers
         WHERE {clause}
         ORDER BY name
@@ -1288,6 +2245,7 @@ def _load_suppliers(db, tenant_id: str | None) -> List[dict]:
         {
             "id": row["id"],
             "name": row["name"],
+            "email": row["email"],
             "external_id": row["external_id"],
             "tax_id": row["tax_id"],
         }
@@ -1303,12 +2261,309 @@ def _ensure_demo_suppliers(db, tenant_id: str) -> None:
     if existing:
         return
 
-    demo_names = ["Fornecedor Atlas", "Fornecedor Nexo", "Fornecedor Prisma"]
-    for name in demo_names:
+    demo_suppliers = [
+        ("Fornecedor Atlas", "atlas@fornecedor.exemplo"),
+        ("Fornecedor Nexo", "nexo@fornecedor.exemplo"),
+        ("Fornecedor Prisma", "prisma@fornecedor.exemplo"),
+    ]
+    for name, email in demo_suppliers:
         db.execute(
-            "INSERT INTO suppliers (name, tenant_id) VALUES (?, ?)",
-            (name, tenant_id),
+            "INSERT INTO suppliers (name, email, tenant_id) VALUES (?, ?, ?)",
+            (name, email, tenant_id),
         )
+
+
+def _create_rfq_supplier_invites(
+    db,
+    tenant_id: str,
+    rfq_id: int,
+    rfq_items: List[dict],
+    supplier_ids: List[int],
+    valid_days: int = 7,
+) -> dict:
+    suppliers = _load_suppliers(db, tenant_id)
+    suppliers_map = {int(s["id"]): s for s in suppliers}
+    selected_supplier_ids = [sid for sid in supplier_ids if sid in suppliers_map]
+    rfq_item_ids = sorted({int(item["rfq_item_id"]) for item in rfq_items if item.get("rfq_item_id") is not None})
+
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=valid_days)).replace(microsecond=0).isoformat()
+    invites_payload: List[dict] = []
+
+    for supplier_id in selected_supplier_ids:
+        supplier = suppliers_map[supplier_id]
+        for rfq_item_id in rfq_item_ids:
+            db.execute(
+                """
+                INSERT INTO rfq_item_suppliers (rfq_item_id, supplier_id, tenant_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT DO NOTHING
+                """,
+                (rfq_item_id, supplier_id, tenant_id),
+            )
+
+        db.execute(
+            """
+            UPDATE rfq_supplier_invites
+            SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+            WHERE rfq_id = ? AND supplier_id = ? AND tenant_id = ? AND status IN ('pending', 'opened')
+            """,
+            (rfq_id, supplier_id, tenant_id),
+        )
+
+        token = secrets.token_urlsafe(24)
+        email = supplier.get("email")
+        cursor = db.execute(
+            """
+            INSERT INTO rfq_supplier_invites (
+                rfq_id, supplier_id, token, email, status, expires_at, tenant_id
+            ) VALUES (?, ?, ?, ?, 'pending', ?, ?)
+            RETURNING id
+            """,
+            (rfq_id, supplier_id, token, email, expires_at, tenant_id),
+        )
+        invite_row = cursor.fetchone()
+        invite_id = int(invite_row["id"] if isinstance(invite_row, dict) else invite_row[0])
+
+        access_url = _build_invite_public_url(token)
+        invites_payload.append(
+            {
+                "id": invite_id,
+                "supplier_id": supplier_id,
+                "supplier_name": supplier.get("name"),
+                "supplier_email": email,
+                "token": token,
+                "status": "pending",
+                "expires_at": expires_at,
+                "access_url": access_url,
+                "mailto_url": _build_invite_mailto_url(
+                    supplier_name=supplier.get("name"),
+                    supplier_email=email,
+                    rfq_id=rfq_id,
+                    access_url=access_url,
+                ),
+            }
+        )
+
+    return {
+        "rfq_id": rfq_id,
+        "items_invited": len(rfq_item_ids),
+        "supplier_count": len(invites_payload),
+        "items": invites_payload,
+    }
+
+
+def _serialize_rfq_invite_row(row) -> dict:
+    token = row["token"]
+    access_url = _build_invite_public_url(token)
+    return {
+        "id": int(row["id"]),
+        "rfq_id": int(row["rfq_id"]),
+        "supplier_id": int(row["supplier_id"]),
+        "supplier_name": row["supplier_name"],
+        "supplier_email": row["email"],
+        "token": token,
+        "status": row["status"],
+        "expires_at": row["expires_at"],
+        "opened_at": row["opened_at"],
+        "submitted_at": row["submitted_at"],
+        "access_url": access_url,
+        "mailto_url": _build_invite_mailto_url(
+            supplier_name=row["supplier_name"],
+            supplier_email=row["email"],
+            rfq_id=int(row["rfq_id"]),
+            access_url=access_url,
+        ),
+    }
+
+
+def _load_rfq_supplier_invites(db, tenant_id: str, rfq_id: int) -> List[dict]:
+    rows = db.execute(
+        """
+        SELECT
+            i.id,
+            i.rfq_id,
+            i.supplier_id,
+            i.token,
+            i.email,
+            i.status,
+            i.expires_at,
+            i.opened_at,
+            i.submitted_at,
+            s.name AS supplier_name
+        FROM rfq_supplier_invites i
+        LEFT JOIN suppliers s
+          ON s.id = i.supplier_id AND s.tenant_id = i.tenant_id
+        WHERE i.rfq_id = ? AND i.tenant_id = ?
+        ORDER BY i.id DESC
+        """,
+        (rfq_id, tenant_id),
+    ).fetchall()
+    return [_serialize_rfq_invite_row(row) for row in rows]
+
+
+def _load_rfq_supplier_invite_by_id(db, tenant_id: str, rfq_id: int, invite_id: int):
+    return db.execute(
+        """
+        SELECT
+            i.id,
+            i.rfq_id,
+            i.supplier_id,
+            i.token,
+            i.email,
+            i.status,
+            i.expires_at,
+            i.opened_at,
+            i.submitted_at,
+            s.name AS supplier_name
+        FROM rfq_supplier_invites i
+        LEFT JOIN suppliers s
+          ON s.id = i.supplier_id AND s.tenant_id = i.tenant_id
+        WHERE i.id = ? AND i.rfq_id = ? AND i.tenant_id = ?
+        LIMIT 1
+        """,
+        (invite_id, rfq_id, tenant_id),
+    ).fetchone()
+
+
+def _remove_supplier_from_rfq(db, tenant_id: str, rfq_id: int, supplier_id: int) -> None:
+    quote_row = db.execute(
+        """
+        SELECT id
+        FROM quotes
+        WHERE rfq_id = ? AND supplier_id = ? AND tenant_id = ?
+        LIMIT 1
+        """,
+        (rfq_id, supplier_id, tenant_id),
+    ).fetchone()
+    if quote_row:
+        quote_id = int(quote_row["id"])
+        db.execute("DELETE FROM quote_items WHERE quote_id = ? AND tenant_id = ?", (quote_id, tenant_id))
+        db.execute("DELETE FROM quotes WHERE id = ? AND tenant_id = ?", (quote_id, tenant_id))
+
+    rfq_item_rows = db.execute(
+        "SELECT id FROM rfq_items WHERE rfq_id = ? AND tenant_id = ?",
+        (rfq_id, tenant_id),
+    ).fetchall()
+    rfq_item_ids = [int(row["id"]) for row in rfq_item_rows]
+    if rfq_item_ids:
+        placeholders = ",".join("?" for _ in rfq_item_ids)
+        db.execute(
+            f"""
+            DELETE FROM rfq_item_suppliers
+            WHERE tenant_id = ? AND supplier_id = ? AND rfq_item_id IN ({placeholders})
+            """,
+            (tenant_id, supplier_id, *rfq_item_ids),
+        )
+
+
+def _build_invite_public_url(token: str) -> str:
+    base_url = (current_app.config.get("PUBLIC_APP_URL") or request.url_root or "").strip().rstrip("/")
+    return f"{base_url}/fornecedor/convite/{token}"
+
+
+def _build_invite_mailto_url(supplier_name: str | None, supplier_email: str | None, rfq_id: int, access_url: str) -> str:
+    recipient = supplier_email or ""
+    subject = quote(f"Cotacao {rfq_id} - acesso para proposta")
+    body_text = (
+        f"Ola {supplier_name or 'fornecedor'},\n\n"
+        "Voce foi convidado para enviar proposta na Plataforma Compras.\n"
+        f"Acesse o link: {access_url}\n\n"
+        "Atenciosamente,\nEquipe de Compras"
+    )
+    body = quote(body_text)
+    return f"mailto:{recipient}?subject={subject}&body={body}"
+
+
+def _load_supplier_invite_by_token(db, token: str):
+    row = db.execute(
+        """
+        SELECT id, rfq_id, supplier_id, token, email, status, expires_at, opened_at, submitted_at, tenant_id
+        FROM rfq_supplier_invites
+        WHERE token = ?
+        LIMIT 1
+        """,
+        (token.strip(),),
+    ).fetchone()
+    return row
+
+
+def _invite_is_expired(invite) -> bool:
+    expires_at = _parse_datetime(invite["expires_at"]) if invite is not None else None
+    if not expires_at:
+        return False
+    now = datetime.now(timezone.utc)
+    return now > expires_at
+
+
+def _build_supplier_invite_payload(db, invite) -> dict:
+    rfq_id = int(invite["rfq_id"])
+    supplier_id = int(invite["supplier_id"])
+    tenant_id = str(invite["tenant_id"])
+
+    rfq = _load_rfq(db, tenant_id, rfq_id)
+    supplier_row = db.execute(
+        "SELECT id, name, email FROM suppliers WHERE id = ? AND tenant_id = ?",
+        (supplier_id, tenant_id),
+    ).fetchone()
+
+    rows = db.execute(
+        """
+        SELECT
+            ri.id AS rfq_item_id,
+            ri.description,
+            ri.quantity,
+            ri.uom,
+            qi.unit_price,
+            qi.lead_time_days
+        FROM rfq_items ri
+        JOIN rfq_item_suppliers ris
+          ON ris.rfq_item_id = ri.id
+         AND ris.supplier_id = ?
+         AND ris.tenant_id = ?
+        LEFT JOIN quotes q
+          ON q.rfq_id = ri.rfq_id
+         AND q.supplier_id = ris.supplier_id
+         AND q.tenant_id = ri.tenant_id
+        LEFT JOIN quote_items qi
+          ON qi.quote_id = q.id
+         AND qi.rfq_item_id = ri.id
+         AND qi.tenant_id = ri.tenant_id
+        WHERE ri.rfq_id = ? AND ri.tenant_id = ?
+        ORDER BY ri.id
+        """,
+        (supplier_id, tenant_id, rfq_id, tenant_id),
+    ).fetchall()
+
+    return {
+        "invite": {
+            "id": invite["id"],
+            "status": invite["status"],
+            "expires_at": invite["expires_at"],
+            "opened_at": invite["opened_at"],
+            "submitted_at": invite["submitted_at"],
+        },
+        "rfq": {
+            "id": rfq_id,
+            "title": rfq["title"] if rfq else f"Cotacao {rfq_id}",
+            "status": rfq["status"] if rfq else "open",
+        },
+        "supplier": {
+            "id": supplier_id,
+            "name": supplier_row["name"] if supplier_row else "Fornecedor",
+            "email": supplier_row["email"] if supplier_row else None,
+        },
+        "items": [
+            {
+                "rfq_item_id": int(row["rfq_item_id"]),
+                "description": row["description"],
+                "quantity": row["quantity"],
+                "uom": row["uom"],
+                "unit_price": row["unit_price"],
+                "lead_time_days": row["lead_time_days"],
+            }
+            for row in rows
+        ],
+    }
 
 
 def _load_rfq(db, tenant_id: str | None, rfq_id: int):
@@ -2583,6 +3838,25 @@ def _parse_optional_int(value) -> int | None:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_int_list(value) -> List[int]:
+    if not isinstance(value, list):
+        return []
+    result: List[int] = []
+    for item in value:
+        parsed = _parse_optional_int(item)
+        if parsed is None:
+            continue
+        result.append(parsed)
+    # Preserva ordem e remove duplicidade.
+    return list(dict.fromkeys(result))
+
+
+def _parse_csv_values(value: str | None) -> List[str]:
+    if not value:
+        return []
+    return [part.strip() for part in str(value).split(",") if part.strip()]
 
 
 def _parse_optional_float(value) -> float | None:

@@ -1,0 +1,448 @@
+{% extends "_layout.html" %}
+{% set active_nav = "requests" %}
+{% block title %}Solicitacoes | Plataforma Compras{% endblock %}
+{% block page_title %}Solicitacoes de compra{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb current">Solicitacoes</span>
+{% endblock %}
+{% block page_actions %}
+  <button class="btn" id="refreshBtn">Atualizar</button>
+  <button class="btn btn-ghost" id="newRequestBtn">Nova solicitacao</button>
+  <a class="btn btn-primary" href="/procurement/cotacoes/abrir?workspace_id={{ workspace_id }}">Abrir cotacao</a>
+{% endblock %}
+
+{% block content %}
+  <section class="grid grid-4" id="requestKpis">
+    <article class="kpi-card">
+      <div class="kpi-label">Pendentes de cotacao</div>
+      <div class="kpi-value" data-kpi="pending_rfq">0</div>
+      <div class="meta">Solicitacoes prontas para sourcing</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Em cotacao</div>
+      <div class="kpi-value" data-kpi="in_rfq">0</div>
+      <div class="meta">Ja encaminhadas para fornecedores</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Ordenadas</div>
+      <div class="kpi-value" data-kpi="ordered">0</div>
+      <div class="meta">Com ordem de compra emitida</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Recebidas</div>
+      <div class="kpi-value" data-kpi="received">0</div>
+      <div class="meta">Fluxo concluido no ERP</div>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Painel de solicitacoes</h2>
+      <span class="meta" id="summary">Carregando solicitacoes</span>
+    </div>
+    <div class="grid grid-4" style="margin-bottom: 12px">
+      <select class="select" id="statusFilter">
+        <option value="">Todos os status</option>
+        <option value="pending_rfq">Pendente de cotacao</option>
+        <option value="in_rfq">Em cotacao</option>
+        <option value="awarded">Com decisao</option>
+        <option value="ordered">Ordenada</option>
+        <option value="partially_received">Recebimento parcial</option>
+        <option value="received">Recebida</option>
+      </select>
+      <label class="checkbox-line">
+        <input type="checkbox" id="erpOnlyFilter" />
+        <span>Somente origem ERP</span>
+      </label>
+      <button class="btn btn-ghost" id="applyBtn">Aplicar filtros</button>
+      <a class="btn btn-ghost" href="/procurement/cotacoes/abrir?workspace_id={{ workspace_id }}">Ir para abrir cotacao</a>
+    </div>
+    <div class="table-wrap">
+      <table class="table-mobile-cards table-compact">
+        <thead>
+          <tr>
+            <th>Solicitacao</th>
+            <th>Status</th>
+            <th>Prioridade</th>
+            <th>Solicitante</th>
+            <th>Necessidade</th>
+            <th class="numeric">Itens</th>
+            <th>Origem</th>
+            <th>Vinculo ERP</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody id="requestsBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="modal-backdrop" id="requestModalBackdrop" role="dialog" aria-modal="true" hidden>
+    <article class="modal-card">
+      <div class="card-header">
+        <h2 class="card-title" id="requestModalTitle">Nova solicitacao</h2>
+        <button class="btn btn-ghost btn-small" type="button" id="requestModalCloseBtn">Fechar</button>
+      </div>
+      <form id="requestForm" class="stack">
+        <input type="hidden" id="requestIdInput" />
+        <div class="grid grid-3">
+          <div>
+            <label class="meta" for="numberInput">Numero</label>
+            <input class="input" id="numberInput" placeholder="SR-1001" />
+          </div>
+          <div>
+            <label class="meta" for="priorityInput">Prioridade</label>
+            <select class="select" id="priorityInput">
+              <option value="low">Baixa</option>
+              <option value="medium" selected>Media</option>
+              <option value="high">Alta</option>
+              <option value="urgent">Urgente</option>
+            </select>
+          </div>
+          <div>
+            <label class="meta" for="statusInput">Status</label>
+            <select class="select" id="statusInput">
+              <option value="pending_rfq">Pendente de cotacao</option>
+              <option value="in_rfq">Em cotacao</option>
+              <option value="awarded">Com decisao</option>
+              <option value="ordered">Ordenada</option>
+              <option value="partially_received">Recebimento parcial</option>
+              <option value="received">Recebida</option>
+              <option value="cancelled">Cancelada</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-3">
+          <div>
+            <label class="meta" for="requestedByInput">Solicitante</label>
+            <input class="input" id="requestedByInput" />
+          </div>
+          <div>
+            <label class="meta" for="departmentInput">Departamento</label>
+            <input class="input" id="departmentInput" />
+          </div>
+          <div>
+            <label class="meta" for="neededAtInput">Necessidade</label>
+            <input class="input" id="neededAtInput" type="date" />
+          </div>
+        </div>
+        <div id="requestItemEditor">
+          <div class="meta">Item inicial da solicitacao (obrigatorio na criacao)</div>
+          <div class="grid grid-3">
+            <div>
+              <label class="meta" for="itemDescriptionInput">Descricao</label>
+              <input class="input" id="itemDescriptionInput" placeholder="Item de compra" />
+            </div>
+            <div>
+              <label class="meta" for="itemQuantityInput">Quantidade</label>
+              <input class="input" id="itemQuantityInput" type="number" min="0.01" step="0.01" value="1" />
+            </div>
+            <div>
+              <label class="meta" for="itemUomInput">Unidade</label>
+              <input class="input" id="itemUomInput" value="UN" />
+            </div>
+          </div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-ghost" type="button" id="requestCancelBtn">Cancelar</button>
+          <button class="btn btn-primary" type="submit" id="requestSubmitBtn">Salvar solicitacao</button>
+        </div>
+      </form>
+    </article>
+  </div>
+{% endblock %}
+
+{% block page_scripts %}
+  <script>
+    const workspaceId = "{{ workspace_id }}";
+    const Platform = window.PlatformUI || {};
+    const requestsBody = document.getElementById("requestsBody");
+    const summary = document.getElementById("summary");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const newRequestBtn = document.getElementById("newRequestBtn");
+    const applyBtn = document.getElementById("applyBtn");
+    const statusFilter = document.getElementById("statusFilter");
+    const erpOnlyFilter = document.getElementById("erpOnlyFilter");
+    const requestModalBackdrop = document.getElementById("requestModalBackdrop");
+    const requestModalTitle = document.getElementById("requestModalTitle");
+    const requestModalCloseBtn = document.getElementById("requestModalCloseBtn");
+    const requestCancelBtn = document.getElementById("requestCancelBtn");
+    const requestForm = document.getElementById("requestForm");
+    const requestIdInput = document.getElementById("requestIdInput");
+    const numberInput = document.getElementById("numberInput");
+    const priorityInput = document.getElementById("priorityInput");
+    const statusInput = document.getElementById("statusInput");
+    const requestedByInput = document.getElementById("requestedByInput");
+    const departmentInput = document.getElementById("departmentInput");
+    const neededAtInput = document.getElementById("neededAtInput");
+    const itemDescriptionInput = document.getElementById("itemDescriptionInput");
+    const itemQuantityInput = document.getElementById("itemQuantityInput");
+    const itemUomInput = document.getElementById("itemUomInput");
+    const requestItemEditor = document.getElementById("requestItemEditor");
+    const requestSubmitBtn = document.getElementById("requestSubmitBtn");
+
+    const state = { items: [], editMode: false };
+
+    const withWorkspace = (path) =>
+      Platform.withWorkspace
+        ? Platform.withWorkspace(path, workspaceId)
+        : `${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
+
+    const escapeHtml = Platform.escapeHtml
+      ? Platform.escapeHtml
+      : (value) =>
+          String(value ?? "Nao informado")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+
+    function statusLabel(value) {
+      if (window.UiLabels?.prettyStatus) return window.UiLabels.prettyStatus(value);
+      return value || "Nao informado";
+    }
+
+    function updateKpis(items) {
+      const counters = {
+        pending_rfq: 0,
+        in_rfq: 0,
+        ordered: 0,
+        received: 0,
+      };
+      items.forEach((item) => {
+        if (item.status in counters) counters[item.status] += 1;
+      });
+      Object.entries(counters).forEach(([key, value]) => {
+        const el = document.querySelector(`[data-kpi='${key}']`);
+        if (el) el.textContent = String(value);
+      });
+    }
+
+    function renderEmpty(message) {
+      requestsBody.innerHTML = `
+        <tr>
+          <td colspan="9" class="empty-row">
+            <div class="empty-state-inline">
+              <div class="empty-state-title">${escapeHtml(message)}</div>
+              <div class="meta">Use o sync ERP ou ajuste filtros para listar solicitacoes</div>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    function renderRows(items) {
+      state.items = items;
+      if (!items.length) {
+        summary.textContent = "Sem solicitacoes para o filtro";
+        renderEmpty("Nenhuma solicitacao encontrada");
+        return;
+      }
+      summary.textContent = `${items.length} solicitacoes carregadas`;
+      requestsBody.innerHTML = items
+        .map((item) => {
+          const erpRef = [item.erp_num_pct, item.erp_num_cot].filter(Boolean).join(" / ") || "-";
+          const sourceLabel = item.source === "erp" ? "ERP" : "Local";
+          const crudActions =
+            item.source === "erp"
+              ? '<span class="meta">Gerenciado pelo ERP</span>'
+              : `
+                  <button class="btn btn-small btn-ghost" type="button" data-edit-request="${item.id}">Editar</button>
+                  <button class="btn btn-small" type="button" data-delete-request="${item.id}">Cancelar</button>
+                `;
+          return `
+            <tr>
+              <td data-label="Solicitacao"><strong>${escapeHtml(item.number || `SR-${item.id}`)}</strong></td>
+              <td data-label="Status">${escapeHtml(statusLabel(item.status))}</td>
+              <td data-label="Prioridade">${escapeHtml(item.priority || "-")}</td>
+              <td data-label="Solicitante">${escapeHtml(item.requested_by || "-")}</td>
+              <td data-label="Necessidade">${escapeHtml(item.needed_at || "-")}</td>
+              <td class="numeric" data-label="Itens">${escapeHtml(item.item_count)}</td>
+              <td data-label="Origem"><span class="pill ${item.source === "erp" ? "info" : ""}">${escapeHtml(sourceLabel)}</span></td>
+              <td data-label="Vinculo ERP">${escapeHtml(erpRef)}</td>
+              <td class="cell-actions" data-label="Acoes">
+                <div class="actions-cell">
+                  <a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/inbox?type=purchase_request&status=${encodeURIComponent(item.status || "")}`)}">Ver na inbox</a>
+                  <a class="btn btn-small" href="${withWorkspace(`/procurement/cotacoes/abrir?purchase_request_id=${item.id}`)}">Abrir cotacao</a>
+                  ${crudActions}
+                </div>
+              </td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      requestsBody.querySelectorAll("[data-edit-request]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const requestId = Number(button.getAttribute("data-edit-request"));
+          openRequestModalForEdit(requestId);
+        });
+      });
+      requestsBody.querySelectorAll("[data-delete-request]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const requestId = Number(button.getAttribute("data-delete-request"));
+          if (!requestId) return;
+          const confirmed = window.confirm("Deseja cancelar esta solicitacao?");
+          if (!confirmed) return;
+          const response = await fetch(withWorkspace(`/api/procurement/solicitacoes/${requestId}`), {
+            method: "DELETE",
+          });
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            if (window.showToast) window.showToast("danger", `Falha ao cancelar solicitacao, ${err.message || err.error || "erro"}`);
+            return;
+          }
+          if (window.showToast) window.showToast("success", "Solicitacao cancelada");
+          await loadSolicitacoes();
+        });
+      });
+    }
+
+    function openModal() {
+      requestModalBackdrop.hidden = false;
+    }
+
+    function closeModal() {
+      requestModalBackdrop.hidden = true;
+    }
+
+    function resetForm() {
+      requestIdInput.value = "";
+      numberInput.value = "";
+      priorityInput.value = "medium";
+      statusInput.value = "pending_rfq";
+      requestedByInput.value = "";
+      departmentInput.value = "";
+      neededAtInput.value = "";
+      itemDescriptionInput.value = "";
+      itemQuantityInput.value = "1";
+      itemUomInput.value = "UN";
+      requestItemEditor.hidden = false;
+      state.editMode = false;
+      requestModalTitle.textContent = "Nova solicitacao";
+      requestSubmitBtn.textContent = "Salvar solicitacao";
+    }
+
+    function openRequestModalForCreate() {
+      resetForm();
+      openModal();
+    }
+
+    function openRequestModalForEdit(requestId) {
+      const item = state.items.find((row) => Number(row.id) === Number(requestId));
+      if (!item) return;
+      resetForm();
+      state.editMode = true;
+      requestIdInput.value = String(item.id);
+      numberInput.value = item.number || "";
+      priorityInput.value = item.priority || "medium";
+      statusInput.value = item.status || "pending_rfq";
+      requestedByInput.value = item.requested_by || "";
+      departmentInput.value = item.department || "";
+      neededAtInput.value = item.needed_at || "";
+      requestItemEditor.hidden = true;
+      requestModalTitle.textContent = "Editar solicitacao";
+      requestSubmitBtn.textContent = "Atualizar solicitacao";
+      openModal();
+    }
+
+    async function loadSolicitacoes() {
+      summary.textContent = "Atualizando solicitacoes";
+      const params = new URLSearchParams({ limit: "200" });
+      if (statusFilter.value) params.set("status", statusFilter.value);
+      if (erpOnlyFilter.checked) params.set("erp_only", "1");
+      try {
+        const response = await fetch(withWorkspace(`/api/procurement/solicitacoes?${params.toString()}`));
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload?.message || payload?.error || "erro");
+        }
+        const items = payload.items || [];
+        updateKpis(items);
+        renderRows(items);
+      } catch (error) {
+        summary.textContent = "Falha ao carregar";
+        renderEmpty("Falha ao carregar solicitacoes");
+        if (window.showToast) {
+          window.showToast("danger", "Nao foi possivel carregar solicitacoes");
+        }
+      }
+    }
+
+    async function saveSolicitacao(event) {
+      event.preventDefault();
+      const payload = {
+        number: numberInput.value.trim() || null,
+        priority: priorityInput.value,
+        status: statusInput.value,
+        requested_by: requestedByInput.value.trim() || null,
+        department: departmentInput.value.trim() || null,
+        needed_at: neededAtInput.value || null,
+      };
+
+      let url = withWorkspace("/api/procurement/solicitacoes");
+      let method = "POST";
+      if (state.editMode) {
+        const requestId = Number(requestIdInput.value);
+        if (!requestId) return;
+        url = withWorkspace(`/api/procurement/solicitacoes/${requestId}`);
+        method = "PATCH";
+      } else {
+        payload.items = [
+          {
+            description: itemDescriptionInput.value.trim(),
+            quantity: Number(itemQuantityInput.value || "0"),
+            uom: itemUomInput.value.trim() || "UN",
+          },
+        ];
+      }
+
+      if (!state.editMode && !payload.items[0].description) {
+        if (window.showToast) window.showToast("warning", "Descricao do item inicial e obrigatoria");
+        return;
+      }
+
+      if (window.PlatformUI?.setButtonBusy) {
+        window.PlatformUI.setButtonBusy(requestSubmitBtn, true, {
+          idle: state.editMode ? "Atualizar solicitacao" : "Salvar solicitacao",
+          loading: state.editMode ? "Atualizando" : "Salvando",
+        });
+      } else {
+        requestSubmitBtn.disabled = true;
+      }
+
+      try {
+        const response = await fetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          if (window.showToast) window.showToast("danger", `Falha ao salvar solicitacao, ${err.message || err.error || "erro"}`);
+          return;
+        }
+        if (window.showToast) window.showToast("success", state.editMode ? "Solicitacao atualizada" : "Solicitacao criada");
+        closeModal();
+        await loadSolicitacoes();
+      } finally {
+        if (window.PlatformUI?.setButtonBusy) {
+          window.PlatformUI.setButtonBusy(requestSubmitBtn, false, {
+            idle: state.editMode ? "Atualizar solicitacao" : "Salvar solicitacao",
+          });
+        } else {
+          requestSubmitBtn.disabled = false;
+        }
+      }
+    }
+
+    refreshBtn.addEventListener("click", loadSolicitacoes);
+    applyBtn.addEventListener("click", loadSolicitacoes);
+    newRequestBtn.addEventListener("click", openRequestModalForCreate);
+    requestModalCloseBtn.addEventListener("click", closeModal);
+    requestCancelBtn.addEventListener("click", closeModal);
+    requestForm.addEventListener("submit", saveSolicitacao);
+    loadSolicitacoes();
+  </script>
+{% endblock %}
