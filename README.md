@@ -46,8 +46,6 @@ Variaveis obrigatorias:
 - DATABASE_URL
 - SECRET_KEY
 - ERP_MODE
-- ERP_BASE_URL
-- ERP_TOKEN
 
 Variaveis recomendadas:
 - ERP_TIMEOUT_SECONDS
@@ -56,6 +54,14 @@ Variaveis recomendadas:
 - RFQ_SLA_DAYS
 - LOG_LEVEL
 - DATABASE_READ_URL
+
+Integracao ERP por modo:
+- `ERP_MODE=mock`: usa dados simulados internos.
+- `ERP_MODE=senior`: exige `ERP_BASE_URL` e `ERP_TOKEN` (ou `ERP_API_KEY`).
+- `ERP_MODE=senior_csv`: usa bridge de CSV com sync incremental por watermark.
+Arquivos principais do bridge CSV:
+- `ERP_CSV_SCHEMA`, `ERP_CSV_E405SOL`, `ERP_CSV_E410COT`, `ERP_CSV_E410PCT`, `ERP_CSV_E410FPC`
+- opcionais para etapa OC e recebimento: `ERP_CSV_E420OCP`, `ERP_CSV_E420IPO`, `ERP_CSV_E440NFC`, `ERP_CSV_E440IPC`, `ERP_CSV_E440ISC`
 
 Deploy (Docker Compose):
 - docs/deploy/docker-compose.md
