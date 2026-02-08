@@ -12,6 +12,14 @@ from flask import Blueprint, current_app, g, jsonify, render_template, request, 
 from app.db import get_db, get_read_db
 from app.erp_client import DEFAULT_RISK_FLAGS, ErpError, fetch_erp_records, push_purchase_order
 from app.errors import IntegrationError, PermissionError as AppPermissionError, ValidationError, classify_erp_failure
+from app.procurement.analytics import (
+    analytics_sections,
+    build_analytics_payload,
+    build_filter_options as build_analytics_filter_options,
+    normalize_section_key,
+    parse_analytics_filters,
+    resolve_visibility as resolve_analytics_visibility,
+)
 from app.procurement.critical_actions import get_critical_action, resolve_confirmation
 from app.procurement.flow_policy import (
     action_label as flow_action_label,
@@ -371,6 +379,21 @@ def approvals_page():
     return render_template("procurement_approvals.html", tenant_id=tenant_id, **_process_context("decisao"))
 
 
+@procurement_bp.route("/procurement/analises", methods=["GET"])
+@procurement_bp.route("/procurement/analises/<string:section>", methods=["GET"])
+def analytics_dashboard_page(section: str = "overview"):
+    _require_roles("buyer", "manager", "admin", "approver")
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    section_key = normalize_section_key(section)
+    return render_template(
+        "procurement_analytics.html",
+        tenant_id=tenant_id,
+        analytics_section_key=section_key,
+        analytics_sections=analytics_sections(),
+        active_nav=f"analytics_{section_key}",
+    )
+
+
 @procurement_bp.route("/fornecedor/convite/<string:token>", methods=["GET"])
 def supplier_invite_page(token: str):
     return render_template("supplier_quote_portal.html", invite_token=token.strip())
@@ -401,6 +424,42 @@ def procurement_inbox():
             "filters": filters,
         }
     )
+
+
+@procurement_bp.route("/api/procurement/analytics/filters", methods=["GET"])
+def analytics_filters_api():
+    _require_roles("buyer", "manager", "admin", "approver")
+    db = get_read_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    role = _current_role()
+    visibility = resolve_analytics_visibility(
+        role,
+        session.get("user_email"),
+        session.get("display_name"),
+        session.get("team_members"),
+    )
+    filters = parse_analytics_filters(request.args, tenant_id)
+    payload = build_analytics_filter_options(db, tenant_id, visibility, filters)
+    return jsonify(payload)
+
+
+@procurement_bp.route("/api/procurement/analytics", methods=["GET"])
+@procurement_bp.route("/api/procurement/analytics/<string:section>", methods=["GET"])
+def analytics_dashboard_api(section: str = "overview"):
+    _require_roles("buyer", "manager", "admin", "approver")
+    db = get_read_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    role = _current_role()
+    section_key = normalize_section_key(request.args.get("section") or section)
+    visibility = resolve_analytics_visibility(
+        role,
+        session.get("user_email"),
+        session.get("display_name"),
+        session.get("team_members"),
+    )
+    filters = parse_analytics_filters(request.args, tenant_id)
+    payload = build_analytics_payload(db, tenant_id, section_key, filters, visibility)
+    return jsonify(payload)
 
 
 @procurement_bp.route("/api/procurement/purchase-requests/open", methods=["GET"])

@@ -1,0 +1,369 @@
+{% extends "_layout.html" %}
+{% set section_map = {
+  "overview": "Visao Geral",
+  "efficiency": "Eficiencia do Processo",
+  "costs": "Custos e Economia",
+  "suppliers": "Fornecedores",
+  "quality_erp": "Qualidade e ERP",
+  "compliance": "Compliance"
+} %}
+{% set active_nav = active_nav | default("analytics_overview") %}
+{% block title %}Analises | Plataforma Compras{% endblock %}
+{% block page_title %}Analises de Compras - {{ section_map.get(analytics_section_key, "Visao Geral") }}{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb current">{{ section_map.get(analytics_section_key, "Visao Geral") }}</span>
+{% endblock %}
+{% block page_actions %}
+  <button class="btn btn-ghost" type="button" id="clearFiltersBtn">Limpar filtros</button>
+  <button class="btn btn-primary" type="button" id="applyFiltersBtn">Aplicar filtros</button>
+{% endblock %}
+
+{% block content %}
+  <section class="workflow-tabs analytics-section-tabs">
+    {% for section in analytics_sections %}
+      {% set nav_key = "analytics_" ~ section.key %}
+      <a
+        class="workflow-tab {% if active_nav == nav_key %}active{% endif %}"
+        href="/procurement/analises/{{ section.slug }}?workspace_id={{ workspace_id }}"
+        title="{{ section.description }}"
+      >
+        <span class="workflow-tab-label">{{ section.label }}</span>
+      </a>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Filtros globais</h2>
+      <span class="meta">Os filtros valem para todos os KPIs e graficos.</span>
+    </div>
+    <div class="grid grid-4 analytics-filter-grid">
+      <div>
+        <label class="meta" for="startDateInput">Periodo inicial</label>
+        <input class="input" type="date" id="startDateInput" />
+      </div>
+      <div>
+        <label class="meta" for="endDateInput">Periodo final</label>
+        <input class="input" type="date" id="endDateInput" />
+      </div>
+      <div>
+        <label class="meta" for="supplierFilterSelect">Fornecedor</label>
+        <select class="select" id="supplierFilterSelect">
+          <option value="">Todos</option>
+        </select>
+      </div>
+      <div>
+        <label class="meta" for="buyerFilterSelect">Comprador</label>
+        <select class="select" id="buyerFilterSelect">
+          <option value="">Todos</option>
+        </select>
+      </div>
+      <div>
+        <label class="meta" for="statusFilterSelect">Status</label>
+        <select class="select" id="statusFilterSelect">
+          <option value="">Todos</option>
+        </select>
+      </div>
+      <div>
+        <label class="meta" for="typeFilterSelect">Tipo de compra</label>
+        <select class="select" id="typeFilterSelect">
+          <option value="">Todos</option>
+        </select>
+      </div>
+      <div>
+        <label class="meta" for="workspaceReadOnly">Workspace</label>
+        <input class="input" id="workspaceReadOnly" value="{{ workspace_name }} ({{ workspace_id }})" readonly />
+      </div>
+    </div>
+  </section>
+
+  <section class="grid grid-4" id="analyticsKpis"></section>
+
+  <section class="grid grid-2" id="analyticsCharts"></section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title" id="drilldownTitle">Lista detalhada</h2>
+      <span class="meta" id="analyticsSummary">Carregando analytics...</span>
+    </div>
+    <div class="table-wrap">
+      <table class="table-mobile-cards table-compact" id="drilldownTable">
+        <thead id="drilldownHead"></thead>
+        <tbody id="drilldownBody"></tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block page_scripts %}
+  <script>
+    (function () {
+      const Platform = window.PlatformUI || {};
+      const workspaceId = "{{ workspace_id }}";
+      const sectionKey = "{{ analytics_section_key }}";
+
+      const startDateInput = document.getElementById("startDateInput");
+      const endDateInput = document.getElementById("endDateInput");
+      const supplierFilterSelect = document.getElementById("supplierFilterSelect");
+      const buyerFilterSelect = document.getElementById("buyerFilterSelect");
+      const statusFilterSelect = document.getElementById("statusFilterSelect");
+      const typeFilterSelect = document.getElementById("typeFilterSelect");
+      const applyFiltersBtn = document.getElementById("applyFiltersBtn");
+      const clearFiltersBtn = document.getElementById("clearFiltersBtn");
+      const analyticsKpis = document.getElementById("analyticsKpis");
+      const analyticsCharts = document.getElementById("analyticsCharts");
+      const drilldownTitle = document.getElementById("drilldownTitle");
+      const analyticsSummary = document.getElementById("analyticsSummary");
+      const drilldownHead = document.getElementById("drilldownHead");
+      const drilldownBody = document.getElementById("drilldownBody");
+
+      const withWorkspace = (path) =>
+        Platform.withWorkspace
+          ? Platform.withWorkspace(path, workspaceId)
+          : `${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
+
+      const escapeHtml = Platform.escapeHtml
+        ? Platform.escapeHtml
+        : (value) =>
+            String(value ?? "")
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;")
+              .replaceAll('"', "&quot;")
+              .replaceAll("'", "&#039;");
+
+      function readSearchFilters() {
+        const params = new URLSearchParams(window.location.search);
+        return {
+          start_date: params.get("start_date") || "",
+          end_date: params.get("end_date") || "",
+          supplier: params.get("supplier") || "",
+          buyer: params.get("buyer") || "",
+          status: params.get("status") || "",
+          purchase_type: params.get("purchase_type") || "",
+        };
+      }
+
+      function writeSearchFilters(filters) {
+        const nextUrl = new URL(window.location.href);
+        ["start_date", "end_date", "supplier", "buyer", "status", "purchase_type"].forEach((key) => {
+          const value = String(filters[key] || "").trim();
+          if (value) {
+            nextUrl.searchParams.set(key, value);
+          } else {
+            nextUrl.searchParams.delete(key);
+          }
+        });
+        nextUrl.searchParams.set("workspace_id", workspaceId);
+        window.history.replaceState({}, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+      }
+
+      function currentFiltersFromForm() {
+        return {
+          start_date: startDateInput.value || "",
+          end_date: endDateInput.value || "",
+          supplier: supplierFilterSelect.value || "",
+          buyer: buyerFilterSelect.value || "",
+          status: statusFilterSelect.value || "",
+          purchase_type: typeFilterSelect.value || "",
+        };
+      }
+
+      function applyFiltersToForm(filters) {
+        startDateInput.value = filters.start_date || "";
+        endDateInput.value = filters.end_date || "";
+        supplierFilterSelect.value = filters.supplier || "";
+        buyerFilterSelect.value = filters.buyer || "";
+        statusFilterSelect.value = filters.status || "";
+        typeFilterSelect.value = filters.purchase_type || "";
+      }
+
+      function fillSelectOptions(selectEl, options, selectedValue) {
+        const baseOption = '<option value="">Todos</option>';
+        const dynamic = (options || [])
+          .map((item) => `<option value="${escapeHtml(item.key || "")}">${escapeHtml(item.label || item.key || "")}</option>`)
+          .join("");
+        selectEl.innerHTML = baseOption + dynamic;
+        selectEl.value = selectedValue || "";
+      }
+
+      function renderKpis(kpis) {
+        if (!Array.isArray(kpis) || !kpis.length) {
+          analyticsKpis.innerHTML = `
+            <article class="card">
+              <div class="meta">Sem indicadores para o filtro aplicado.</div>
+            </article>
+          `;
+          return;
+        }
+        analyticsKpis.innerHTML = kpis
+          .map((item) => {
+            const trend = item.trend || {};
+            const trendClass = trend.direction ? `analytics-trend ${escapeHtml(trend.direction)}` : "analytics-trend";
+            const trendText = trend.display ? `${escapeHtml(trend.display)} ${escapeHtml(trend.label || "")}` : "Sem comparacao";
+            return `
+              <article class="kpi-card analytics-kpi-card" title="${escapeHtml(item.tooltip || "")}">
+                <div class="kpi-label">${escapeHtml(item.label || "")}</div>
+                <div class="kpi-value">${escapeHtml(item.display_value || "0")}</div>
+                <div class="${trendClass}">${trendText}</div>
+              </article>
+            `;
+          })
+          .join("");
+      }
+
+      function renderChartItems(items) {
+        if (!Array.isArray(items) || !items.length) {
+          return '<div class="meta">Sem dados para exibir.</div>';
+        }
+        return `
+          <div class="analytics-chart-list">
+            ${items
+              .map((item) => {
+                const ratio = Number(item.ratio || 0);
+                return `
+                  <div class="analytics-chart-row">
+                    <div class="analytics-chart-head">
+                      <span>${escapeHtml(item.label || "")}</span>
+                      <strong>${escapeHtml(item.display_value || "0")}</strong>
+                    </div>
+                    <div class="analytics-bar-track">
+                      <span class="analytics-bar-fill" style="width:${Math.max(0, Math.min(100, ratio))}%"></span>
+                    </div>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        `;
+      }
+
+      function renderCharts(charts) {
+        if (!Array.isArray(charts) || !charts.length) {
+          analyticsCharts.innerHTML = `
+            <article class="card"><div class="meta">Sem graficos para o filtro aplicado.</div></article>
+          `;
+          return;
+        }
+        analyticsCharts.innerHTML = charts
+          .map((chart) => `
+            <article class="card">
+              <div class="card-header">
+                <h2 class="card-title">${escapeHtml(chart.title || "Grafico")}</h2>
+              </div>
+              ${renderChartItems(chart.items)}
+            </article>
+          `)
+          .join("");
+      }
+
+      function renderDrilldown(drilldown) {
+        const title = drilldown?.title || "Lista detalhada";
+        const columns = Array.isArray(drilldown?.columns) ? drilldown.columns : [];
+        const rows = Array.isArray(drilldown?.rows) ? drilldown.rows : [];
+
+        drilldownTitle.textContent = title;
+        if (!columns.length) {
+          drilldownHead.innerHTML = "";
+          drilldownBody.innerHTML = `<tr><td class="meta">Sem colunas para exibir.</td></tr>`;
+          return;
+        }
+
+        drilldownHead.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>`;
+        if (!rows.length) {
+          drilldownBody.innerHTML = `<tr><td colspan="${columns.length}" class="meta">Sem itens para este filtro.</td></tr>`;
+          return;
+        }
+
+        drilldownBody.innerHTML = rows
+          .map((row) => {
+            const values = Object.values(row || {}).filter((_, idx, arr) => idx < arr.length);
+            const link = row?.link ? withWorkspace(row.link) : "";
+            const cells = columns.map((_, idx) => {
+              const keyMap = Object.keys(row || {});
+              const key = keyMap[idx] || "";
+              const value = row[key] ?? "-";
+              if (idx === 0 && link) {
+                return `<td><a class="link-inline" href="${escapeHtml(link)}">${escapeHtml(value)}</a></td>`;
+              }
+              return `<td>${escapeHtml(value)}</td>`;
+            });
+            return `<tr>${cells.join("")}</tr>`;
+          })
+          .join("");
+      }
+
+      async function fetchFilterOptions(filters) {
+        const params = new URLSearchParams();
+        Object.entries(filters).forEach(([key, value]) => {
+          if (value) params.set(key, value);
+        });
+        const response = await fetch(withWorkspace(`/api/procurement/analytics/filters?${params.toString()}`));
+        if (!response.ok) throw new Error("Falha ao carregar filtros");
+        return response.json();
+      }
+
+      async function fetchSectionData(filters) {
+        const params = new URLSearchParams();
+        Object.entries(filters).forEach(([key, value]) => {
+          if (value) params.set(key, value);
+        });
+        const response = await fetch(withWorkspace(`/api/procurement/analytics/${sectionKey}?${params.toString()}`));
+        if (!response.ok) throw new Error("Falha ao carregar dashboard");
+        return response.json();
+      }
+
+      async function refreshDashboard() {
+        const filters = currentFiltersFromForm();
+        writeSearchFilters(filters);
+        analyticsSummary.textContent = "Atualizando indicadores...";
+        try {
+          const payload = await fetchSectionData(filters);
+          renderKpis(payload.kpis || []);
+          renderCharts(payload.charts || []);
+          renderDrilldown(payload.drilldown || {});
+          const currentCount = payload?.meta?.records_count ?? 0;
+          const previousCount = payload?.meta?.comparison_records_count ?? 0;
+          analyticsSummary.textContent = `${currentCount} processos no periodo (comparacao ${previousCount})`;
+        } catch (error) {
+          analyticsSummary.textContent = "Nao foi possivel carregar analytics agora.";
+          window.showToast?.("danger", "Falha ao carregar dashboard de analytics.");
+        }
+      }
+
+      async function bootstrap() {
+        const searchFilters = readSearchFilters();
+        applyFiltersToForm(searchFilters);
+        analyticsSummary.textContent = "Carregando filtros...";
+        try {
+          const optionsPayload = await fetchFilterOptions(searchFilters);
+          fillSelectOptions(supplierFilterSelect, optionsPayload.suppliers || [], searchFilters.supplier);
+          fillSelectOptions(buyerFilterSelect, optionsPayload.buyers || [], searchFilters.buyer);
+          fillSelectOptions(statusFilterSelect, optionsPayload.statuses || [], searchFilters.status);
+          fillSelectOptions(typeFilterSelect, optionsPayload.purchase_types || [], searchFilters.purchase_type);
+        } catch (error) {
+          window.showToast?.("danger", "Falha ao carregar filtros de analytics.");
+        }
+        await refreshDashboard();
+      }
+
+      applyFiltersBtn.addEventListener("click", () => {
+        refreshDashboard();
+      });
+
+      clearFiltersBtn.addEventListener("click", () => {
+        applyFiltersToForm({
+          start_date: "",
+          end_date: "",
+          supplier: "",
+          buyer: "",
+          status: "",
+          purchase_type: "",
+        });
+        refreshDashboard();
+      });
+
+      bootstrap();
+    })();
+  </script>
+{% endblock %}

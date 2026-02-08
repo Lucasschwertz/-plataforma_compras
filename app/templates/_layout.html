@@ -22,6 +22,12 @@
       else "Abrir cotacao" if active_nav == "open_quote"
       else "Cotacoes" if active_nav == "sourcing"
       else "Aprovacoes" if active_nav == "approvals"
+      else "Visao Geral" if active_nav == "analytics_overview"
+      else "Eficiencia do Processo" if active_nav == "analytics_efficiency"
+      else "Custos e Economia" if active_nav == "analytics_costs"
+      else "Fornecedores" if active_nav == "analytics_suppliers"
+      else "Qualidade e ERP" if active_nav == "analytics_quality_erp"
+      else "Compliance" if active_nav == "analytics_compliance"
       else "Analise" if active_nav == "governanca"
       else "Plataforma" if active_nav == "integration"
       else "Modulo"
@@ -59,6 +65,13 @@
           {% if ui_role == "approver" or ui_role == "admin" or ui_role == "manager" %}
             <a class="{% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>
           {% endif %}
+          <div class="nav-section-title">Analises</div>
+          <a class="{% if active_nav == 'analytics_overview' %}active{% endif %}" href="/procurement/analises/visao-geral?workspace_id={{ workspace_id }}">Visao Geral</a>
+          <a class="{% if active_nav == 'analytics_efficiency' %}active{% endif %}" href="/procurement/analises/eficiencia-processo?workspace_id={{ workspace_id }}">Eficiencia do Processo</a>
+          <a class="{% if active_nav == 'analytics_costs' %}active{% endif %}" href="/procurement/analises/custos-economia?workspace_id={{ workspace_id }}">Custos e Economia</a>
+          <a class="{% if active_nav == 'analytics_suppliers' %}active{% endif %}" href="/procurement/analises/fornecedores?workspace_id={{ workspace_id }}">Fornecedores</a>
+          <a class="{% if active_nav == 'analytics_quality_erp' %}active{% endif %}" href="/procurement/analises/qualidade-erp?workspace_id={{ workspace_id }}">Qualidade e ERP</a>
+          <a class="{% if active_nav == 'analytics_compliance' %}active{% endif %}" href="/procurement/analises/compliance?workspace_id={{ workspace_id }}">Compliance</a>
           <div class="nav-section-title">Analise</div>
           <a class="{% if active_nav == 'governanca' %}active{% endif %}" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">Trilha de cotacoes</a>
           <div class="nav-section-title">Plataforma</div>
@@ -102,6 +115,9 @@
               aria-label="Buscar na operacao"
             />
             <div class="role-shortcuts" aria-label="Atalhos por papel">
+              {% if ui_role != "supplier" %}
+                <a class="btn btn-ghost btn-small" href="/procurement/analises/visao-geral?workspace_id={{ workspace_id }}">Analises</a>
+              {% endif %}
               {% if ui_role == "approver" or ui_role == "manager" or ui_role == "admin" %}
                 <a class="btn btn-ghost btn-small" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>
               {% endif %}
@@ -173,6 +189,7 @@
       <a class="quick-link {% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Cotacoes</a>
       <a class="quick-link {% if active_nav == 'orders' %}active{% endif %}" href="/procurement/ordens-compra?workspace_id={{ workspace_id }}">Ordens</a>
       <a class="quick-link {% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
+      <a class="quick-link {% if active_nav == 'analytics_overview' or active_nav == 'analytics_efficiency' or active_nav == 'analytics_costs' or active_nav == 'analytics_suppliers' or active_nav == 'analytics_quality_erp' or active_nav == 'analytics_compliance' %}active{% endif %}" href="/procurement/analises/visao-geral?workspace_id={{ workspace_id }}">Analises</a>
       {% if ui_role == "approver" or ui_role == "manager" %}
         <a class="quick-link {% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovar</a>
       {% elif ui_role == "admin" %}
