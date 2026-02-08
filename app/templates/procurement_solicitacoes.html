@@ -1,7 +1,7 @@
 {% extends "_layout.html" %}
 {% set active_nav = "requests" %}
-{% block title %}Solicitacoes | Plataforma Compras{% endblock %}
-{% block page_title %}Solicitacoes de compra{% endblock %}
+{% block title %}{{ ui_text("title.requests") }}{% endblock %}
+{% block page_title %}{{ ui_text("page.requests") }}{% endblock %}
 {% block breadcrumb_tail %}
   <span class="crumb-sep">/</span><span class="crumb current">Solicitacoes</span>
 {% endblock %}
@@ -14,22 +14,22 @@
 {% block content %}
   <section class="grid grid-4" id="requestKpis">
     <article class="kpi-card">
-      <div class="kpi-label">Pendentes de cotacao</div>
+      <div class="kpi-label">{{ ui_status_labels["pending_rfq"] }}</div>
       <div class="kpi-value" data-kpi="pending_rfq">0</div>
       <div class="meta">Solicitacoes prontas para sourcing</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-label">Em cotacao</div>
+      <div class="kpi-label">{{ ui_status_labels["in_rfq"] }}</div>
       <div class="kpi-value" data-kpi="in_rfq">0</div>
       <div class="meta">Ja encaminhadas para fornecedores</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-label">Ordenadas</div>
+      <div class="kpi-label">{{ ui_status_labels["ordered"] }}</div>
       <div class="kpi-value" data-kpi="ordered">0</div>
       <div class="meta">Com ordem de compra emitida</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-label">Recebidas</div>
+      <div class="kpi-label">{{ ui_status_labels["received"] }}</div>
       <div class="kpi-value" data-kpi="received">0</div>
       <div class="meta">Fluxo concluido no ERP</div>
     </article>
@@ -42,13 +42,12 @@
     </div>
     <div class="grid grid-4" style="margin-bottom: 12px">
       <select class="select" id="statusFilter">
-        <option value="">Todos os status</option>
-        <option value="pending_rfq">Pendente de cotacao</option>
-        <option value="in_rfq">Em cotacao</option>
-        <option value="awarded">Com decisao</option>
-        <option value="ordered">Ordenada</option>
-        <option value="partially_received">Recebimento parcial</option>
-        <option value="received">Recebida</option>
+        <option value="">{{ ui_text("label.all_statuses") }}</option>
+        {% for status in ui_status_groups["solicitacao"] %}
+          {% if status.key != "cancelled" %}
+            <option value="{{ status.key }}" title="{{ status.description }}">{{ status.label }}</option>
+          {% endif %}
+        {% endfor %}
       </select>
       <label class="checkbox-line">
         <input type="checkbox" id="erpOnlyFilter" />
@@ -102,13 +101,9 @@
           <div>
             <label class="meta" for="statusInput">Status</label>
             <select class="select" id="statusInput">
-              <option value="pending_rfq">Pendente de cotacao</option>
-              <option value="in_rfq">Em cotacao</option>
-              <option value="awarded">Com decisao</option>
-              <option value="ordered">Ordenada</option>
-              <option value="partially_received">Recebimento parcial</option>
-              <option value="received">Recebida</option>
-              <option value="cancelled">Cancelada</option>
+              {% for status in ui_status_groups["solicitacao"] %}
+                <option value="{{ status.key }}" title="{{ status.description }}">{{ status.label }}</option>
+              {% endfor %}
             </select>
           </div>
         </div>
@@ -181,7 +176,7 @@
     const requestItemEditor = document.getElementById("requestItemEditor");
     const requestSubmitBtn = document.getElementById("requestSubmitBtn");
 
-    const state = { items: [], editMode: false };
+    const state = { items: [], editMode: false, currentEditItem: null };
 
     const withWorkspace = (path) =>
       Platform.withWorkspace
@@ -201,6 +196,14 @@
     function statusLabel(value) {
       if (window.UiLabels?.prettyStatus) return window.UiLabels.prettyStatus(value);
       return value || "Nao informado";
+    }
+
+    function hasAction(item, action) {
+      return Array.isArray(item?.allowed_actions) && item.allowed_actions.includes(action);
+    }
+
+    function actionButtonClass(item, action, fallback = "btn btn-small btn-ghost") {
+      return item?.primary_action === action ? "btn btn-small btn-primary" : fallback;
     }
 
     function updateKpis(items) {
@@ -244,13 +247,30 @@
         .map((item) => {
           const erpRef = [item.erp_num_pct, item.erp_num_cot].filter(Boolean).join(" / ") || "-";
           const sourceLabel = item.source === "erp" ? "ERP" : "Local";
-          const crudActions =
-            item.source === "erp"
-              ? '<span class="meta">Gerenciado pelo ERP</span>'
-              : `
-                  <button class="btn btn-small btn-ghost" type="button" data-edit-request="${item.id}">Editar</button>
-                  <button class="btn btn-small" type="button" data-delete-request="${item.id}">Cancelar</button>
-                `;
+          const actions = [];
+          if (hasAction(item, "view_inbox")) {
+            actions.push(
+              `<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/inbox?type=purchase_request&status=${encodeURIComponent(item.status || "")}`)}">Ver na inbox</a>`
+            );
+          }
+          if (hasAction(item, "open_rfq")) {
+            actions.push(
+              `<a class="${actionButtonClass(item, "open_rfq", "btn btn-small")}" href="${withWorkspace(`/procurement/cotacoes/abrir?purchase_request_id=${item.id}`)}">Abrir cotacao</a>`
+            );
+          }
+          if (item.source !== "erp" && hasAction(item, "edit_request")) {
+            actions.push(
+              `<button class="${actionButtonClass(item, "edit_request", "btn btn-small btn-ghost")}" type="button" data-edit-request="${item.id}">Editar</button>`
+            );
+          }
+          if (item.source !== "erp" && hasAction(item, "cancel_request")) {
+            actions.push(
+              `<button class="${actionButtonClass(item, "cancel_request", "btn btn-small")}" type="button" data-delete-request="${item.id}">Cancelar</button>`
+            );
+          }
+          if (!actions.length) {
+            actions.push(item.source === "erp" ? '<span class="meta">Gerenciado pelo ERP</span>' : '<span class="meta">Sem acoes disponiveis</span>');
+          }
           return `
             <tr>
               <td data-label="Solicitacao"><strong>${escapeHtml(item.number || `SR-${item.id}`)}</strong></td>
@@ -262,11 +282,7 @@
               <td data-label="Origem"><span class="pill ${item.source === "erp" ? "info" : ""}">${escapeHtml(sourceLabel)}</span></td>
               <td data-label="Vinculo ERP">${escapeHtml(erpRef)}</td>
               <td class="cell-actions" data-label="Acoes">
-                <div class="actions-cell">
-                  <a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/inbox?type=purchase_request&status=${encodeURIComponent(item.status || "")}`)}">Ver na inbox</a>
-                  <a class="btn btn-small" href="${withWorkspace(`/procurement/cotacoes/abrir?purchase_request_id=${item.id}`)}">Abrir cotacao</a>
-                  ${crudActions}
-                </div>
+                <div class="actions-cell">${actions.join("")}</div>
               </td>
             </tr>
           `;
@@ -283,9 +299,15 @@
         button.addEventListener("click", async () => {
           const requestId = Number(button.getAttribute("data-delete-request"));
           if (!requestId) return;
-          const confirmed = window.confirm("Deseja cancelar esta solicitacao?");
+          const criticalUi = window.CriticalActionUI;
+          const confirmed = criticalUi
+            ? await criticalUi.confirm("cancel_request")
+            : window.confirm("{{ ui_messages['confirm']['cancel_request'] }}");
           if (!confirmed) return;
-          const response = await fetch(withWorkspace(`/api/procurement/solicitacoes/${requestId}`), {
+          const endpoint = criticalUi
+            ? criticalUi.appendConfirmQuery(withWorkspace(`/api/procurement/solicitacoes/${requestId}`), "cancel_request")
+            : withWorkspace(`/api/procurement/solicitacoes/${requestId}`);
+          const response = await fetch(endpoint, {
             method: "DELETE",
           });
           if (!response.ok) {
@@ -320,6 +342,11 @@
       itemUomInput.value = "UN";
       requestItemEditor.hidden = false;
       state.editMode = false;
+      state.currentEditItem = null;
+      [numberInput, priorityInput, statusInput, requestedByInput, departmentInput, neededAtInput].forEach((input) => {
+        input.disabled = false;
+      });
+      requestSubmitBtn.disabled = false;
       requestModalTitle.textContent = "Nova solicitacao";
       requestSubmitBtn.textContent = "Salvar solicitacao";
     }
@@ -332,8 +359,13 @@
     function openRequestModalForEdit(requestId) {
       const item = state.items.find((row) => Number(row.id) === Number(requestId));
       if (!item) return;
+      if (!hasAction(item, "edit_request")) {
+        if (window.showToast) window.showToast("warning", "Edicao indisponivel para o status atual");
+        return;
+      }
       resetForm();
       state.editMode = true;
+      state.currentEditItem = item;
       requestIdInput.value = String(item.id);
       numberInput.value = item.number || "";
       priorityInput.value = item.priority || "medium";
@@ -342,6 +374,7 @@
       departmentInput.value = item.department || "";
       neededAtInput.value = item.needed_at || "";
       requestItemEditor.hidden = true;
+      statusInput.disabled = !hasAction(item, "update_request_status");
       requestModalTitle.textContent = "Editar solicitacao";
       requestSubmitBtn.textContent = "Atualizar solicitacao";
       openModal();
@@ -361,9 +394,26 @@
         const items = payload.items || [];
         updateKpis(items);
         renderRows(items);
+        const stageByStatus = {
+          pending_rfq: "solicitacao",
+          in_rfq: "cotacao",
+          awarded: "decisao",
+          ordered: "ordem_compra",
+          partially_received: "erp",
+          received: "erp",
+          cancelled: "solicitacao",
+        };
+        const selected = statusFilter.value || "";
+        const stage = stageByStatus[selected] || items[0]?.process_stage || "solicitacao";
+        if (window.ProcessFlow?.setStage) {
+          window.ProcessFlow.setStage(stage);
+        }
       } catch (error) {
         summary.textContent = "Falha ao carregar";
         renderEmpty("Falha ao carregar solicitacoes");
+        if (window.ProcessFlow?.setStage) {
+          window.ProcessFlow.setStage("solicitacao");
+        }
         if (window.showToast) {
           window.showToast("danger", "Nao foi possivel carregar solicitacoes");
         }
@@ -386,6 +436,13 @@
       if (state.editMode) {
         const requestId = Number(requestIdInput.value);
         if (!requestId) return;
+        if (!hasAction(state.currentEditItem, "edit_request")) {
+          if (window.showToast) window.showToast("warning", "Edicao indisponivel para o status atual");
+          return;
+        }
+        if (!hasAction(state.currentEditItem, "update_request_status")) {
+          delete payload.status;
+        }
         url = withWorkspace(`/api/procurement/solicitacoes/${requestId}`);
         method = "PATCH";
       } else {
@@ -401,6 +458,22 @@
       if (!state.editMode && !payload.items[0].description) {
         if (window.showToast) window.showToast("warning", "Descricao do item inicial e obrigatoria");
         return;
+      }
+      const isCancellationUpdate =
+        state.editMode &&
+        payload.status === "cancelled" &&
+        state.currentEditItem &&
+        state.currentEditItem.status !== "cancelled";
+      if (isCancellationUpdate) {
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi
+          ? await criticalUi.confirm("cancel_request")
+          : window.confirm("{{ ui_messages['confirm']['cancel_request'] }}");
+        if (!confirmed) return;
+        if (criticalUi) {
+          payload.confirm = true;
+          payload.confirm_action = "cancel_request";
+        }
       }
 
       if (window.PlatformUI?.setButtonBusy) {

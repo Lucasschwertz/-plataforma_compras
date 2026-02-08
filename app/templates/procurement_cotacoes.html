@@ -1,7 +1,7 @@
 {% extends "_layout.html" %}
 {% set active_nav = "sourcing" %}
-{% block title %}Cotacoes | Plataforma Compras{% endblock %}
-{% block page_title %}Cotacoes{% endblock %}
+{% block title %}{{ ui_text("title.quotes") }}{% endblock %}
+{% block page_title %}{{ ui_text("page.quotes") }}{% endblock %}
 {% block breadcrumb_tail %}
   <span class="crumb-sep">/</span><span class="crumb current">Cotacoes</span>
 {% endblock %}
@@ -14,22 +14,22 @@
 {% block content %}
   <section class="grid grid-4">
     <article class="kpi-card">
-      <div class="kpi-label">Abertas</div>
+      <div class="kpi-label">{{ ui_status_labels["open"] }}</div>
       <div class="kpi-value" data-kpi="open">0</div>
       <div class="meta">Em coleta com fornecedores</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-label">Coletando propostas</div>
+      <div class="kpi-label">{{ ui_status_labels["collecting_quotes"] }}</div>
       <div class="kpi-value" data-kpi="collecting_quotes">0</div>
       <div class="meta">Com convites e respostas em andamento</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-label">Com decisao</div>
+      <div class="kpi-label">{{ ui_status_labels["awarded"] }}</div>
       <div class="kpi-value" data-kpi="awarded">0</div>
       <div class="meta">Prontas para ordem de compra</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-label">Canceladas</div>
+      <div class="kpi-label">{{ ui_status_labels["cancelled"] }}</div>
       <div class="kpi-value" data-kpi="cancelled">0</div>
       <div class="meta">Encerradas sem compra</div>
     </article>
@@ -42,13 +42,10 @@
     </div>
     <div class="grid grid-4" style="margin-bottom: 12px">
       <select class="select" id="statusFilter">
-        <option value="">Todos os status</option>
-        <option value="draft">Rascunho</option>
-        <option value="open">Aberta</option>
-        <option value="collecting_quotes">Coletando propostas</option>
-        <option value="closed">Fechada</option>
-        <option value="awarded">Com decisao</option>
-        <option value="cancelled">Cancelada</option>
+        <option value="">{{ ui_text("label.all_statuses") }}</option>
+        {% for status in ui_status_groups["cotacao"] %}
+          <option value="{{ status.key }}" title="{{ status.description }}">{{ status.label }}</option>
+        {% endfor %}
       </select>
       <input class="input" id="titleFilter" placeholder="Buscar por titulo" />
       <button class="btn btn-ghost" id="applyBtn">Aplicar filtros</button>
@@ -86,12 +83,9 @@
         <div>
           <label class="meta" for="rfqStatusInput">Status</label>
           <select class="select" id="rfqStatusInput">
-            <option value="draft">Rascunho</option>
-            <option value="open">Aberta</option>
-            <option value="collecting_quotes">Coletando propostas</option>
-            <option value="closed">Fechada</option>
-            <option value="awarded">Com decisao</option>
-            <option value="cancelled">Cancelada</option>
+            {% for status in ui_status_groups["cotacao"] %}
+              <option value="{{ status.key }}" title="{{ status.description }}">{{ status.label }}</option>
+            {% endfor %}
           </select>
         </div>
         <div class="page-actions">
@@ -145,6 +139,14 @@
       return value || "Nao informado";
     }
 
+    function hasAction(item, action) {
+      return Array.isArray(item?.allowed_actions) && item.allowed_actions.includes(action);
+    }
+
+    function actionButtonClass(item, action, fallback = "btn btn-small btn-ghost") {
+      return item?.primary_action === action ? "btn btn-small btn-primary" : fallback;
+    }
+
     function renderEmpty(message) {
       rfqsBody.innerHTML = `
         <tr>
@@ -180,22 +182,40 @@
 
       summary.textContent = `${items.length} cotacoes carregadas`;
       rfqsBody.innerHTML = items
-        .map((item) => `
-          <tr>
-            <td data-label="Cotacao"><strong>${escapeHtml(item.title || `Cotacao ${item.id}`)}</strong><br /><span class="meta">ID ${item.id}</span></td>
-            <td data-label="Status">${escapeHtml(statusLabel(item.status))}</td>
-            <td class="numeric" data-label="Itens">${escapeHtml(item.item_count ?? 0)}</td>
-            <td class="numeric" data-label="Fornecedores">${escapeHtml(item.supplier_count ?? 0)}</td>
-            <td data-label="Atualizada">${escapeHtml(item.updated_at || "-")}</td>
-            <td class="cell-actions" data-label="Acoes">
-              <div class="actions-cell">
-                <a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/cotacoes/${item.id}`)}">Mesa</a>
-                <button class="btn btn-small btn-ghost" type="button" data-edit-rfq="${item.id}">Editar</button>
-                <button class="btn btn-small" type="button" data-cancel-rfq="${item.id}" ${item.status === "cancelled" ? "disabled" : ""}>Cancelar</button>
-              </div>
-            </td>
-          </tr>
-        `)
+        .map((item) => {
+          const actions = [];
+          actions.push(`<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/cotacoes/${item.id}`)}">Mesa</a>`);
+          if (hasAction(item, "award_rfq")) {
+            actions.push(
+              `<a class="${actionButtonClass(item, "award_rfq", "btn btn-small")}" href="${withWorkspace(`/procurement/cotacoes/${item.id}`)}#decisao">Decidir</a>`
+            );
+          }
+          if (hasAction(item, "edit_rfq")) {
+            actions.push(
+              `<button class="${actionButtonClass(item, "edit_rfq", "btn btn-small btn-ghost")}" type="button" data-edit-rfq="${item.id}">Editar</button>`
+            );
+          }
+          if (hasAction(item, "cancel_rfq")) {
+            actions.push(
+              `<button class="${actionButtonClass(item, "cancel_rfq", "btn btn-small")}" type="button" data-cancel-rfq="${item.id}">Cancelar</button>`
+            );
+          }
+          if (!actions.length) {
+            actions.push('<span class="meta">Sem acoes disponiveis</span>');
+          }
+          return `
+            <tr>
+              <td data-label="Cotacao"><strong>${escapeHtml(item.title || `Cotacao ${item.id}`)}</strong><br /><span class="meta">ID ${item.id}</span></td>
+              <td data-label="Status">${escapeHtml(statusLabel(item.status))}</td>
+              <td class="numeric" data-label="Itens">${escapeHtml(item.item_count ?? 0)}</td>
+              <td class="numeric" data-label="Fornecedores">${escapeHtml(item.supplier_count ?? 0)}</td>
+              <td data-label="Atualizada">${escapeHtml(item.updated_at || "-")}</td>
+              <td class="cell-actions" data-label="Acoes">
+                <div class="actions-cell">${actions.join("")}</div>
+              </td>
+            </tr>
+          `;
+        })
         .join("");
 
       rfqsBody.querySelectorAll("[data-edit-rfq]").forEach((button) => {
@@ -218,23 +238,36 @@
       rfqForm.reset();
       rfqIdInput.value = "";
       rfqStatusInput.value = "draft";
+      rfqStatusInput.disabled = false;
     }
 
     function openEditModal(rfqId) {
       const rfq = state.items.find((item) => Number(item.id) === Number(rfqId));
       if (!rfq) return;
+      if (!hasAction(rfq, "edit_rfq")) {
+        if (window.showToast) window.showToast("warning", "Edicao indisponivel para o status atual");
+        return;
+      }
       rfqIdInput.value = String(rfq.id);
       rfqTitleInput.value = rfq.title || "";
       rfqStatusInput.value = rfq.status || "draft";
+      rfqStatusInput.disabled = !hasAction(rfq, "update_rfq_status");
       openModal();
     }
 
     async function cancelRfq(rfqId) {
       const target = state.items.find((item) => Number(item.id) === Number(rfqId));
-      if (!target || target.status === "cancelled") return;
-      if (!confirm("Confirmar cancelamento da cotacao?")) return;
+      if (!target || !hasAction(target, "cancel_rfq")) return;
+      const criticalUi = window.CriticalActionUI;
+      const confirmed = criticalUi
+        ? await criticalUi.confirm("cancel_rfq")
+        : confirm("{{ ui_messages['confirm']['cancel_quote'] }}");
+      if (!confirmed) return;
       try {
-        const response = await fetch(withWorkspace(`/api/procurement/rfqs/${rfqId}`), { method: "DELETE" });
+        const endpoint = criticalUi
+          ? criticalUi.appendConfirmQuery(withWorkspace(`/api/procurement/rfqs/${rfqId}`), "cancel_rfq")
+          : withWorkspace(`/api/procurement/rfqs/${rfqId}`);
+        const response = await fetch(endpoint, { method: "DELETE" });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload?.message || payload?.error || "erro");
         if (window.showToast) window.showToast("success", "Cotacao cancelada");
@@ -259,9 +292,25 @@
           items = items.filter((item) => String(item.title || "").toLowerCase().includes(q));
         }
         renderRows(items);
+        const stageByStatus = {
+          draft: "cotacao",
+          open: "cotacao",
+          collecting_quotes: "cotacao",
+          closed: "cotacao",
+          awarded: "decisao",
+          cancelled: "cotacao",
+        };
+        const selected = state.query.status || "";
+        const stage = stageByStatus[selected] || items[0]?.process_stage || "cotacao";
+        if (window.ProcessFlow?.setStage) {
+          window.ProcessFlow.setStage(stage);
+        }
       } catch (error) {
         summary.textContent = "Falha ao carregar";
         renderEmpty("Falha ao carregar cotacoes");
+        if (window.ProcessFlow?.setStage) {
+          window.ProcessFlow.setStage("cotacao");
+        }
         if (window.showToast) window.showToast("danger", "Nao foi possivel carregar cotacoes");
       }
     }
@@ -283,11 +332,31 @@
       event.preventDefault();
       const rfqId = Number(rfqIdInput.value);
       if (!rfqId) return;
+      const current = state.items.find((item) => Number(item.id) === Number(rfqId));
+      if (!hasAction(current, "edit_rfq")) {
+        if (window.showToast) window.showToast("warning", "Edicao indisponivel para o status atual");
+        return;
+      }
 
       const payload = {
         title: rfqTitleInput.value.trim(),
         status: rfqStatusInput.value,
       };
+      if (!hasAction(current, "update_rfq_status")) {
+        delete payload.status;
+      }
+      const isCancellationUpdate = payload.status === "cancelled" && current.status !== "cancelled";
+      if (isCancellationUpdate) {
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi
+          ? await criticalUi.confirm("cancel_rfq")
+          : confirm("{{ ui_messages['confirm']['cancel_quote'] }}");
+        if (!confirmed) return;
+        if (criticalUi) {
+          payload.confirm = true;
+          payload.confirm_action = "cancel_rfq";
+        }
+      }
 
       if (Platform.setButtonBusy) {
         Platform.setButtonBusy(rfqSubmitBtn, true, { loading: "Salvando", idle: "Salvar cotacao" });

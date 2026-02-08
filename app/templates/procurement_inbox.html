@@ -1,8 +1,8 @@
 
 {% extends "_layout.html" %}
 {% set active_nav = "procurement" %}
-{% block title %}Inbox | Plataforma Compras{% endblock %}
-{% block page_title %}Inbox de compras{% endblock %}
+{% block title %}{{ ui_text("title.inbox") }}{% endblock %}
+{% block page_title %}{{ ui_text("page.inbox") }}{% endblock %}
 {% block breadcrumb_tail %}
   <span class="crumb-sep">/</span><span class="crumb current">Inbox de compras</span>
 {% endblock %}
@@ -526,6 +526,16 @@
         const filtersLabel = activeFilters ? `, filtros ${activeFilters}` : "";
         summary.textContent = `${state.lastItems.length} itens na inbox${filtersLabel}`;
         updateWorkflowTabs();
+        const stageByType = {
+          purchase_request: "solicitacao",
+          rfq: "cotacao",
+          purchase_order: "ordem_compra",
+        };
+        const selectedType = state.filters.type || "";
+        const resolvedStage = stageByType[selectedType] || state.lastItems[0]?.process_stage || "solicitacao";
+        if (window.ProcessFlow?.setStage) {
+          window.ProcessFlow.setStage(resolvedStage);
+        }
 
         await loadRfqSuggestions(state.lastItems);
       }
@@ -627,21 +637,31 @@
         return pills.length ? `<div class="meta">${pills.join("")}</div>` : "Nao informado";
       }
 
+      function hasAction(item, action) {
+        return Array.isArray(item?.allowed_actions) && item.allowed_actions.includes(action);
+      }
+
+      function actionClass(item, action, fallback = "btn btn-small btn-ghost") {
+        return item?.primary_action === action ? "btn btn-small btn-primary" : fallback;
+      }
+
       function renderActions(item) {
         const actions = [];
         if (item.type === "rfq") {
           actions.push(
-            `<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/cotacoes/${item.id}`)}">Mesa</a>
-            <button class="btn btn-small" data-action="comparison" data-id="${item.id}">Comparar</button>`
+            `<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/cotacoes/${item.id}`)}">Mesa</a>`
           );
-          if (item.status !== "awarded") {
+          if (hasAction(item, "view_quotes")) {
+            actions.push(`<button class="btn btn-small btn-ghost" data-action="comparison" data-id="${item.id}">Comparar</button>`);
+          }
+          if (hasAction(item, "award_rfq")) {
             actions.push(
-              `<button class="btn btn-small btn-primary" data-action="award" data-id="${item.id}">Decidir</button>`
+              `<button class="${actionClass(item, "award_rfq", "btn btn-small")}" data-action="award" data-id="${item.id}">Decidir</button>`
             );
           }
-          if (item.status === "awarded" && item.award_id && !item.award_purchase_order_id) {
+          if (hasAction(item, "create_purchase_order") && item.award_id && !item.award_purchase_order_id) {
             actions.push(
-              `<button class="btn btn-small" data-action="create-po" data-award-id="${item.award_id}" data-rfq-id="${item.id}">Gerar OC</button>`
+              `<button class="${actionClass(item, "create_purchase_order", "btn btn-small")}" data-action="create-po" data-award-id="${item.award_id}" data-rfq-id="${item.id}">Gerar OC</button>`
             );
           }
           if (item.award_purchase_order_id) {
@@ -651,19 +671,26 @@
           }
         }
         if (item.type === "purchase_request") {
-          actions.push(
-            `<button class="btn btn-small" data-action="new-rfq" data-id="${item.id}">Criar cotacao</button>`
-          );
+          if (hasAction(item, "open_rfq")) {
+            actions.push(
+              `<button class="${actionClass(item, "open_rfq", "btn btn-small")}" data-action="new-rfq" data-id="${item.id}">Criar cotacao</button>`
+            );
+          }
+          if (hasAction(item, "view_quotes")) {
+            actions.push(
+              `<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/cotacoes?status=open`)}">Cotacoes</a>`
+            );
+          }
         }
         if (item.type === "purchase_order") {
           actions.push(
             `<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/purchase-orders/${item.id}`)}">Detalhe</a>`
           );
-          if (item.status !== "erp_accepted") {
+          if (hasAction(item, "push_to_erp")) {
             actions.push(
-              `<button class="btn btn-small btn-primary" data-action="push-erp" data-id="${item.id}">Enviar ao ERP</button>`
+              `<button class="${actionClass(item, "push_to_erp", "btn btn-small")}" data-action="push-erp" data-id="${item.id}">Enviar ao ERP</button>`
             );
-          } else {
+          } else if (item.status === "erp_accepted") {
             actions.push('<span class="pill">ERP OK</span>');
           }
         }
@@ -853,13 +880,19 @@
         const supplier_name = (awardSupplierInput.value || "").trim();
         const reason = (awardReasonInput.value || "").trim();
         if (!rfqId || !supplier_name || !reason) return;
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi ? await criticalUi.confirm("award_rfq") : true;
+        if (!confirmed) return;
 
         setBusy(awardSubmitBtn, true, { idle: "Confirmar decisao", loading: "Aplicando" });
         try {
+          const payload = criticalUi
+            ? criticalUi.withConfirmPayload({ supplier_name, reason }, "award_rfq")
+            : { supplier_name, reason };
           const res = await fetch(`/api/procurement/rfqs/${rfqId}/award`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ supplier_name, reason }),
+            body: JSON.stringify(payload),
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -878,10 +911,16 @@
         event.preventDefault();
         const awardId = Number(poAwardIdInput.value);
         if (!awardId) return;
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi ? await criticalUi.confirm("create_purchase_order") : true;
+        if (!confirmed) return;
 
         setBusy(poSubmitBtn, true, { idle: "Gerar OC", loading: "Gerando" });
         try {
-          const res = await fetch(`/api/procurement/awards/${awardId}/purchase-orders`, {
+          const endpoint = criticalUi
+            ? criticalUi.appendConfirmQuery(`/api/procurement/awards/${awardId}/purchase-orders`, "create_purchase_order")
+            : `/api/procurement/awards/${awardId}/purchase-orders`;
+          const res = await fetch(endpoint, {
             method: "POST",
           });
           const data = await res.json().catch(() => ({}));
@@ -904,10 +943,16 @@
         event.preventDefault();
         const purchaseOrderId = Number(pushPoIdInput.value);
         if (!purchaseOrderId) return;
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi ? await criticalUi.confirm("push_to_erp") : true;
+        if (!confirmed) return;
 
         setBusy(pushSubmitBtn, true, { idle: "Enviar agora", loading: "Enviando" });
         try {
-          const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, {
+          const endpoint = criticalUi
+            ? criticalUi.appendConfirmQuery(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, "push_to_erp")
+            : `/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`;
+          const res = await fetch(endpoint, {
             method: "POST",
           });
           if (!res.ok) {

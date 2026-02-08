@@ -86,3 +86,42 @@ Operacao:
 
 ## UX
 - Estilo visual: minimalista (aplicado nas telas de Inbox, Cotacao e Decisao/OC).
+
+## Qualidade e CI
+
+Workflow: `.github/workflows/ci.yml`
+
+Como a CI funciona:
+- Dispara em `push` e `pull_request` para `main`.
+- Usa Python `3.11` (mesma base do `Dockerfile`).
+- Instala dependencias com `requirements.txt`.
+- Executa toda a suite com `unittest`:
+  `python -m unittest discover -s tests -p "test_*.py" -v`
+- Falha o pipeline se qualquer teste falhar.
+- Executa coverage em etapa nao bloqueante (somente relatorio).
+- Publica artefatos de coverage (`coverage.xml`, `coverage.txt`, `htmlcov`).
+
+Ambiente de teste seguro na CI:
+- `ERP_MODE=mock` para evitar ERP real.
+- `SYNC_SCHEDULER_ENABLED=false` para evitar jobs assincronos.
+- Sem uso de secrets obrigatorios.
+- Banco de teste em SQLite (configuracao padrao dos testes com DB temporario).
+
+Como rodar testes localmente:
+
+```powershell
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Como rodar coverage localmente:
+
+```powershell
+pip install coverage
+coverage run -m unittest discover -s tests -p "test_*.py" -v
+coverage report -m
+coverage html -d htmlcov
+```
+
+Obs: coverage nao bloqueia CI neste momento; o objetivo atual e visibilidade continua de qualidade.

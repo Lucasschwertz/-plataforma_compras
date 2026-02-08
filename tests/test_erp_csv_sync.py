@@ -312,7 +312,7 @@ class ErpCsvSyncTest(unittest.TestCase):
         self.assertEqual(read.get_json()["purchase_order"]["status"], "approved")
 
         delete = self.client.delete(
-            f"/api/procurement/purchase-orders/{created_id}",
+            f"/api/procurement/purchase-orders/{created_id}?confirm=true",
             headers=self.headers,
         )
         self.assertEqual(delete.status_code, 200)

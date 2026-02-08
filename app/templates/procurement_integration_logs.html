@@ -1,7 +1,7 @@
 {% extends "_layout.html" %}
 {% set active_nav = "governanca" if request.args.get("scope") == "rfq" else "integration" %}
-{% block title %}Logs de Integracao | Plataforma Compras{% endblock %}
-{% block page_title %}Integracoes e trilha de cotacoes{% endblock %}
+{% block title %}{{ ui_text("title.integrations") }}{% endblock %}
+{% block page_title %}{{ ui_text("page.integrations") }}{% endblock %}
 {% block breadcrumb_tail %}
   <span class="crumb-sep">/</span><span class="crumb current">Integracoes e trilha</span>
 {% endblock %}

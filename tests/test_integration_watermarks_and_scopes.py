@@ -115,20 +115,20 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
         award_res = self.client.post(
             f"/api/procurement/rfqs/{rfq_id}/award",
             headers=self.headers,
-            json={"reason": "alias_award", "supplier_name": "Fornecedor Alias"},
+            json={"reason": "alias_award", "supplier_name": "Fornecedor Alias", "confirm": True},
         )
         self.assertEqual(award_res.status_code, 201)
         award_id = award_res.get_json()["award_id"]
 
         po_res = self.client.post(
-            f"/api/procurement/awards/{award_id}/purchase-orders",
+            f"/api/procurement/awards/{award_id}/purchase-orders?confirm=true",
             headers=self.headers,
         )
         self.assertEqual(po_res.status_code, 201)
         purchase_order_id = po_res.get_json()["purchase_order_id"]
 
         push_res = self.client.post(
-            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp",
+            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp?confirm=true",
             headers=self.headers,
         )
         self.assertEqual(push_res.status_code, 200)
@@ -192,20 +192,20 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
         award_res = self.client.post(
             f"/api/procurement/rfqs/{rfq_id}/award",
             headers=self.headers,
-            json={"reason": "idempotency_award", "supplier_name": "Fornecedor Idempotente"},
+            json={"reason": "idempotency_award", "supplier_name": "Fornecedor Idempotente", "confirm": True},
         )
         self.assertEqual(award_res.status_code, 201)
         award_id = award_res.get_json()["award_id"]
 
         po_res = self.client.post(
-            f"/api/procurement/awards/{award_id}/purchase-orders",
+            f"/api/procurement/awards/{award_id}/purchase-orders?confirm=true",
             headers=self.headers,
         )
         self.assertEqual(po_res.status_code, 201)
         purchase_order_id = po_res.get_json()["purchase_order_id"]
 
         push_res = self.client.post(
-            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp",
+            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp?confirm=true",
             headers=self.headers,
         )
         self.assertEqual(push_res.status_code, 200)

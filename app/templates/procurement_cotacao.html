@@ -1,8 +1,8 @@
 
 {% extends "_layout.html" %}
 {% set active_nav = "sourcing" %}
-{% block title %}Cotacao {{ rfq_id }} | Plataforma Compras{% endblock %}
-{% block page_title %}Mesa de cotacao e decisao{% endblock %}
+{% block title %}{{ ui_text("title.quote_detail") }} {{ rfq_id }} | {{ ui_terms["app_name"] }}{% endblock %}
+{% block page_title %}{{ ui_text("page.quote_detail") }}{% endblock %}
 {% block breadcrumb_tail %}
   <span class="crumb-sep">/</span><span class="crumb current">Mesa {{ rfq_id }}</span>
 {% endblock %}
@@ -312,6 +312,30 @@
         convites: [],
         detalheComparacaoAberto: true,
       };
+
+      function hasEntityAction(entity, action) {
+        return Array.isArray(entity?.allowed_actions) && entity.allowed_actions.includes(action);
+      }
+
+      function cotacaoHasAction(action) {
+        return hasEntityAction(state.cotacao, action);
+      }
+
+      function decisaoHasAction(action) {
+        return hasEntityAction(state.decisao, action);
+      }
+
+      function ordemHasAction(action) {
+        return hasEntityAction(state.ordemCompra, action);
+      }
+
+      function inviteHasAction(invite, action) {
+        return hasEntityAction(invite, action);
+      }
+
+      function primaryActionClass(entity, action, fallback = "btn btn-small btn-ghost") {
+        return entity?.primary_action === action ? "btn btn-small btn-primary" : fallback;
+      }
 
       const escapeHtml = Platform.escapeHtml
         ? Platform.escapeHtml
@@ -829,6 +853,7 @@
         }
 
         const hasSuppliers = state.fornecedores && state.fornecedores.length > 0;
+        const canInviteSuppliers = cotacaoHasAction("manage_item_supplier") || cotacaoHasAction("invite_supplier");
 
         itensBody.innerHTML = state.itens
           .map((item) => {
@@ -863,6 +888,9 @@
             }
             if (isExecutiveReaderRole) {
               convidarControl = '<span class="meta">Leitura por perfil</span>';
+            }
+            if (!canInviteSuppliers) {
+              convidarControl = '<span class="meta">Convite indisponivel para o status atual</span>';
             }
 
             return `
@@ -959,6 +987,30 @@
         convitesBody.innerHTML = convites
           .map((invite) => {
             const statusLabelText = prettyStatus(invite.status || "pending");
+            const actions = [];
+            if (inviteHasAction(invite, "open_invite_portal")) {
+              actions.push(
+                `<a class="btn btn-small btn-ghost" href="${escapeHtml(invite.access_url || "#")}" target="_blank" rel="noreferrer">Portal</a>`
+              );
+            }
+            if (inviteHasAction(invite, "reopen_invite")) {
+              actions.push(
+                `<button class="${primaryActionClass(invite, "reopen_invite", "btn btn-small btn-ghost")}" type="button" data-invite-action="reopen" data-invite-id="${invite.id}">Reabrir</button>`
+              );
+            }
+            if (inviteHasAction(invite, "extend_invite")) {
+              actions.push(
+                `<button class="${primaryActionClass(invite, "extend_invite", "btn btn-small btn-ghost")}" type="button" data-invite-action="extend" data-invite-id="${invite.id}">+7 dias</button>`
+              );
+            }
+            if (inviteHasAction(invite, "cancel_invite")) {
+              actions.push(
+                `<button class="${primaryActionClass(invite, "cancel_invite", "btn btn-small")}" type="button" data-invite-action="cancel" data-invite-id="${invite.id}">Cancelar</button>`
+              );
+            }
+            if (!actions.length) {
+              actions.push('<span class="meta">Sem acoes disponiveis</span>');
+            }
             return `
               <tr>
                 <td data-label="Fornecedor"><strong>${escapeHtml(invite.supplier_name || `Fornecedor ${invite.supplier_id}`)}</strong></td>
@@ -966,12 +1018,7 @@
                 <td data-label="Status"><span class="pill">${escapeHtml(statusLabelText)}</span></td>
                 <td data-label="Validade">${escapeHtml(invite.expires_at || "-")}</td>
                 <td class="cell-actions" data-label="Acoes">
-                  <div class="actions-cell">
-                    <a class="btn btn-small btn-ghost" href="${escapeHtml(invite.access_url || "#")}" target="_blank" rel="noreferrer">Portal</a>
-                    <button class="btn btn-small btn-ghost" type="button" data-invite-action="reopen" data-invite-id="${invite.id}">Reabrir</button>
-                    <button class="btn btn-small btn-ghost" type="button" data-invite-action="extend" data-invite-id="${invite.id}">+7 dias</button>
-                    <button class="btn btn-small" type="button" data-invite-action="cancel" data-invite-id="${invite.id}">Cancelar</button>
-                  </div>
+                  <div class="actions-cell">${actions.join("")}</div>
                 </td>
               </tr>
             `;
@@ -1250,6 +1297,10 @@
       function bindConvidar() {
         document.querySelectorAll("[data-invite-btn]").forEach((btn) => {
           btn.addEventListener("click", async () => {
+            if (!cotacaoHasAction("manage_item_supplier") && !cotacaoHasAction("invite_supplier")) {
+              window.showToast("warning", "Convite indisponivel para o status atual");
+              return;
+            }
             const itemId = Number(btn.getAttribute("data-invite-btn"));
             const select = document.querySelector(`[data-invite-select="${itemId}"]`);
             if (!select) return;
@@ -1261,6 +1312,7 @@
       }
 
       function renderFornecedores() {
+        const canRegisterQuote = cotacaoHasAction("save_supplier_quote");
         if (isExecutiveReaderRole) {
           propostaFornecedorSelect.innerHTML = '<option value="">Modo executivo</option>';
           propostaFornecedorSelect.disabled = true;
@@ -1268,6 +1320,17 @@
           propostaSubmitBtn.textContent = "Somente leitura";
           propostaDeleteBtn.disabled = true;
           propostaDeleteBtn.textContent = "Somente leitura";
+          renderPropostaItens();
+          return;
+        }
+
+        if (!canRegisterQuote) {
+          propostaFornecedorSelect.innerHTML = '<option value="">Registro indisponivel no status atual</option>';
+          propostaFornecedorSelect.disabled = true;
+          propostaSubmitBtn.disabled = true;
+          propostaSubmitBtn.textContent = "Registro indisponivel";
+          propostaDeleteBtn.disabled = true;
+          propostaDeleteBtn.textContent = "Exclusao indisponivel";
           renderPropostaItens();
           return;
         }
@@ -1327,13 +1390,17 @@
         ]);
 
         ocBadge.textContent = prettyStatus(oc.status);
+        const canPush = hasEntityAction(oc, "push_to_erp");
+        const pushClass = oc.primary_action === "push_to_erp" ? "btn btn-primary" : "btn";
 
         ocAcoes.innerHTML = `
             <a class="btn" href="${withWorkspace(`/procurement/purchase-orders/${oc.id}`)}">Abrir OC</a>
           ${
-            oc.status !== "erp_accepted"
-              ? `<button class="btn btn-primary" id="pushOcBtn">Enviar ao ERP</button>`
-              : `<span class="pill">ERP aceito</span>`
+            canPush
+              ? `<button class="${pushClass}" id="pushOcBtn">Enviar ao ERP</button>`
+              : oc.status === "erp_accepted"
+                ? `<span class="pill">ERP aceito</span>`
+                : `<span class="meta">Acao de envio indisponivel</span>`
           }
         `;
 
@@ -1347,30 +1414,61 @@
         if (!nextActionPrimaryBtn || !nextActionBadge || !nextActionMeta) return;
 
         nextActionPrimaryBtn.disabled = false;
-        nextActionPrimaryBtn.dataset.action = "focus_decision";
+        nextActionPrimaryBtn.dataset.action = "focus_comparacao";
         nextActionPrimaryBtn.dataset.ocId = "";
-        nextActionPrimaryBtn.textContent = "Registrar decisao";
+        nextActionPrimaryBtn.dataset.awardId = "";
+        nextActionPrimaryBtn.textContent = "Revisar comparacao";
 
         if (!decisao) {
+          const primary = state.cotacao?.primary_action || "";
+          if (primary === "invite_supplier" || primary === "manage_item_supplier") {
+            nextActionBadge.textContent = "Convidar fornecedores";
+            nextActionMeta.textContent = "Convide fornecedores para iniciar a coleta de propostas.";
+            nextActionPrimaryBtn.textContent = "Ir para convites";
+            nextActionPrimaryBtn.dataset.action = "focus_convites";
+            return;
+          }
+          if (primary === "save_supplier_quote") {
+            nextActionBadge.textContent = "Registrar propostas";
+            nextActionMeta.textContent = "Preencha e salve propostas para habilitar a decisao.";
+            nextActionPrimaryBtn.textContent = "Ir para propostas";
+            nextActionPrimaryBtn.dataset.action = "focus_proposta";
+            return;
+          }
           nextActionBadge.textContent = "Aguardando decisao";
           nextActionMeta.textContent = "Preencha fornecedor e motivo para registrar a decisao.";
+          nextActionPrimaryBtn.textContent = "Registrar decisao";
+          nextActionPrimaryBtn.dataset.action = "focus_decision";
           return;
         }
 
         if (decisao && !oc) {
           nextActionBadge.textContent = "Gerar ordem de compra";
-          nextActionMeta.textContent = "A decisao foi registrada, agora gere a ordem de compra na secao de decisao.";
+          nextActionMeta.textContent = "A decisao foi registrada, gere a ordem para seguir o fluxo.";
           nextActionPrimaryBtn.textContent = "Gerar ordem de compra";
-          nextActionPrimaryBtn.dataset.action = "focus_decision";
+          nextActionPrimaryBtn.dataset.action = "create_po";
+          nextActionPrimaryBtn.dataset.awardId = String(decisao.id || "");
+          if (!hasEntityAction(decisao, "create_purchase_order")) {
+            nextActionPrimaryBtn.dataset.action = "focus_decision";
+            nextActionPrimaryBtn.disabled = true;
+            nextActionMeta.textContent = "Geracao de ordem indisponivel para o status atual.";
+          }
           return;
         }
 
         if (oc && oc.status !== "erp_accepted") {
-          nextActionBadge.textContent = "Enviar ao ERP";
-          nextActionMeta.textContent = "A ordem foi gerada, confirme o envio ao ERP para concluir o fluxo.";
-          nextActionPrimaryBtn.textContent = "Enviar OC ao ERP";
-          nextActionPrimaryBtn.dataset.action = "push_erp";
-          nextActionPrimaryBtn.dataset.ocId = String(oc.id);
+          if (hasEntityAction(oc, "push_to_erp")) {
+            nextActionBadge.textContent = "Enviar ao ERP";
+            nextActionMeta.textContent = "A ordem foi gerada, confirme o envio ao ERP para concluir o fluxo.";
+            nextActionPrimaryBtn.textContent = "Enviar OC ao ERP";
+            nextActionPrimaryBtn.dataset.action = "push_erp";
+            nextActionPrimaryBtn.dataset.ocId = String(oc.id);
+          } else {
+            nextActionBadge.textContent = "Aguardando retorno";
+            nextActionMeta.textContent = "A ordem ja esta em processamento. Atualize para acompanhar o retorno.";
+            nextActionPrimaryBtn.textContent = "Atualizar dados";
+            nextActionPrimaryBtn.dataset.action = "refresh";
+          }
           return;
         }
 
@@ -1383,6 +1481,7 @@
 
       function renderDecisao(decisao, oc) {
         if (!decisao) {
+          const canAward = cotacaoHasAction("award_rfq");
           const suggestion = getSuggestedSupplier(state.comparacao);
           if (suggestion) {
             fornecedorInput.value = suggestion.name;
@@ -1399,9 +1498,15 @@
               fillReasonPresetOptions();
             }
           }
-          decisaoBadge.textContent = "Aguardando";
-          renderKv(decisaoResumo, [["Status", "Aguardando decisao"], ["Dica", "Preencha abaixo para decidir"]]);
-          decisaoForm.style.display = "grid";
+          decisaoBadge.textContent = canAward ? "Aguardando" : "Bloqueada";
+          if (canAward) {
+            renderKv(decisaoResumo, [["Status", "Aguardando decisao"], ["Dica", "Preencha abaixo para decidir"]]);
+            decisaoForm.style.display = "grid";
+          } else {
+            renderKv(decisaoResumo, [["Status", "Decisao indisponivel"], ["Dica", "Acao nao permitida para o status atual"]]);
+            decisaoHint.textContent = "Registro de decisao bloqueado para o status atual da cotacao.";
+            decisaoForm.style.display = "none";
+          }
           return;
         }
 
@@ -1420,17 +1525,7 @@
           decisaoHint.textContent = "Decisao registrada. Proximo passo, gerar a OC.";
         }
 
-        if (decisao.purchase_order_id) {
-          decisaoForm.style.display = "none";
-        } else {
-          decisaoForm.style.display = "grid";
-          fornecedorInput.value = decisao.fornecedor || fornecedorInput.value;
-          motivoInput.value = decisao.motivo || motivoInput.value;
-          if (motivoCategorySelect) {
-            motivoCategorySelect.value = detectReasonCategoryByText(decisao.motivo || "");
-            fillReasonPresetOptions();
-          }
-        }
+        decisaoForm.style.display = "none";
       }
 
       function renderCotacao(cotacao) {
@@ -1476,6 +1571,9 @@
           eventosCotacao.innerHTML = "";
           eventosDecisao.innerHTML = "";
           decisaoForm.style.display = "none";
+          if (window.ProcessFlow?.setStage) {
+            window.ProcessFlow.setStage("cotacao");
+          }
           return;
         }
 
@@ -1486,6 +1584,10 @@
         state.convites = cotacaoData.convites || [];
         state.fornecedores = fornecedoresData.items || [];
         state.comparacao = comparacaoRes.ok ? comparacaoData : null;
+        const processStage = cotacaoData.flow?.process_stage || state.cotacao?.process_stage || "cotacao";
+        if (window.ProcessFlow?.setStage) {
+          window.ProcessFlow.setStage(processStage);
+        }
 
         renderCotacao(state.cotacao);
         renderFornecedores();
@@ -1509,21 +1611,37 @@
       }
 
       async function executarAcaoConvite(inviteId, action) {
+        const actionMap = { reopen: "reopen_invite", extend: "extend_invite", cancel: "cancel_invite" };
+        const invite = (state.convites || []).find((item) => Number(item.id) === Number(inviteId));
+        const mappedAction = actionMap[action] || "";
+        if (!invite || !inviteHasAction(invite, mappedAction)) {
+          window.showToast("warning", "Acao indisponivel para o status atual");
+          return;
+        }
         const labels = {
           reopen: "reabrir",
           extend: "estender",
           cancel: "cancelar",
         };
         const label = labels[action] || action;
-        const confirmed = window.confirm(`Deseja ${label} este convite?`);
-        if (!confirmed) return;
+        const criticalUi = window.CriticalActionUI;
+        if (action === "cancel") {
+          const confirmed = criticalUi
+            ? await criticalUi.confirm("cancel_invite")
+            : window.confirm("{{ ui_messages['confirm']['cancel_invite'] }}");
+          if (!confirmed) return;
+        }
+        const payload = {
+          action,
+          invite_valid_days: action === "extend" ? 7 : 7,
+        };
+        const body = criticalUi && action === "cancel"
+          ? criticalUi.withConfirmPayload(payload, "cancel_invite")
+          : payload;
         const res = await fetch(`/api/procurement/cotacoes/${rfqId}/convites/${inviteId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action,
-            invite_valid_days: action === "extend" ? 7 : 7,
-          }),
+          body: JSON.stringify(body),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -1535,16 +1653,26 @@
       }
 
       async function registrarDecisao() {
+        if (!cotacaoHasAction("award_rfq")) {
+          window.showToast("warning", "Decisao indisponivel para o status atual");
+          return;
+        }
         const fornecedor = (fornecedorInput.value || "").trim();
         const motivo = (motivoInput.value || "").trim();
         if (!fornecedor || !motivo) return;
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi ? await criticalUi.confirm("award_rfq") : true;
+        if (!confirmed) return;
 
         setBusy(decidirBtn, true, { idle: "Registrar decisao", loading: "Registrando" });
         try {
+          const payload = criticalUi
+            ? criticalUi.withConfirmPayload({ supplier_name: fornecedor, reason: motivo }, "award_rfq")
+            : { supplier_name: fornecedor, reason: motivo };
           const res = await fetch(`/api/procurement/rfqs/${rfqId}/award`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ supplier_name: fornecedor, reason: motivo }),
+            body: JSON.stringify(payload),
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -1558,16 +1686,51 @@
         }
       }
 
+      async function criarOcDaDecisao(awardId) {
+        if (!awardId || !decisaoHasAction("create_purchase_order")) {
+          window.showToast("warning", "Geracao de ordem indisponivel para o status atual");
+          return;
+        }
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi ? await criticalUi.confirm("create_purchase_order") : true;
+        if (!confirmed) return;
+        const endpoint = criticalUi
+          ? criticalUi.appendConfirmQuery(`/api/procurement/awards/${awardId}/purchase-orders`, "create_purchase_order")
+          : `/api/procurement/awards/${awardId}/purchase-orders`;
+        const res = await fetch(endpoint, { method: "POST" });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          window.showToast("danger", `Nao foi possivel gerar a ordem, ${err.message || err.error || "erro"}`);
+          return;
+        }
+        window.showToast("success", "Ordem de compra gerada com sucesso");
+        await carregar();
+      }
+
       async function enviarOcAoErp(ocId) {
-        const confirmar = window.confirm("Deseja enviar esta ordem de compra ao ERP agora?");
-        if (!confirmar) return;
-        await fetch(`/api/procurement/purchase-orders/${ocId}/push-to-erp`, { method: "POST" });
+        if (!ordemHasAction("push_to_erp")) {
+          window.showToast("warning", "Envio ao ERP indisponivel para o status atual");
+          return;
+        }
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi
+          ? await criticalUi.confirm("push_to_erp")
+          : window.confirm("{{ ui_messages['confirm']['push_order_erp'] }}");
+        if (!confirmed) return;
+        const endpoint = criticalUi
+          ? criticalUi.appendConfirmQuery(`/api/procurement/purchase-orders/${ocId}/push-to-erp`, "push_to_erp")
+          : `/api/procurement/purchase-orders/${ocId}/push-to-erp`;
+        await fetch(endpoint, { method: "POST" });
         window.showToast("success", "Ordem enviada ao ERP com sucesso");
         await carregar();
       }
 
       async function salvarProposta(event) {
         event.preventDefault();
+        if (!cotacaoHasAction("save_supplier_quote")) {
+          window.showToast("warning", "Registro de proposta indisponivel para o status atual");
+          return;
+        }
         const supplierId = Number(propostaFornecedorSelect.value);
         if (!supplierId) return;
 
@@ -1633,13 +1796,23 @@
       }
 
       async function excluirPropostaFornecedor() {
+        if (!cotacaoHasAction("save_supplier_quote")) {
+          window.showToast("warning", "Exclusao de proposta indisponivel para o status atual");
+          return;
+        }
         const supplierId = Number(propostaFornecedorSelect.value);
         if (!supplierId) return;
-        const confirmed = window.confirm("Deseja excluir a proposta deste fornecedor?");
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi
+          ? await criticalUi.confirm("delete_supplier_proposal")
+          : window.confirm("{{ ui_messages['confirm']['delete_supplier_proposal'] }}");
         if (!confirmed) return;
         setBusy(propostaDeleteBtn, true, { idle: "Excluir proposta do fornecedor", loading: "Excluindo" });
         try {
-          const res = await fetch(`/api/procurement/cotacoes/${rfqId}/propostas/${supplierId}`, {
+          const endpoint = criticalUi
+            ? criticalUi.appendConfirmQuery(`/api/procurement/cotacoes/${rfqId}/propostas/${supplierId}`, "delete_supplier_proposal")
+            : `/api/procurement/cotacoes/${rfqId}/propostas/${supplierId}`;
+          const res = await fetch(endpoint, {
             method: "DELETE",
           });
           if (!res.ok) {
@@ -1682,6 +1855,30 @@
         if (action === "focus_decision") {
           window.location.hash = "decisao";
           fornecedorInput.focus();
+          return;
+        }
+        if (action === "focus_convites") {
+          window.location.hash = "convitesSection";
+          return;
+        }
+        if (action === "focus_proposta") {
+          window.location.hash = "propostaSection";
+          propostaFornecedorSelect.focus();
+          return;
+        }
+        if (action === "focus_comparacao") {
+          window.location.hash = "comparacao";
+          return;
+        }
+        if (action === "refresh") {
+          await carregar();
+          return;
+        }
+        if (action === "create_po") {
+          const awardId = Number(nextActionPrimaryBtn.dataset.awardId || 0);
+          if (awardId) {
+            await criarOcDaDecisao(awardId);
+          }
           return;
         }
         const ocId = Number(nextActionPrimaryBtn.dataset.ocId || 0);

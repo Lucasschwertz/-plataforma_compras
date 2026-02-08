@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Entrar - Plataforma Compras</title>
+    <title>{{ ui_text("title.login") }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/procurement.css') }}" />
   </head>
   <body>
@@ -11,9 +11,9 @@
       <section class="page-grid" style="grid-template-columns: minmax(0, 420px); justify-content: center">
         <article class="card">
           <div class="brand" style="margin-bottom: 12px">
-            <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
+            <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="{{ ui_terms['app_name'] }}" />
             <div class="brand-text">
-              <div class="brand-title">Plataforma Compras</div>
+              <div class="brand-title">{{ ui_terms["app_name"] }}</div>
               <div class="brand-tagline">Acesso seguro para sua operacao</div>
             </div>
           </div>

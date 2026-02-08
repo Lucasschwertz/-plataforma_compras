@@ -67,20 +67,20 @@ class ProcurementSmokeTest(unittest.TestCase):
         award_res = self.client.post(
             f"/api/procurement/rfqs/{rfq_id}/award",
             headers=self.headers,
-            json={"reason": "smoke_award", "supplier_name": "Fornecedor Smoke"},
+            json={"reason": "smoke_award", "supplier_name": "Fornecedor Smoke", "confirm": True},
         )
         self.assertEqual(award_res.status_code, 201)
         award_id = self._json(award_res)["award_id"]
 
         po_res = self.client.post(
-            f"/api/procurement/awards/{award_id}/purchase-orders",
+            f"/api/procurement/awards/{award_id}/purchase-orders?confirm=true",
             headers=self.headers,
         )
         self.assertEqual(po_res.status_code, 201)
         purchase_order_id = self._json(po_res)["purchase_order_id"]
 
         push_res = self.client.post(
-            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp",
+            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp?confirm=true",
             headers=self.headers,
         )
         self.assertEqual(push_res.status_code, 200)
@@ -269,7 +269,7 @@ class ProcurementSmokeTest(unittest.TestCase):
         self.assertEqual(delete_item_res.status_code, 200)
 
         cancel_res = self.client.delete(
-            f"/api/procurement/solicitacoes/{request_id}",
+            f"/api/procurement/solicitacoes/{request_id}?confirm=true",
             headers=self.headers,
         )
         self.assertEqual(cancel_res.status_code, 200)
@@ -344,13 +344,13 @@ class ProcurementSmokeTest(unittest.TestCase):
         self.assertTrue(any(item["unit_price"] is not None for item in quote_items))
 
         delete_quote_res = self.client.delete(
-            f"/api/procurement/cotacoes/{rfq_id}/propostas/{supplier_id}",
+            f"/api/procurement/cotacoes/{rfq_id}/propostas/{supplier_id}?confirm=true",
             headers=self.headers,
         )
         self.assertEqual(delete_quote_res.status_code, 200)
 
         cancel_invite_res = self.client.delete(
-            f"/api/procurement/cotacoes/{rfq_id}/convites/{invite_id}",
+            f"/api/procurement/cotacoes/{rfq_id}/convites/{invite_id}?confirm=true",
             headers=self.headers,
         )
         self.assertEqual(cancel_invite_res.status_code, 200)

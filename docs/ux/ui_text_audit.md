@@ -1,0 +1,1312 @@
+# UI Text Audit
+
+Data da auditoria: 2026-02-08
+
+Escopo: invent?rio dos arquivos versionados em `app/templates/*.html`, `app/auth.py`, `app/routes/home_routes.py`, `app/routes/procurement_routes.py`.
+
+Crit?rio: listagem de textos potencialmente vis?veis ao usu?rio (t?tulos, labels, placeholders, bot?es, mensagens/toasts e mensagens backend retornadas por rotas).
+
+## 1) Textos de UI encontrados
+
+Total de templates auditados: **14**
+Total de arquivos de rotas/auth auditados: **3**
+
+### 1.1 Templates HTML (invent?rio por arquivo)
+
+#### `app/templates/_layout.html`
+- `app/templates/_layout.html:6` `block`: Plataforma Compras
+- `app/templates/_layout.html:43` `attr:alt`: Plataforma Compras
+- `app/templates/_layout.html:45` `html`: Plataforma Compras
+- `app/templates/_layout.html:46` `html`: Workspace ativo
+- `app/templates/_layout.html:53` `html`: Ordens de compra
+- `app/templates/_layout.html:55` `html`: Abrir cotacao
+- `app/templates/_layout.html:61` `html`: Trilha de cotacoes
+- `app/templates/_layout.html:74` `attr:aria-label`: Abrir menu
+- `app/templates/_layout.html:89` `html`: Origem em carregamento
+- `app/templates/_layout.html:98` `attr:placeholder`: Buscar na operacao (/)
+- `app/templates/_layout.html:99` `attr:aria-label`: Buscar na operacao
+- `app/templates/_layout.html:101` `attr:aria-label`: Atalhos por papel
+- `app/templates/_layout.html:115` `html`: Alternar tema
+- `app/templates/_layout.html:142` `attr:aria-label`: Acoes rapidas
+- `app/templates/_layout.html:163` `js`: (prefers-color-scheme: dark)
+- `app/templates/_layout.html:238` `js`: a[href^="/"]
+- `app/templates/_layout.html:275` `js`: .nav a
+- `app/templates/_layout.html:293` `js`: Origem URL
+- `app/templates/_layout.html:293` `js`: Origem sessao
+
+#### `app/templates/login.html`
+- `app/templates/login.html:6` `html`: Entrar - Plataforma Compras
+- `app/templates/login.html:14` `attr:alt`: Plataforma Compras
+- `app/templates/login.html:16` `html`: Plataforma Compras
+- `app/templates/login.html:17` `html`: Acesso seguro para sua operacao
+- `app/templates/login.html:21` `html`: Informe seu usuario e senha para acessar a plataforma.
+- `app/templates/login.html:37` `html`: Criar conta
+
+#### `app/templates/procurement_approvals.html`
+- `app/templates/procurement_approvals.html:3` `block`: Aprovacoes | Plataforma Compras
+- `app/templates/procurement_approvals.html:4` `block`: Aprovacoes de cotacao
+- `app/templates/procurement_approvals.html:6` `html`: Fila de aprovacoes
+- `app/templates/procurement_approvals.html:9` `html`: Atualizar dados
+- `app/templates/procurement_approvals.html:10` `html`: Abrir cotacoes
+- `app/templates/procurement_approvals.html:16` `html`: Aguardando decisao
+- `app/templates/procurement_approvals.html:18` `html`: Cotacoes sem decisao registrada
+- `app/templates/procurement_approvals.html:21` `html`: Decisao sem OC
+- `app/templates/procurement_approvals.html:23` `html`: Cotacoes com decisao pendente de ordem
+- `app/templates/procurement_approvals.html:26` `html`: OC pendente ERP
+- `app/templates/procurement_approvals.html:28` `html`: Ordens aguardando envio ou retorno ERP
+- `app/templates/procurement_approvals.html:33` `html`: Trilha de cotacoes e governanca
+- `app/templates/procurement_approvals.html:39` `html`: Fila de aprovacao de cotacoes
+- `app/templates/procurement_approvals.html:50` `html`: Idade em dias
+- `app/templates/procurement_approvals.html:51` `html`: Proxima acao
+- `app/templates/procurement_approvals.html:59` `html`: Carregando fila de aprovacao
+- `app/templates/procurement_approvals.html:60` `html`: Aguarde alguns segundos
+- `app/templates/procurement_approvals.html:81` `js`: ?
+- `app/templates/procurement_approvals.html:86` `js`: Nao informado
+- `app/templates/procurement_approvals.html:87` `js`: &amp;
+- `app/templates/procurement_approvals.html:88` `js`: &lt;
+- `app/templates/procurement_approvals.html:89` `js`: &gt;
+- `app/templates/procurement_approvals.html:90` `js`: &quot;
+- `app/templates/procurement_approvals.html:120` `js`: Registrar decisao
+- `app/templates/procurement_approvals.html:121` `js`: Gerar ordem de compra
+- `app/templates/procurement_approvals.html:122` `js`: Enviar ordem ao ERP
+- `app/templates/procurement_approvals.html:131` `html`: ${escapeHtml(message)}
+- `app/templates/procurement_approvals.html:132` `html`: ${escapeHtml(detail)}
+- `app/templates/procurement_approvals.html:142` `html`: Abrir mesa
+- `app/templates/procurement_approvals.html:147` `html`: Abrir OC
+- `app/templates/procurement_approvals.html:149` `html`: Abrir inbox
+- `app/templates/procurement_approvals.html:154` `js`: Sem itens para aprovar
+- `app/templates/procurement_approvals.html:156` `js`: Fila sem pendencias
+- `app/templates/procurement_approvals.html:157` `js`: Nao ha itens exigindo aprovacao neste momento
+- `app/templates/procurement_approvals.html:167` `html`: ${escapeHtml(item.ref || "Sem referencia")}
+- `app/templates/procurement_approvals.html:167` `js`: Sem referencia
+- `app/templates/procurement_approvals.html:168` `html`: ${escapeHtml(prettyType(item.type))}
+- `app/templates/procurement_approvals.html:169` `html`: ${escapeHtml(prettyStatus(item.status))}
+- `app/templates/procurement_approvals.html:170` `html`: ${escapeHtml(prettyPriority(item.priority))}
+- `app/templates/procurement_approvals.html:171` `html`: ${escapeHtml(item.age_days ?? 0)}
+- `app/templates/procurement_approvals.html:171` `js`: Idade em dias
+- `app/templates/procurement_approvals.html:172` `html`: ${escapeHtml(nextActionLabel(item))}
+- `app/templates/procurement_approvals.html:172` `js`: Proxima acao
+- `app/templates/procurement_approvals.html:173` `html`: ${renderActions(item)}
+- `app/templates/procurement_approvals.html:194` `js`: [data-kpi='awaiting_decision']
+- `app/templates/procurement_approvals.html:195` `js`: [data-kpi='awarded_waiting_po']
+- `app/templates/procurement_approvals.html:196` `js`: [data-kpi='awaiting_erp_push']
+- `app/templates/procurement_approvals.html:201` `js`: Falha ao carregar
+- `app/templates/procurement_approvals.html:203` `js`: Falha ao carregar fila
+- `app/templates/procurement_approvals.html:204` `js`: Atualize a pagina para tentar novamente
+- `app/templates/procurement_approvals.html:207` `js`: Nao foi possivel carregar a fila de aprovacoes
+
+#### `app/templates/procurement_cotacao.html`
+- `app/templates/procurement_cotacao.html:4` `block`: Cotacao {{ rfq_id }} | Plataforma Compras
+- `app/templates/procurement_cotacao.html:5` `block`: Mesa de cotacao e decisao
+- `app/templates/procurement_cotacao.html:10` `html`: Voltar para cotacoes
+- `app/templates/procurement_cotacao.html:11` `html`: Ir para decisao
+- `app/templates/procurement_cotacao.html:16` `html`: Proxima acao da mesa
+- `app/templates/procurement_cotacao.html:17` `html`: Aguardando dados
+- `app/templates/procurement_cotacao.html:20` `html`: Registrar decisao
+- `app/templates/procurement_cotacao.html:21` `html`: Revisar comparacao
+- `app/templates/procurement_cotacao.html:23` `html`: Use a comparacao para decidir e seguir para ordem de compra.
+- `app/templates/procurement_cotacao.html:29` `html`: Contexto da cotacao
+- `app/templates/procurement_cotacao.html:30` `html`: Atualizar dados
+- `app/templates/procurement_cotacao.html:37` `html`: Decisao de compra
+- `app/templates/procurement_cotacao.html:48` `html`: Motivo da decisao
+- `app/templates/procurement_cotacao.html:52` `html`: Foco da decisao
+- `app/templates/procurement_cotacao.html:54` `html`: Equilibrio geral
+- `app/templates/procurement_cotacao.html:55` `html`: Custo total
+- `app/templates/procurement_cotacao.html:56` `html`: Prazo de entrega
+- `app/templates/procurement_cotacao.html:57` `html`: Cobertura de itens
+- `app/templates/procurement_cotacao.html:58` `html`: Risco operacional
+- `app/templates/procurement_cotacao.html:62` `html`: Motivo sugerido por papel
+- `app/templates/procurement_cotacao.html:64` `html`: Selecionar motivo rapido
+- `app/templates/procurement_cotacao.html:73` `html`: Matriz de decisao para award
+- `app/templates/procurement_cotacao.html:82` `html`: Ordem de compra associada
+- `app/templates/procurement_cotacao.html:83` `html`: Nao gerada
+- `app/templates/procurement_cotacao.html:92` `html`: Cobertura por item e fornecedor
+- `app/templates/procurement_cotacao.html:93` `html`: Convide fornecedores e acompanhe propostas por item
+- `app/templates/procurement_cotacao.html:101` `html`: Melhor proposta
+- `app/templates/procurement_cotacao.html:102` `html`: Fornecedores convidados
+- `app/templates/procurement_cotacao.html:113` `html`: Convites de fornecedores
+- `app/templates/procurement_cotacao.html:114` `html`: Gerencie validade, reabertura e cancelamento de convite
+- `app/templates/procurement_cotacao.html:134` `html`: Painel comparativo da cotacao
+- `app/templates/procurement_cotacao.html:136` `html`: Modo executivo
+- `app/templates/procurement_cotacao.html:137` `html`: Ocultar detalhe tecnico
+- `app/templates/procurement_cotacao.html:138` `html`: Voltar ao topo
+- `app/templates/procurement_cotacao.html:145` `html`: Assistente de decisao por item
+- `app/templates/procurement_cotacao.html:146` `html`: Aguardando propostas
+- `app/templates/procurement_cotacao.html:152` `html`: Fornecedor recomendado
+- `app/templates/procurement_cotacao.html:153` `html`: Nao informado
+- `app/templates/procurement_cotacao.html:154` `html`: Sem dados
+- `app/templates/procurement_cotacao.html:157` `html`: Total recomendado
+- `app/templates/procurement_cotacao.html:159` `html`: Comparativo consolidado
+- `app/templates/procurement_cotacao.html:162` `html`: Economia potencial
+- `app/templates/procurement_cotacao.html:164` `html`: Vs fornecedor mais caro
+- `app/templates/procurement_cotacao.html:167` `html`: Risco de decisao
+- `app/templates/procurement_cotacao.html:169` `html`: Sem dados de risco
+- `app/templates/procurement_cotacao.html:180` `html`: Prazo medio e pior
+- `app/templates/procurement_cotacao.html:189` `html`: Ver detalhes tecnicos
+- `app/templates/procurement_cotacao.html:199` `html`: Registrar proposta por fornecedor convidado
+- `app/templates/procurement_cotacao.html:212` `html`: Preco unitario
+- `app/templates/procurement_cotacao.html:213` `html`: Prazo em dias
+- `app/templates/procurement_cotacao.html:220` `html`: Excluir proposta do fornecedor
+- `app/templates/procurement_cotacao.html:221` `html`: Salvar proposta
+- `app/templates/procurement_cotacao.html:229` `html`: Historico da cotacao
+- `app/templates/procurement_cotacao.html:236` `html`: Historico da decisao
+- `app/templates/procurement_cotacao.html:254` `js`: ?
+- `app/templates/procurement_cotacao.html:319` `js`: Nao informado
+- `app/templates/procurement_cotacao.html:320` `js`: &amp;
+- `app/templates/procurement_cotacao.html:321` `js`: &lt;
+- `app/templates/procurement_cotacao.html:322` `js`: &gt;
+- `app/templates/procurement_cotacao.html:323` `js`: &quot;
+- `app/templates/procurement_cotacao.html:360` `js`: Melhor equilibrio entre custo e prazo de entrega
+- `app/templates/procurement_cotacao.html:361` `js`: Fornecedor com melhor cobertura dos itens cotados
+- `app/templates/procurement_cotacao.html:362` `js`: Decisao orientada pelo comparativo consolidado
+- `app/templates/procurement_cotacao.html:365` `js`: Melhor equilibrio entre custo, prazo e cobertura
+- `app/templates/procurement_cotacao.html:366` `js`: Decisao alinhada com prioridade de negocio
+- `app/templates/procurement_cotacao.html:367` `js`: Risco operacional reduzido para o ciclo atual
+- `app/templates/procurement_cotacao.html:370` `js`: Justificativa validada com base na comparacao
+- `app/templates/procurement_cotacao.html:371` `js`: Decisao em conformidade com a politica de compras
+- `app/templates/procurement_cotacao.html:372` `js`: Risco e custo aprovados para emissao de ordem
+- `app/templates/procurement_cotacao.html:375` `js`: Conducao validada com trilha operacional
+- `app/templates/procurement_cotacao.html:376` `js`: Decisao homologada para continuidade do fluxo
+- `app/templates/procurement_cotacao.html:377` `js`: Aprovacao registrada com foco em risco e prazo
+- `app/templates/procurement_cotacao.html:382` `js`: Menor custo total para os itens cotados
+- `app/templates/procurement_cotacao.html:383` `js`: Melhor custo consolidado com cobertura suficiente
+- `app/templates/procurement_cotacao.html:384` `js`: Economia validada frente as demais propostas
+- `app/templates/procurement_cotacao.html:387` `js`: Decisao por custo total com risco controlado
+- `app/templates/procurement_cotacao.html:388` `js`: Melhor retorno financeiro para o ciclo atual
+- `app/templates/procurement_cotacao.html:389` `js`: Economia consolidada com cobertura adequada
+- `app/templates/procurement_cotacao.html:392` `js`: Custo validado com base no comparativo oficial
+- `app/templates/procurement_cotacao.html:393` `js`: Decisao aprovada por menor impacto financeiro
+- `app/templates/procurement_cotacao.html:394` `js`: Escolha aderente ao criterio de menor custo
+- `app/templates/procurement_cotacao.html:397` `js`: Registro homologado por criterio financeiro
+- `app/templates/procurement_cotacao.html:398` `js`: Escolha validada por custo total e governanca
+- `app/templates/procurement_cotacao.html:399` `js`: Aprovacao final orientada por economia
+- `app/templates/procurement_cotacao.html:404` `js`: Melhor prazo de entrega para itens criticos
+- `app/templates/procurement_cotacao.html:405` `js`: Lead time reduzido para atender necessidade
+- `app/templates/procurement_cotacao.html:406` `js`: Prazo priorizado para continuidade operacional
+- `app/templates/procurement_cotacao.html:409` `js`: Prazo priorizado para reduzir risco de parada
+- `app/templates/procurement_cotacao.html:410` `js`: Decisao orientada por tempo de atendimento
+- `app/templates/procurement_cotacao.html:411` `js`: Lead time alinhado com prioridade de negocio
+- `app/templates/procurement_cotacao.html:414` `js`: Prazo validado para atender necessidade operacional
+- `app/templates/procurement_cotacao.html:415` `js`: Decisao aprovada por risco de atraso reduzido
+- `app/templates/procurement_cotacao.html:416` `js`: Lead time em conformidade com a urgencia
+- `app/templates/procurement_cotacao.html:419` `js`: Escolha homologada por prazo critico
+- `app/templates/procurement_cotacao.html:420` `js`: Decisao final orientada por lead time
+- `app/templates/procurement_cotacao.html:421` `js`: Registro aprovado para acelerar atendimento
+- `app/templates/procurement_cotacao.html:426` `js`: Fornecedor com maior cobertura dos itens cotados
+- `app/templates/procurement_cotacao.html:427` `js`: Cobertura priorizada para reduzir fragmentacao
+- `app/templates/procurement_cotacao.html:428` `js`: Escolha orientada por abrangencia da proposta
+- `app/templates/procurement_cotacao.html:431` `js`: Cobertura consolidada para simplificar operacao
+- `app/templates/procurement_cotacao.html:432` `js`: Decisao por maior abrangencia com custo viavel
+- `app/templates/procurement_cotacao.html:433` `js`: Fornecedor com melhor aderencia ao escopo
+- `app/templates/procurement_cotacao.html:436` `js`: Cobertura validada para continuidade do fluxo
+- `app/templates/procurement_cotacao.html:437` `js`: Aprovacao com foco em abrangencia de atendimento
+- `app/templates/procurement_cotacao.html:438` `js`: Decisao conforme escopo total da cotacao
+- `app/templates/procurement_cotacao.html:441` `js`: Homologacao por cobertura e conformidade
+- `app/templates/procurement_cotacao.html:442` `js`: Registro final por maior aderencia ao escopo
+- `app/templates/procurement_cotacao.html:443` `js`: Escolha aprovada para reduzir gaps operacionais
+- `app/templates/procurement_cotacao.html:448` `js`: Menor risco operacional considerando historico
+- `app/templates/procurement_cotacao.html:449` `js`: Escolha com menor exposicao a atraso
+- `app/templates/procurement_cotacao.html:450` `js`: Fornecedor com resposta mais confiavel
+- `app/templates/procurement_cotacao.html:454` `js`: Decisao com foco em continuidade e previsibilidade
+- `app/templates/procurement_cotacao.html:455` `js`: Escolha orientada por menor risco de ruptura
+- `app/templates/procurement_cotacao.html:458` `js`: Risco avaliado e aprovado para emissao de ordem
+- `app/templates/procurement_cotacao.html:459` `js`: Decisao em conformidade com diretriz de risco
+- `app/templates/procurement_cotacao.html:460` `js`: Aprovacao registrada por menor exposicao
+- `app/templates/procurement_cotacao.html:463` `js`: Homologacao por criterio de risco e controle
+- `app/templates/procurement_cotacao.html:464` `js`: Registro final com foco em estabilidade operacional
+- `app/templates/procurement_cotacao.html:465` `js`: Escolha aprovada por menor criticidade
+- `app/templates/procurement_cotacao.html:479` `html`: ${escapeHtml(reason)}
+- `app/templates/procurement_cotacao.html:485` `html`: ${escapeHtml(k)}
+- `app/templates/procurement_cotacao.html:485` `html`: ${escapeHtml(v)}
+- `app/templates/procurement_cotacao.html:494` `html`: ${escapeHtml(message)}
+- `app/templates/procurement_cotacao.html:495` `html`: ${escapeHtml(detail)}
+- `app/templates/procurement_cotacao.html:504` `html`: ${escapeHtml(vazioLabel)}
+- `app/templates/procurement_cotacao.html:511` `html`: ${escapeHtml(prettyStatus(e.to_status))}
+- `app/templates/procurement_cotacao.html:512` `html`: ${escapeHtml(e.occurred_at)}
+- `app/templates/procurement_cotacao.html:513` `html`: de ${escapeHtml(e.from_status || "Nao informado")}, motivo ${escapeHtml(e.reason || "Nao informado")}
+- `app/templates/procurement_cotacao.html:521` `js`: Sem proposta
+- `app/templates/procurement_cotacao.html:540` `js`: Mostrar visao tecnica
+- `app/templates/procurement_cotacao.html:541` `js`: Ocultar visao tecnica
+- `app/templates/procurement_cotacao.html:563` `js`: Sem dados de fornecedores
+- `app/templates/procurement_cotacao.html:567` `js`: Sem dados de risco
+- `app/templates/procurement_cotacao.html:615` `js`: SLA em risco, revisar decisao
+- `app/templates/procurement_cotacao.html:618` `js`: Sem alertas relevantes
+- `app/templates/procurement_cotacao.html:642` `html`: ${index + 1}. ${escapeHtml(item.supplier_name || \`Fornecedor ${item.supplier_id}\`)}
+- `app/templates/procurement_cotacao.html:654` `js`: dias desde abertura
+- `app/templates/procurement_cotacao.html:655` `js`: idade indisponivel
+- `app/templates/procurement_cotacao.html:659` `js`: sem propostas registradas
+- `app/templates/procurement_cotacao.html:660` `js`: SLA desativado
+- `app/templates/procurement_cotacao.html:664` `js`: sem dados
+- `app/templates/procurement_cotacao.html:668` `js`: <span class="pill danger">Risco SLA</span>
+- `app/templates/procurement_cotacao.html:668` `html`: Risco SLA
+- `app/templates/procurement_cotacao.html:669` `js`: <span class="pill success">SLA ok</span>
+- `app/templates/procurement_cotacao.html:669` `html`: SLA ok
+- `app/templates/procurement_cotacao.html:670` `js`: <span class="pill">SLA desativado</span>
+- `app/templates/procurement_cotacao.html:670` `html`: SLA desativado
+- `app/templates/procurement_cotacao.html:672` `html`: ${lastSource}
+- `app/templates/procurement_cotacao.html:672` `html`: ${startSource}
+- `app/templates/procurement_cotacao.html:672` `html`: • ${lastQuote}
+- `app/templates/procurement_cotacao.html:677` `js`: Sem dados de propostas para comparar.
+- `app/templates/procurement_cotacao.html:679` `js`: Sem propostas registradas
+- `app/templates/procurement_cotacao.html:680` `js`: Registre propostas para habilitar o comparativo
+- `app/templates/procurement_cotacao.html:688` `html`: Sem itens para analise
+- `app/templates/procurement_cotacao.html:689` `html`: Registre propostas para habilitar o assistente de decisao.
+- `app/templates/procurement_cotacao.html:694` `js`: Sem analise
+- `app/templates/procurement_cotacao.html:705` `js`: Sem sugestao
+- `app/templates/procurement_cotacao.html:707` `js`: Sem propostas cadastradas para comparacao.
+- `app/templates/procurement_cotacao.html:708` `js`: Use o assistente por item para validar preco e prazo antes da decisao final.
+- `app/templates/procurement_cotacao.html:715` `js`: Melhor opcao geral considera total consolidado com cobertura completa. A melhor opcao por item pode ser diferente.
+- `app/templates/procurement_cotacao.html:717` `js`: Sem recomendacao geral, cobertura incompleta.
+- `app/templates/procurement_cotacao.html:718` `js`: Nenhum fornecedor cobre todos os itens. A decisao deve considerar sugestoes por item.
+- `app/templates/procurement_cotacao.html:722` `html`: ${escapeHtml(suggestionLabel)}
+- `app/templates/procurement_cotacao.html:723` `html`: ${escapeHtml(decisionScopeHint)}
+- `app/templates/procurement_cotacao.html:724` `html`: ${renderSlaResumo(summary)}
+- `app/templates/procurement_cotacao.html:731` `js`: Ainda nao ha fornecedores com proposta valida
+- `app/templates/procurement_cotacao.html:738` `js`: <span class="pill success">Melhor opcao geral</span>
+- `app/templates/procurement_cotacao.html:738` `html`: Melhor opcao geral
+- `app/templates/procurement_cotacao.html:743` `js`: <span class="flag warning">Atraso historico</span>
+- `app/templates/procurement_cotacao.html:743` `html`: Atraso historico
+- `app/templates/procurement_cotacao.html:744` `js`: <span class="flag danger">Sem resposta</span>
+- `app/templates/procurement_cotacao.html:744` `html`: Sem resposta
+- `app/templates/procurement_cotacao.html:745` `html`: ${flags.join("")}
+- `app/templates/procurement_cotacao.html:750` `html`: ${escapeHtml(t.supplier_name || \`Fornecedor ${t.supplier_id}\`)}
+- `app/templates/procurement_cotacao.html:753` `html`: ${formatCurrency(t.total_amount)}
+- `app/templates/procurement_cotacao.html:754` `html`: ${escapeHtml(prazoMedio)}${prazoPior ? \`
+- `app/templates/procurement_cotacao.html:754` `html`: ${escapeHtml(prazoPior)}
+- `app/templates/procurement_cotacao.html:755` `html`: ${escapeHtml(cobertura)}
+- `app/templates/procurement_cotacao.html:756` `html`: ${destaque}
+- `app/templates/procurement_cotacao.html:768` `html`: Total ${formatCurrency(t.total_amount)}, cobertura ${t.items_quoted}/${t.items_total}
+- `app/templates/procurement_cotacao.html:783` `html`: ${escapeHtml(item.description || "Item")}
+- `app/templates/procurement_cotacao.html:784` `html`: Sem propostas registradas
+- `app/templates/procurement_cotacao.html:795` `js`: menor preco
+- `app/templates/procurement_cotacao.html:796` `js`: menor prazo
+- `app/templates/procurement_cotacao.html:797` `html`: ${escapeHtml(badges.join(" • "))}
+- `app/templates/procurement_cotacao.html:797` `js`: pill warning
+- `app/templates/procurement_cotacao.html:800` `html`: ${escapeHtml(q.supplier_name)}
+- `app/templates/procurement_cotacao.html:801` `html`: Total ${escapeHtml(total)}
+- `app/templates/procurement_cotacao.html:802` `html`: Preco unitario ${escapeHtml(price)}
+- `app/templates/procurement_cotacao.html:803` `html`: Prazo ${escapeHtml(prazo)}
+- `app/templates/procurement_cotacao.html:813` `html`: Sugestao ${escapeHtml(item.suggestion_reason || "Nao informado")}
+- `app/templates/procurement_cotacao.html:814` `html`: ${lines}
+- `app/templates/procurement_cotacao.html:823` `js`: Sem itens nesta cotacao
+- `app/templates/procurement_cotacao.html:824` `js`: Volte para a inbox e crie uma cotacao com itens selecionados
+- `app/templates/procurement_cotacao.html:839` `js`: sem preco
+- `app/templates/procurement_cotacao.html:844` `js`: Nenhum convidado
+- `app/templates/procurement_cotacao.html:849` `html`: ${escapeHtml(f.name)}
+- `app/templates/procurement_cotacao.html:855` `html`: ${opcoes}
+- `app/templates/procurement_cotacao.html:855` `js`: min-width: 180px
+- `app/templates/procurement_cotacao.html:859` `js`: <span class="meta">Todos convidados</span>
+- `app/templates/procurement_cotacao.html:859` `html`: Todos convidados
+- `app/templates/procurement_cotacao.html:862` `js`: <span class="meta">Sem fornecedores cadastrados</span>
+- `app/templates/procurement_cotacao.html:862` `html`: Sem fornecedores cadastrados
+- `app/templates/procurement_cotacao.html:865` `js`: <span class="meta">Leitura por perfil</span>
+- `app/templates/procurement_cotacao.html:865` `html`: Leitura por perfil
+- `app/templates/procurement_cotacao.html:870` `html`: ${escapeHtml(item.descricao)}
+- `app/templates/procurement_cotacao.html:871` `html`: ${escapeHtml(item.quantidade)} ${escapeHtml(item.uom)}
+- `app/templates/procurement_cotacao.html:872` `html`: ${escapeHtml(formatMelhorProposta(item.melhor_proposta))}
+- `app/templates/procurement_cotacao.html:872` `js`: Melhor proposta
+- `app/templates/procurement_cotacao.html:873` `html`: ${escapeHtml(fornecedoresTxt)}
+- `app/templates/procurement_cotacao.html:873` `js`: Fornecedores convidados
+- `app/templates/procurement_cotacao.html:874` `html`: ${convidarControl}
+- `app/templates/procurement_cotacao.html:887` `js`: Modo executivo ativo
+- `app/templates/procurement_cotacao.html:888` `js`: Registro de proposta indisponivel para este perfil
+- `app/templates/procurement_cotacao.html:903` `js`: Selecione um fornecedor
+- `app/templates/procurement_cotacao.html:904` `js`: Escolha o fornecedor para preencher os itens convidados
+- `app/templates/procurement_cotacao.html:912` `js`: Fornecedor sem itens convidados
+- `app/templates/procurement_cotacao.html:913` `js`: Convide este fornecedor em ao menos um item para registrar proposta
+- `app/templates/procurement_cotacao.html:936` `js`: Preco unitario
+- `app/templates/procurement_cotacao.html:939` `js`: Prazo em dias
+- `app/templates/procurement_cotacao.html:952` `js`: Sem convites ativos
+- `app/templates/procurement_cotacao.html:953` `js`: Convide fornecedores para receber propostas pela plataforma
+- `app/templates/procurement_cotacao.html:964` `html`: ${escapeHtml(invite.supplier_name || \`Fornecedor ${invite.supplier_id}\`)}
+- `app/templates/procurement_cotacao.html:965` `html`: ${escapeHtml(invite.supplier_email || "-")}
+- `app/templates/procurement_cotacao.html:966` `html`: ${escapeHtml(statusLabelText)}
+- `app/templates/procurement_cotacao.html:967` `html`: ${escapeHtml(invite.expires_at || "-")}
+- `app/templates/procurement_cotacao.html:972` `html`: +7 dias
+- `app/templates/procurement_cotacao.html:981` `js`: [data-invite-action]
+- `app/templates/procurement_cotacao.html:1052` `js`: ") === String(bestLead.supplier_id ||
+- `app/templates/procurement_cotacao.html:1087` `js`: badge warning
+- `app/templates/procurement_cotacao.html:1090` `js`: badge success
+- `app/templates/procurement_cotacao.html:1094` `js`: Sem analise consolidada
+- `app/templates/procurement_cotacao.html:1102` `js`: list-item decision-card
+- `app/templates/procurement_cotacao.html:1104` `html`: ${itemName}
+- `app/templates/procurement_cotacao.html:1105` `html`: Sem proposta
+- `app/templates/procurement_cotacao.html:1107` `html`: Nao ha proposta registrada para este item.
+- `app/templates/procurement_cotacao.html:1132` `js`: Convergencia preco e prazo
+- `app/templates/procurement_cotacao.html:1132` `js`: Trade off preco e prazo
+- `app/templates/procurement_cotacao.html:1142` `html`: ${decisionLabel}
+- `app/templates/procurement_cotacao.html:1145` `html`: Fornecedor sugerido
+- `app/templates/procurement_cotacao.html:1148` `html`: Menor preco ${bestPriceName}, ${bestPriceValue}
+- `app/templates/procurement_cotacao.html:1149` `html`: Menor prazo ${bestLeadName}, ${bestLeadValue}
+- `app/templates/procurement_cotacao.html:1151` `html`: ${escapeHtml(explanation)} ${escapeHtml(analysis.item.suggestion_reason || "")}
+- `app/templates/procurement_cotacao.html:1159` `html`: Itens sem proposta: ${escapeHtml(missingCount)}
+- `app/templates/procurement_cotacao.html:1170` `js`: Sem dados
+- `app/templates/procurement_cotacao.html:1173` `html`: Sem matriz de decisao
+- `app/templates/procurement_cotacao.html:1174` `html`: Registre propostas para formar recomendacao por item.
+- `app/templates/procurement_cotacao.html:1188` `js`: Sem recomendacao completa
+- `app/templates/procurement_cotacao.html:1191` `js`: A matriz compara item a item. Use esta visao para validar a decisao final.
+- `app/templates/procurement_cotacao.html:1193` `js`: Existe trade off entre preco e prazo. O melhor fornecedor geral pode diferir do melhor fornecedor por item.
+- `app/templates/procurement_cotacao.html:1195` `js`: Existem itens sem proposta. O resultado geral pode mudar quando a cobertura estiver completa.
+- `app/templates/procurement_cotacao.html:1199` `html`: ${escapeHtml(matrixHint)}
+- `app/templates/procurement_cotacao.html:1210` `html`: Sem proposta registrada para este item.
+- `app/templates/procurement_cotacao.html:1226` `js`: Trade off
+- `app/templates/procurement_cotacao.html:1235` `html`: ${recommendedName}
+- `app/templates/procurement_cotacao.html:1236` `html`: ${recommendedTotal}
+- `app/templates/procurement_cotacao.html:1236` `html`: Total sugerido
+- `app/templates/procurement_cotacao.html:1237` `html`: ${bestPriceName}
+- `app/templates/procurement_cotacao.html:1237` `html`: Melhor preco
+- `app/templates/procurement_cotacao.html:1238` `html`: ${bestLeadName}
+- `app/templates/procurement_cotacao.html:1238` `html`: Melhor prazo
+- `app/templates/procurement_cotacao.html:1251` `js`: [data-invite-btn]
+- `app/templates/procurement_cotacao.html:1265` `js`: <option value="">Modo executivo</option>
+- `app/templates/procurement_cotacao.html:1268` `js`: Somente leitura
+- `app/templates/procurement_cotacao.html:1281` `js`: <option value="">Sem fornecedores cadastrados</option>
+- `app/templates/procurement_cotacao.html:1284` `js`: Sem fornecedores
+- `app/templates/procurement_cotacao.html:1286` `js`: Excluir proposta do fornecedor
+- `app/templates/procurement_cotacao.html:1293` `js`: <option value="">Convide um fornecedor primeiro</option>
+- `app/templates/procurement_cotacao.html:1293` `html`: Convide um fornecedor primeiro
+- `app/templates/procurement_cotacao.html:1296` `js`: Convide fornecedores
+- `app/templates/procurement_cotacao.html:1304` `js`: Salvar proposta
+- `app/templates/procurement_cotacao.html:1316` `js`: Ainda nao gerada
+- `app/templates/procurement_cotacao.html:1316` `js`: Proximo passo
+- `app/templates/procurement_cotacao.html:1316` `js`: Registrar decisao
+- `app/templates/procurement_cotacao.html:1318` `js`: Nao gerada
+- `app/templates/procurement_cotacao.html:1326` `js`: ID externo
+- `app/templates/procurement_cotacao.html:1332` `html`: Abrir OC
+- `app/templates/procurement_cotacao.html:1335` `html`: Enviar ao ERP
+- `app/templates/procurement_cotacao.html:1336` `html`: ERP aceito
+- `app/templates/procurement_cotacao.html:1355` `js`: Aguardando decisao
+- `app/templates/procurement_cotacao.html:1356` `js`: Preencha fornecedor e motivo para registrar a decisao.
+- `app/templates/procurement_cotacao.html:1361` `js`: Gerar ordem de compra
+- `app/templates/procurement_cotacao.html:1362` `js`: A decisao foi registrada, agora gere a ordem de compra na secao de decisao.
+- `app/templates/procurement_cotacao.html:1369` `js`: Enviar ao ERP
+- `app/templates/procurement_cotacao.html:1370` `js`: A ordem foi gerada, confirme o envio ao ERP para concluir o fluxo.
+- `app/templates/procurement_cotacao.html:1371` `js`: Enviar OC ao ERP
+- `app/templates/procurement_cotacao.html:1377` `js`: Fluxo concluido
+- `app/templates/procurement_cotacao.html:1378` `js`: Decisao e ordem de compra finalizadas com retorno ERP aceito.
+- `app/templates/procurement_cotacao.html:1379` `js`: Abrir ordem de compra
+- `app/templates/procurement_cotacao.html:1396` `js`: Sem decisao registrada ainda.
+- `app/templates/procurement_cotacao.html:1403` `js`: Preencha abaixo para decidir
+- `app/templates/procurement_cotacao.html:1418` `js`: Decisao registrada e convertida em ordem de compra.
+- `app/templates/procurement_cotacao.html:1420` `js`: Decisao registrada. Proximo passo, gerar a OC.
+- `app/templates/procurement_cotacao.html:1440` `js`: Criada em
+- `app/templates/procurement_cotacao.html:1441` `js`: Atualizada em
+- `app/templates/procurement_cotacao.html:1452` `js`: menor total
+- `app/templates/procurement_cotacao.html:1471` `html`: Erro: ${escapeHtml(cotacaoData.message || cotacaoData.error || "desconhecido")}
+- `app/templates/procurement_cotacao.html:1497` `js`: Sem eventos da cotacao.
+- `app/templates/procurement_cotacao.html:1498` `js`: Sem eventos da decisao.
+- `app/templates/procurement_cotacao.html:1505` `js`: application/json
+- `app/templates/procurement_cotacao.html:1551` `js`: motivo nao informado
+- `app/templates/procurement_cotacao.html:1554` `js`: Decisao registrada com sucesso
+- `app/templates/procurement_cotacao.html:1562` `js`: Deseja enviar esta ordem de compra ao ERP agora?
+- `app/templates/procurement_cotacao.html:1565` `js`: Ordem enviada ao ERP com sucesso
+- `app/templates/procurement_cotacao.html:1579` `js`: Selecione um fornecedor convidado para esta cotacao
+- `app/templates/procurement_cotacao.html:1603` `js`: Informe ao menos um preco unitario para registrar a proposta
+- `app/templates/procurement_cotacao.html:1617` `js`: nao informado
+- `app/templates/procurement_cotacao.html:1628` `js`: Proposta registrada com sucesso
+- `app/templates/procurement_cotacao.html:1638` `js`: Deseja excluir a proposta deste fornecedor?
+- `app/templates/procurement_cotacao.html:1650` `js`: Proposta excluida com sucesso
+
+#### `app/templates/procurement_cotacao_abertura.html`
+- `app/templates/procurement_cotacao_abertura.html:3` `block`: Abrir cotacao | Plataforma Compras
+- `app/templates/procurement_cotacao_abertura.html:4` `block`: Abertura de cotacao
+- `app/templates/procurement_cotacao_abertura.html:6` `html`: Abrir cotacao
+- `app/templates/procurement_cotacao_abertura.html:10` `html`: Ver solicitacoes
+- `app/templates/procurement_cotacao_abertura.html:11` `html`: Ver cotacoes
+- `app/templates/procurement_cotacao_abertura.html:17` `html`: Fluxo de abertura
+- `app/templates/procurement_cotacao_abertura.html:18` `html`: Selecione itens e fornecedores
+- `app/templates/procurement_cotacao_abertura.html:28` `html`: Itens das solicitacoes
+- `app/templates/procurement_cotacao_abertura.html:29` `html`: Carregando itens
+- `app/templates/procurement_cotacao_abertura.html:36` `html`: Fornecedores para convite
+- `app/templates/procurement_cotacao_abertura.html:37` `html`: Carregando fornecedores
+- `app/templates/procurement_cotacao_abertura.html:47` `html`: Titulo da cotacao
+- `app/templates/procurement_cotacao_abertura.html:51` `html`: Itens selecionados
+- `app/templates/procurement_cotacao_abertura.html:55` `html`: Fornecedores selecionados
+- `app/templates/procurement_cotacao_abertura.html:60` `html`: Abrir cotacao e gerar convites
+- `app/templates/procurement_cotacao_abertura.html:67` `html`: Convites de fornecedor
+- `app/templates/procurement_cotacao_abertura.html:68` `html`: Convites gerados
+- `app/templates/procurement_cotacao_abertura.html:86` `html`: Abrir mesa da cotacao
+- `app/templates/procurement_cotacao_abertura.html:87` `html`: Voltar para cotacoes
+- `app/templates/procurement_cotacao_abertura.html:118` `js`: ?
+- `app/templates/procurement_cotacao_abertura.html:123` `js`: Nao informado
+- `app/templates/procurement_cotacao_abertura.html:124` `js`: &amp;
+- `app/templates/procurement_cotacao_abertura.html:125` `js`: &lt;
+- `app/templates/procurement_cotacao_abertura.html:126` `js`: &gt;
+- `app/templates/procurement_cotacao_abertura.html:127` `js`: &quot;
+- `app/templates/procurement_cotacao_abertura.html:140` `html`: Sem itens pendentes para cotacao
+- `app/templates/procurement_cotacao_abertura.html:141` `html`: Verifique se o ERP enviou solicitacoes com status pendente
+- `app/templates/procurement_cotacao_abertura.html:144` `js`: Nenhum item aberto
+- `app/templates/procurement_cotacao_abertura.html:158` `html`: ${escapeHtml(item.description)}
+- `app/templates/procurement_cotacao_abertura.html:159` `html`: ${escapeHtml(item.quantity)} ${escapeHtml(item.uom)} | linha ${escapeHtml(item.line_no || "-")}
+- `app/templates/procurement_cotacao_abertura.html:167` `html`: ${escapeHtml(header)}
+- `app/templates/procurement_cotacao_abertura.html:168` `html`: Solicitante ${escapeHtml(group.requested_by || "-")} | ${escapeHtml(group.department || "-")}
+- `app/templates/procurement_cotacao_abertura.html:169` `html`: ${items}
+- `app/templates/procurement_cotacao_abertura.html:169` `js`: margin-top: 10px
+- `app/templates/procurement_cotacao_abertura.html:175` `js`: [data-item-checkbox]
+- `app/templates/procurement_cotacao_abertura.html:189` `html`: Sem fornecedores cadastrados
+- `app/templates/procurement_cotacao_abertura.html:190` `html`: Cadastre fornecedores para iniciar convites
+- `app/templates/procurement_cotacao_abertura.html:193` `js`: Nenhum fornecedor
+- `app/templates/procurement_cotacao_abertura.html:203` `html`: ${escapeHtml(supplier.name)}
+- `app/templates/procurement_cotacao_abertura.html:204` `html`: ${escapeHtml(supplier.email || "sem email cadastrado")}
+- `app/templates/procurement_cotacao_abertura.html:204` `js`: sem email cadastrado
+- `app/templates/procurement_cotacao_abertura.html:211` `js`: [data-supplier-checkbox]
+- `app/templates/procurement_cotacao_abertura.html:228` `html`: ${escapeHtml(invite.supplier_name)}
+- `app/templates/procurement_cotacao_abertura.html:229` `html`: ${escapeHtml(invite.supplier_email || "-")}
+- `app/templates/procurement_cotacao_abertura.html:230` `html`: ${escapeHtml(invite.expires_at || "-")}
+- `app/templates/procurement_cotacao_abertura.html:231` `html`: Abrir portal
+- `app/templates/procurement_cotacao_abertura.html:234` `html`: Enviar email
+- `app/templates/procurement_cotacao_abertura.html:235` `html`: Copiar link
+- `app/templates/procurement_cotacao_abertura.html:243` `js`: [data-copy-link]
+- `app/templates/procurement_cotacao_abertura.html:248` `js`: Link copiado
+- `app/templates/procurement_cotacao_abertura.html:250` `js`: Nao foi possivel copiar o link
+- `app/templates/procurement_cotacao_abertura.html:257` `js`: Atualizando itens
+- `app/templates/procurement_cotacao_abertura.html:258` `js`: Atualizando fornecedores
+- `app/templates/procurement_cotacao_abertura.html:273` `js`: Falha ao carregar
+- `app/templates/procurement_cotacao_abertura.html:275` `html`: Falha ao carregar itens
+- `app/templates/procurement_cotacao_abertura.html:276` `html`: Falha ao carregar fornecedores
+- `app/templates/procurement_cotacao_abertura.html:277` `js`: Nao foi possivel carregar dados de abertura
+- `app/templates/procurement_cotacao_abertura.html:284` `js`: Selecione ao menos um item
+- `app/templates/procurement_cotacao_abertura.html:288` `js`: Selecione ao menos um fornecedor
+- `app/templates/procurement_cotacao_abertura.html:292` `js`: Abrindo cotacao
+- `app/templates/procurement_cotacao_abertura.html:292` `js`: Abrir cotacao e gerar convites
+- `app/templates/procurement_cotacao_abertura.html:298` `js`: application/json
+- `app/templates/procurement_cotacao_abertura.html:300` `js`: Cotacao aberta
+- `app/templates/procurement_cotacao_abertura.html:311` `js`: Cotacao criada e convites gerados
+
+#### `app/templates/procurement_cotacoes.html`
+- `app/templates/procurement_cotacoes.html:3` `block`: Cotacoes | Plataforma Compras
+- `app/templates/procurement_cotacoes.html:11` `html`: Nova cotacao
+- `app/templates/procurement_cotacoes.html:19` `html`: Em coleta com fornecedores
+- `app/templates/procurement_cotacoes.html:22` `html`: Coletando propostas
+- `app/templates/procurement_cotacoes.html:24` `html`: Com convites e respostas em andamento
+- `app/templates/procurement_cotacoes.html:27` `html`: Com decisao
+- `app/templates/procurement_cotacoes.html:29` `html`: Prontas para ordem de compra
+- `app/templates/procurement_cotacoes.html:34` `html`: Encerradas sem compra
+- `app/templates/procurement_cotacoes.html:40` `html`: Painel de cotacoes
+- `app/templates/procurement_cotacoes.html:41` `html`: Carregando cotacoes
+- `app/templates/procurement_cotacoes.html:45` `html`: Todos os status
+- `app/templates/procurement_cotacoes.html:53` `attr:placeholder`: Buscar por titulo
+- `app/templates/procurement_cotacoes.html:54` `html`: Aplicar filtros
+- `app/templates/procurement_cotacoes.html:55` `html`: Abrir cotacao
+- `app/templates/procurement_cotacoes.html:77` `html`: Atualizar cotacao
+- `app/templates/procurement_cotacoes.html:99` `html`: Salvar cotacao
+- `app/templates/procurement_cotacoes.html:126` `js`: ", title:
+- `app/templates/procurement_cotacoes.html:131` `js`: ?
+- `app/templates/procurement_cotacoes.html:137` `js`: &amp;
+- `app/templates/procurement_cotacoes.html:138` `js`: &lt;
+- `app/templates/procurement_cotacoes.html:139` `js`: &gt;
+- `app/templates/procurement_cotacoes.html:140` `js`: &quot;
+- `app/templates/procurement_cotacoes.html:145` `js`: Nao informado
+- `app/templates/procurement_cotacoes.html:153` `html`: ${escapeHtml(message)}
+- `app/templates/procurement_cotacoes.html:154` `html`: Abra uma cotacao a partir das solicitacoes para iniciar a negociacao
+- `app/templates/procurement_cotacoes.html:176` `js`: Sem cotacoes para o filtro atual
+- `app/templates/procurement_cotacoes.html:177` `js`: Nenhuma cotacao encontrada
+- `app/templates/procurement_cotacoes.html:185` `html`: ${escapeHtml(item.title || \`Cotacao ${item.id}\`)}
+- `app/templates/procurement_cotacoes.html:185` `html`: ID ${item.id}
+- `app/templates/procurement_cotacoes.html:186` `html`: ${escapeHtml(statusLabel(item.status))}
+- `app/templates/procurement_cotacoes.html:187` `html`: ${escapeHtml(item.item_count ?? 0)}
+- `app/templates/procurement_cotacoes.html:188` `html`: ${escapeHtml(item.supplier_count ?? 0)}
+- `app/templates/procurement_cotacoes.html:189` `html`: ${escapeHtml(item.updated_at || "-")}
+- `app/templates/procurement_cotacoes.html:201` `js`: [data-edit-rfq]
+- `app/templates/procurement_cotacoes.html:205` `js`: [data-cancel-rfq]
+- `app/templates/procurement_cotacoes.html:235` `js`: Confirmar cancelamento da cotacao?
+- `app/templates/procurement_cotacoes.html:240` `js`: Cotacao cancelada
+- `app/templates/procurement_cotacoes.html:263` `js`: Falha ao carregar
+- `app/templates/procurement_cotacoes.html:264` `js`: Falha ao carregar cotacoes
+- `app/templates/procurement_cotacoes.html:265` `js`: Nao foi possivel carregar cotacoes
+- `app/templates/procurement_cotacoes.html:293` `js`: Salvar cotacao
+- `app/templates/procurement_cotacoes.html:301` `js`: application/json
+- `app/templates/procurement_cotacoes.html:306` `js`: Cotacao atualizada
+
+#### `app/templates/procurement_home.html`
+- `app/templates/procurement_home.html:4` `block`: Dashboard | Plataforma Compras
+- `app/templates/procurement_home.html:11` `html`: Abrir aprovacoes
+- `app/templates/procurement_home.html:12` `html`: Abrir cotacoes
+- `app/templates/procurement_home.html:15` `html`: Abrir trilha
+- `app/templates/procurement_home.html:17` `html`: Abrir inbox
+- `app/templates/procurement_home.html:18` `html`: Abrir integracoes
+- `app/templates/procurement_home.html:27` `html`: Proxima acao recomendada
+- `app/templates/procurement_home.html:32` `html`: Priorizar aprovacoes
+- `app/templates/procurement_home.html:34` `html`: Priorizar decisoes
+- `app/templates/procurement_home.html:36` `html`: Revisar integracoes
+- `app/templates/procurement_home.html:38` `html`: Conduzir cotacoes
+- `app/templates/procurement_home.html:57` `html`: Contexto do papel
+- `app/templates/procurement_home.html:61` `html`: Priorize decisoes de cotacao, geracao de ordem e envio ao ERP.
+- `app/templates/procurement_home.html:63` `html`: Conduza decisoes criticas, reduza risco e mantenha ritmo operacional.
+- `app/templates/procurement_home.html:65` `html`: Acompanhe operacao, trilha e integracoes por workspace.
+- `app/templates/procurement_home.html:67` `html`: Conduza solicitacoes, cotacoes, decisoes e ordens de compra.
+- `app/templates/procurement_home.html:73` `html`: Aguardando cotacoes
+- `app/templates/procurement_home.html:75` `html`: Cotacoes abertas para receber propostas
+- `app/templates/procurement_home.html:78` `html`: Pendentes de cotacao
+- `app/templates/procurement_home.html:80` `html`: Solicitacoes prontas para iniciar cotacao
+- `app/templates/procurement_home.html:83` `html`: Decisao sem OC
+- `app/templates/procurement_home.html:85` `html`: Cotacoes decididas sem ordem de compra
+- `app/templates/procurement_home.html:88` `html`: OC pendente ERP
+- `app/templates/procurement_home.html:90` `html`: Ordens que ainda exigem envio ou retorno ERP
+- `app/templates/procurement_home.html:96` `html`: Painel executivo por papel
+- `app/templates/procurement_home.html:99` `html`: Carregando foco operacional
+- `app/templates/procurement_home.html:109` `html`: Filtros rapidos
+- `app/templates/procurement_home.html:110` `html`: Abrir inbox com contexto pronto
+- `app/templates/procurement_home.html:114` `html`: Todos os tipos
+- `app/templates/procurement_home.html:117` `html`: Ordem de compra
+- `app/templates/procurement_home.html:120` `html`: Todos os status
+- `app/templates/procurement_home.html:121` `html`: Pendente de cotacao
+- `app/templates/procurement_home.html:122` `html`: Em cotacao
+- `app/templates/procurement_home.html:123` `html`: Cotacao aberta
+- `app/templates/procurement_home.html:124` `html`: Coletando propostas
+- `app/templates/procurement_home.html:125` `html`: Com decisao
+- `app/templates/procurement_home.html:126` `html`: OC rascunho
+- `app/templates/procurement_home.html:127` `html`: OC aprovada
+- `app/templates/procurement_home.html:128` `html`: OC enviada ao ERP
+- `app/templates/procurement_home.html:129` `html`: Falha no ERP
+- `app/templates/procurement_home.html:132` `html`: Todas as prioridades
+- `app/templates/procurement_home.html:138` `attr:placeholder`: Referencia ou termo
+- `app/templates/procurement_home.html:141` `html`: Abrir inbox filtrada
+- `app/templates/procurement_home.html:142` `html`: Limpar filtros
+- `app/templates/procurement_home.html:149` `html`: Pendencias prioritarias
+- `app/templates/procurement_home.html:150` `html`: Carregando dados
+- `app/templates/procurement_home.html:153` `html`: Carregando pendencias
+- `app/templates/procurement_home.html:161` `html`: Proximas acoes
+- `app/templates/procurement_home.html:173` `html`: Acompanhar execucoes, falhas e retries
+- `app/templates/procurement_home.html:177` `html`: Capturar solicitacoes
+- `app/templates/procurement_home.html:178` `html`: Separar itens prontos para abertura de cotacao
+- `app/templates/procurement_home.html:181` `html`: Executar cotacoes
+- `app/templates/procurement_home.html:182` `html`: Selecionar itens e convidar fornecedores com link
+- `app/templates/procurement_home.html:185` `html`: Registrar decisoes
+- `app/templates/procurement_home.html:186` `html`: Definir fornecedor e gerar ordem de compra
+- `app/templates/procurement_home.html:189` `html`: Revisar governanca
+- `app/templates/procurement_home.html:190` `html`: Conferir trilha de status e evidencias operacionais
+- `app/templates/procurement_home.html:199` `html`: Jornada operacional
+- `app/templates/procurement_home.html:203` `html`: 1. Capturar solicitacoes
+- `app/templates/procurement_home.html:204` `html`: Acompanhar status e origem ERP das solicitacoes
+- `app/templates/procurement_home.html:207` `html`: 2. Executar cotacoes
+- `app/templates/procurement_home.html:208` `html`: Selecionar itens, convidar fornecedores e gerar links
+- `app/templates/procurement_home.html:211` `html`: 3. Registrar decisoes
+- `app/templates/procurement_home.html:212` `html`: Escolher fornecedor e justificar decisao
+- `app/templates/procurement_home.html:215` `html`: 4. Emitir e enviar OC
+- `app/templates/procurement_home.html:216` `html`: Concluir envio para o ERP e acompanhar retorno
+- `app/templates/procurement_home.html:223` `html`: Pilares da plataforma
+- `app/templates/procurement_home.html:228` `html`: RFX, comparacao de fornecedores e decisao
+- `app/templates/procurement_home.html:231` `html`: Operacao de compras
+- `app/templates/procurement_home.html:232` `html`: Execucao ponta a ponta do ciclo de compra
+- `app/templates/procurement_home.html:235` `html`: Trilha de cotacoes
+- `app/templates/procurement_home.html:236` `html`: Evidencia de trilha, status e conformidade
+- `app/templates/procurement_home.html:240` `html`: Jobs de sincronizacao e tratamento de excecoes
+- `app/templates/procurement_home.html:266` `js`: ?
+- `app/templates/procurement_home.html:279` `js`: Nao informado
+- `app/templates/procurement_home.html:286` `js`: &amp;
+- `app/templates/procurement_home.html:287` `js`: &lt;
+- `app/templates/procurement_home.html:288` `js`: &gt;
+- `app/templates/procurement_home.html:289` `js`: &quot;
+- `app/templates/procurement_home.html:319` `js`: Conducao de cotacoes
+- `app/templates/procurement_home.html:321` `js`: Cotacoes ativas que precisam de fechamento
+- `app/templates/procurement_home.html:323` `js`: Abrir cotacoes
+- `app/templates/procurement_home.html:326` `js`: Decisoes sem OC
+- `app/templates/procurement_home.html:328` `js`: Decisoes registradas, aguardando ordem de compra
+- `app/templates/procurement_home.html:333` `js`: Risco de fluxo
+- `app/templates/procurement_home.html:335` `js`: Ordens com envio pendente ou retorno com erro
+- `app/templates/procurement_home.html:337` `js`: Atuar no risco
+- `app/templates/procurement_home.html:348` `js`: Aprovar cotacoes
+- `app/templates/procurement_home.html:350` `js`: Cotacoes abertas para consolidar decisao
+- `app/templates/procurement_home.html:352` `js`: Abrir fila
+- `app/templates/procurement_home.html:355` `js`: Converter decisoes
+- `app/templates/procurement_home.html:357` `js`: Decisoes prontas para gerar ordem de compra
+- `app/templates/procurement_home.html:359` `js`: Gerar OC
+- `app/templates/procurement_home.html:362` `js`: Remover gargalo ERP
+- `app/templates/procurement_home.html:364` `js`: Ordens com envio pendente ou erro
+- `app/templates/procurement_home.html:366` `js`: Revisar OC
+- `app/templates/procurement_home.html:377` `js`: Saude da operacao
+- `app/templates/procurement_home.html:379` `js`: Itens ativos entre solicitacao, cotacao e ordem
+- `app/templates/procurement_home.html:381` `js`: Abrir inbox
+- `app/templates/procurement_home.html:384` `js`: Execucoes de integracao
+- `app/templates/procurement_home.html:386` `js`: Ordens aguardando retorno ERP
+- `app/templates/procurement_home.html:388` `js`: Abrir integracoes
+- `app/templates/procurement_home.html:391` `js`: Governanca de cotacoes
+- `app/templates/procurement_home.html:393` `js`: Cotacoes em andamento para monitorar trilha
+- `app/templates/procurement_home.html:395` `js`: Ver trilha
+- `app/templates/procurement_home.html:407` `js`: Cotacoes aguardando proposta de fornecedor
+- `app/templates/procurement_home.html:412` `js`: Iniciar novas cotacoes
+- `app/templates/procurement_home.html:414` `js`: Solicitacoes prontas para virar cotacao
+- `app/templates/procurement_home.html:416` `js`: Criar cotacao
+- `app/templates/procurement_home.html:419` `js`: Concluir ciclo de compra
+- `app/templates/procurement_home.html:421` `js`: Cotacoes com decisao pendente de ordem
+- `app/templates/procurement_home.html:437` `html`: ${escapeHtml(card.title)}
+- `app/templates/procurement_home.html:438` `html`: ${escapeHtml(card.value)}
+- `app/templates/procurement_home.html:439` `html`: ${escapeHtml(card.detail)}
+- `app/templates/procurement_home.html:440` `html`: ${escapeHtml(card.cta)}
+- `app/templates/procurement_home.html:462` `js`: Sem pendencias para este workspace
+- `app/templates/procurement_home.html:465` `html`: Nenhuma pendencia no momento
+- `app/templates/procurement_home.html:466` `html`: A operacao deste workspace esta em dia para os filtros padrao.
+- `app/templates/procurement_home.html:477` `js`: list-item link
+- `app/templates/procurement_home.html:478` `html`: ${escapeHtml(item.ref || "Sem referencia")} | ${escapeHtml(prettyType(item.type))}
+- `app/templates/procurement_home.html:478` `js`: Sem referencia
+- `app/templates/procurement_home.html:480` `html`: ${escapeHtml(prettyStatus(item.status))}
+- `app/templates/procurement_home.html:481` `html`: Prioridade ${escapeHtml(item.priority || "Nao informado")}
+- `app/templates/procurement_home.html:482` `html`: Idade ${escapeHtml(item.age_days ?? 0)}d
+- `app/templates/procurement_home.html:484` `html`: Atualizado em ${escapeHtml(item.updated_at || "Nao informado")}
+- `app/templates/procurement_home.html:502` `js`: Falha ao carregar dados
+- `app/templates/procurement_home.html:505` `html`: Falha ao carregar pendencias
+- `app/templates/procurement_home.html:506` `html`: Tente atualizar o painel em alguns segundos.
+- `app/templates/procurement_home.html:510` `js`: Falha ao carregar dashboard
+- `app/templates/procurement_home.html:513` `js`: Falha ao carregar foco operacional
+- `app/templates/procurement_home.html:518` `html`: Dados indisponiveis
+- `app/templates/procurement_home.html:519` `html`: Atualize o painel para recarregar os indicadores do papel.
+
+#### `app/templates/procurement_inbox.html`
+- `app/templates/procurement_inbox.html:4` `block`: Inbox | Plataforma Compras
+- `app/templates/procurement_inbox.html:5` `block`: Inbox de compras
+- `app/templates/procurement_inbox.html:7` `html`: Inbox de compras
+- `app/templates/procurement_inbox.html:10` `html`: Atualizar dados
+- `app/templates/procurement_inbox.html:11` `html`: Popular dados
+- `app/templates/procurement_inbox.html:13` `html`: Abrir cotacao
+- `app/templates/procurement_inbox.html:14` `html`: Nova cotacao
+- `app/templates/procurement_inbox.html:21` `html`: Refine e aplique
+- `app/templates/procurement_inbox.html:26` `html`: Ordens de compra
+- `app/templates/procurement_inbox.html:28` `attr:aria-label`: Filtros da inbox
+- `app/templates/procurement_inbox.html:29` `attr:placeholder`: Buscar por referencia
+- `app/templates/procurement_inbox.html:31` `html`: Todos os tipos
+- `app/templates/procurement_inbox.html:34` `html`: Ordem de compra
+- `app/templates/procurement_inbox.html:36` `attr:placeholder`: Status interno, exemplo Em cotacao
+- `app/templates/procurement_inbox.html:38` `html`: Todas prioridades
+- `app/templates/procurement_inbox.html:51` `html`: Fluxo operacional
+- `app/templates/procurement_inbox.html:52` `html`: Navegue por etapa
+- `app/templates/procurement_inbox.html:56` `html`: 1 Solicitacoes
+- `app/templates/procurement_inbox.html:60` `html`: 2 Cotacao
+- `app/templates/procurement_inbox.html:64` `html`: 3 Decisao
+- `app/templates/procurement_inbox.html:68` `html`: 4 Ordem de compra
+- `app/templates/procurement_inbox.html:76` `html`: Pendentes de cotacao
+- `app/templates/procurement_inbox.html:80` `html`: Aguardando cotacoes
+- `app/templates/procurement_inbox.html:84` `html`: Decisao sem OC
+- `app/templates/procurement_inbox.html:88` `html`: OC pendente ERP
+- `app/templates/procurement_inbox.html:95` `html`: Fila ativa de trabalho
+- `app/templates/procurement_inbox.html:107` `html`: Idade em dias
+- `app/templates/procurement_inbox.html:134` `html`: Itens das solicitacoes em aberto
+- `app/templates/procurement_inbox.html:135` `html`: Selecione os itens que entram nesta cotacao.
+- `app/templates/procurement_inbox.html:149` `html`: Registrar decisao da cotacao
+- `app/templates/procurement_inbox.html:164` `html`: Foco da decisao
+- `app/templates/procurement_inbox.html:166` `html`: Equilibrio geral
+- `app/templates/procurement_inbox.html:167` `html`: Custo total
+- `app/templates/procurement_inbox.html:168` `html`: Prazo de entrega
+- `app/templates/procurement_inbox.html:169` `html`: Cobertura de itens
+- `app/templates/procurement_inbox.html:170` `html`: Risco operacional
+- `app/templates/procurement_inbox.html:174` `html`: Motivo sugerido por papel
+- `app/templates/procurement_inbox.html:176` `html`: Selecionar motivo rapido
+- `app/templates/procurement_inbox.html:181` `html`: Matriz por item para decisao
+- `app/templates/procurement_inbox.html:182` `html`: Aguardando dados
+- `app/templates/procurement_inbox.html:186` `html`: Usar fornecedor recomendado
+- `app/templates/procurement_inbox.html:191` `html`: Confirmar decisao
+- `app/templates/procurement_inbox.html:200` `html`: Criar ordem de compra
+- `app/templates/procurement_inbox.html:210` `html`: Status inicial, aprovada
+- `app/templates/procurement_inbox.html:213` `html`: Gerar OC
+- `app/templates/procurement_inbox.html:222` `html`: Enviar ordem ao ERP
+- `app/templates/procurement_inbox.html:228` `html`: A OC sera enviada e marcada como ERP aceito.
+- `app/templates/procurement_inbox.html:231` `html`: Enviar agora
+- `app/templates/procurement_inbox.html:247` `js`: ?
+- `app/templates/procurement_inbox.html:252` `js`: Nao informado
+- `app/templates/procurement_inbox.html:253` `js`: &amp;
+- `app/templates/procurement_inbox.html:254` `js`: &lt;
+- `app/templates/procurement_inbox.html:255` `js`: &gt;
+- `app/templates/procurement_inbox.html:256` `js`: &quot;
+- `app/templates/procurement_inbox.html:398` `js`: [data-step]
+- `app/templates/procurement_inbox.html:424` `js`: [data-pr-item-select]:checked
+- `app/templates/procurement_inbox.html:430` `js`: <div class="meta">Carregando itens</div>
+- `app/templates/procurement_inbox.html:430` `html`: Carregando itens
+- `app/templates/procurement_inbox.html:438` `js`: <div class="meta">Nao foi possivel carregar itens de solicitacao.</div>
+- `app/templates/procurement_inbox.html:438` `html`: Nao foi possivel carregar itens de solicitacao.
+- `app/templates/procurement_inbox.html:439` `js`: Erro ao carregar itens
+- `app/templates/procurement_inbox.html:446` `js`: Sem itens de solicitacao em aberto no momento.
+- `app/templates/procurement_inbox.html:447` `js`: <div class="meta">Sem itens de solicitacao em aberto.</div>
+- `app/templates/procurement_inbox.html:447` `html`: Sem itens de solicitacao em aberto.
+- `app/templates/procurement_inbox.html:460` `js`: sem data
+- `app/templates/procurement_inbox.html:466` `js`: display: flex; gap: 10px; align-items: flex-start
+- `app/templates/procurement_inbox.html:473` `html`: ${escapeHtml(ref)} • ${escapeHtml(item.description || "Item")}
+- `app/templates/procurement_inbox.html:474` `html`: ${escapeHtml(meta)}
+- `app/templates/procurement_inbox.html:494` `js`: [data-close-modal]
+- `app/templates/procurement_inbox.html:505` `js`: Carregando inbox
+- `app/templates/procurement_inbox.html:521` `js`: decisao sem OC
+- `app/templates/procurement_inbox.html:537` `html`: limit ${data.paging?.limit ?? state.limit}
+- `app/templates/procurement_inbox.html:538` `html`: offset ${data.paging?.offset ?? state.offset}
+- `app/templates/procurement_inbox.html:542` `html`: decisao sem OC
+- `app/templates/procurement_inbox.html:552` `html`: ${label} ${escapeHtml(value)}
+- `app/templates/procurement_inbox.html:571` `html`: ${escapeHtml(message)}
+- `app/templates/procurement_inbox.html:572` `html`: ${escapeHtml(detail)}
+- `app/templates/procurement_inbox.html:582` `js`: Inbox sem registros
+- `app/templates/procurement_inbox.html:583` `js`: Ajuste os filtros ou atualize os dados para continuar
+- `app/templates/procurement_inbox.html:594` `html`: ${prettyType(item.type)}
+- `app/templates/procurement_inbox.html:595` `html`: ${escapeHtml(item.ref || "Nao informado")}
+- `app/templates/procurement_inbox.html:596` `html`: ${escapeHtml(prettyStatus(item.status || "Nao informado"))}
+- `app/templates/procurement_inbox.html:597` `html`: ${renderPriority(item.priority)}
+- `app/templates/procurement_inbox.html:598` `html`: ${escapeHtml(item.needed_at || "Nao informado")}
+- `app/templates/procurement_inbox.html:599` `html`: ${item.age_days ?? 0}
+- `app/templates/procurement_inbox.html:599` `js`: Idade em dias
+- `app/templates/procurement_inbox.html:600` `html`: ${escapeHtml(item.updated_at || "Nao informado")}
+- `app/templates/procurement_inbox.html:601` `html`: ${meta}
+- `app/templates/procurement_inbox.html:602` `html`: ${actions}
+- `app/templates/procurement_inbox.html:613` `html`: decisao ${item.award_id}
+- `app/templates/procurement_inbox.html:615` `html`: oc ${item.award_purchase_order_id}
+- `app/templates/procurement_inbox.html:621` `html`: Sugestao ${escapeHtml(suggestion.name)}
+- `app/templates/procurement_inbox.html:625` `js`: <span class="pill">ERP aceito</span>
+- `app/templates/procurement_inbox.html:625` `html`: ERP aceito
+- `app/templates/procurement_inbox.html:627` `html`: ${pills.join("")}
+- `app/templates/procurement_inbox.html:649` `html`: Ver OC
+- `app/templates/procurement_inbox.html:655` `html`: Criar cotacao
+- `app/templates/procurement_inbox.html:664` `html`: Enviar ao ERP
+- `app/templates/procurement_inbox.html:667` `js`: <span class="pill">ERP OK</span>
+- `app/templates/procurement_inbox.html:667` `html`: ERP OK
+- `app/templates/procurement_inbox.html:671` `html`: Nao informado
+- `app/templates/procurement_inbox.html:673` `html`: ${actions.join("")}
+- `app/templates/procurement_inbox.html:677` `js`: [data-action='comparison']
+- `app/templates/procurement_inbox.html:684` `js`: [data-action='award']
+- `app/templates/procurement_inbox.html:688` `js`: [data-action='new-rfq']
+- `app/templates/procurement_inbox.html:697` `js`: [data-action='create-po']
+- `app/templates/procurement_inbox.html:705` `js`: [data-action='push-erp']
+- `app/templates/procurement_inbox.html:711` `js`: Cotacao nova
+- `app/templates/procurement_inbox.html:735` `js`: Aguardando dados
+- `app/templates/procurement_inbox.html:742` `html`: ${escapeHtml(rfqItem.ref || "Cotacao")}
+- `app/templates/procurement_inbox.html:742` `html`: Cotacao ${rfqId}
+- `app/templates/procurement_inbox.html:757` `html`: Recomendacao ${escapeHtml(suggestion.name)}
+- `app/templates/procurement_inbox.html:772` `js`: Fornecedor selecionado
+- `app/templates/procurement_inbox.html:775` `html`: decisao ${awardId}
+- `app/templates/procurement_inbox.html:786` `html`: ${escapeHtml(poItem.ref || "OC")}
+- `app/templates/procurement_inbox.html:786` `html`: OC ${purchaseOrderId}
+- `app/templates/procurement_inbox.html:792` `js`: Popular dados
+- `app/templates/procurement_inbox.html:796` `js`: Dados de exemplo atualizados
+- `app/templates/procurement_inbox.html:813` `js`: ", type:
+- `app/templates/procurement_inbox.html:813` `js`: , awaiting_po:
+- `app/templates/procurement_inbox.html:813` `js`: , priority:
+- `app/templates/procurement_inbox.html:813` `js`: , status:
+- `app/templates/procurement_inbox.html:827` `js`: Selecione ao menos um item de solicitacao para criar a cotacao
+- `app/templates/procurement_inbox.html:835` `js`: application/json
+- `app/templates/procurement_inbox.html:839` `js`: Nao foi possivel criar a cotacao no momento
+- `app/templates/procurement_inbox.html:843` `js`: Cotacao criada com sucesso
+- `app/templates/procurement_inbox.html:857` `js`: Confirmar decisao
+- `app/templates/procurement_inbox.html:866` `js`: motivo nao informado
+- `app/templates/procurement_inbox.html:870` `js`: Decisao registrada com sucesso
+- `app/templates/procurement_inbox.html:882` `js`: Gerar OC
+- `app/templates/procurement_inbox.html:893` `js`: Ordem de compra criada com sucesso
+- `app/templates/procurement_inbox.html:908` `js`: Enviar agora
+- `app/templates/procurement_inbox.html:919` `js`: Ordem enviada ao ERP com sucesso
+- `app/templates/procurement_inbox.html:946` `js`: Nao ha recomendacao consolidada para esta cotacao
+- `app/templates/procurement_inbox.html:974` `html`: ${priority}
+- `app/templates/procurement_inbox.html:1003` `js`: Melhor equilibrio entre custo e prazo de entrega
+- `app/templates/procurement_inbox.html:1004` `js`: Fornecedor com melhor cobertura dos itens cotados
+- `app/templates/procurement_inbox.html:1005` `js`: Decisao orientada pelo comparativo consolidado
+- `app/templates/procurement_inbox.html:1008` `js`: Melhor equilibrio entre custo, prazo e cobertura
+- `app/templates/procurement_inbox.html:1009` `js`: Decisao alinhada com prioridade de negocio
+- `app/templates/procurement_inbox.html:1010` `js`: Risco operacional reduzido para o ciclo atual
+- `app/templates/procurement_inbox.html:1013` `js`: Justificativa validada com base na comparacao
+- `app/templates/procurement_inbox.html:1014` `js`: Decisao em conformidade com a politica de compras
+- `app/templates/procurement_inbox.html:1015` `js`: Risco e custo aprovados para emissao de ordem
+- `app/templates/procurement_inbox.html:1018` `js`: Conducao validada com trilha operacional
+- `app/templates/procurement_inbox.html:1019` `js`: Decisao homologada para continuidade do fluxo
+- `app/templates/procurement_inbox.html:1020` `js`: Aprovacao registrada com foco em risco e prazo
+- `app/templates/procurement_inbox.html:1025` `js`: Menor custo total para os itens cotados
+- `app/templates/procurement_inbox.html:1026` `js`: Melhor custo consolidado com cobertura suficiente
+- `app/templates/procurement_inbox.html:1027` `js`: Economia validada frente as demais propostas
+- `app/templates/procurement_inbox.html:1030` `js`: Decisao por custo total com risco controlado
+- `app/templates/procurement_inbox.html:1031` `js`: Melhor retorno financeiro para o ciclo atual
+- `app/templates/procurement_inbox.html:1032` `js`: Economia consolidada com cobertura adequada
+- `app/templates/procurement_inbox.html:1035` `js`: Custo validado com base no comparativo oficial
+- `app/templates/procurement_inbox.html:1036` `js`: Decisao aprovada por menor impacto financeiro
+- `app/templates/procurement_inbox.html:1037` `js`: Escolha aderente ao criterio de menor custo
+- `app/templates/procurement_inbox.html:1040` `js`: Registro homologado por criterio financeiro
+- `app/templates/procurement_inbox.html:1041` `js`: Escolha validada por custo total e governanca
+- `app/templates/procurement_inbox.html:1042` `js`: Aprovacao final orientada por economia
+- `app/templates/procurement_inbox.html:1047` `js`: Melhor prazo de entrega para itens criticos
+- `app/templates/procurement_inbox.html:1048` `js`: Lead time reduzido para atender necessidade
+- `app/templates/procurement_inbox.html:1049` `js`: Prazo priorizado para continuidade operacional
+- `app/templates/procurement_inbox.html:1052` `js`: Prazo priorizado para reduzir risco de parada
+- `app/templates/procurement_inbox.html:1053` `js`: Decisao orientada por tempo de atendimento
+- `app/templates/procurement_inbox.html:1054` `js`: Lead time alinhado com prioridade de negocio
+- `app/templates/procurement_inbox.html:1057` `js`: Prazo validado para atender necessidade operacional
+- `app/templates/procurement_inbox.html:1058` `js`: Decisao aprovada por risco de atraso reduzido
+- `app/templates/procurement_inbox.html:1059` `js`: Lead time em conformidade com a urgencia
+- `app/templates/procurement_inbox.html:1062` `js`: Escolha homologada por prazo critico
+- `app/templates/procurement_inbox.html:1063` `js`: Decisao final orientada por lead time
+- `app/templates/procurement_inbox.html:1064` `js`: Registro aprovado para acelerar atendimento
+- `app/templates/procurement_inbox.html:1069` `js`: Fornecedor com maior cobertura dos itens cotados
+- `app/templates/procurement_inbox.html:1070` `js`: Cobertura priorizada para reduzir fragmentacao
+- `app/templates/procurement_inbox.html:1071` `js`: Escolha orientada por abrangencia da proposta
+- `app/templates/procurement_inbox.html:1074` `js`: Cobertura consolidada para simplificar operacao
+- `app/templates/procurement_inbox.html:1075` `js`: Decisao por maior abrangencia com custo viavel
+- `app/templates/procurement_inbox.html:1076` `js`: Fornecedor com melhor aderencia ao escopo
+- `app/templates/procurement_inbox.html:1079` `js`: Cobertura validada para continuidade do fluxo
+- `app/templates/procurement_inbox.html:1080` `js`: Aprovacao com foco em abrangencia de atendimento
+- `app/templates/procurement_inbox.html:1081` `js`: Decisao conforme escopo total da cotacao
+- `app/templates/procurement_inbox.html:1084` `js`: Homologacao por cobertura e conformidade
+- `app/templates/procurement_inbox.html:1085` `js`: Registro final por maior aderencia ao escopo
+- `app/templates/procurement_inbox.html:1086` `js`: Escolha aprovada para reduzir gaps operacionais
+- `app/templates/procurement_inbox.html:1091` `js`: Menor risco operacional considerando historico
+- `app/templates/procurement_inbox.html:1092` `js`: Escolha com menor exposicao a atraso
+- `app/templates/procurement_inbox.html:1093` `js`: Fornecedor com resposta mais confiavel
+- `app/templates/procurement_inbox.html:1097` `js`: Decisao com foco em continuidade e previsibilidade
+- `app/templates/procurement_inbox.html:1098` `js`: Escolha orientada por menor risco de ruptura
+- `app/templates/procurement_inbox.html:1101` `js`: Risco avaliado e aprovado para emissao de ordem
+- `app/templates/procurement_inbox.html:1102` `js`: Decisao em conformidade com diretriz de risco
+- `app/templates/procurement_inbox.html:1103` `js`: Aprovacao registrada por menor exposicao
+- `app/templates/procurement_inbox.html:1106` `js`: Homologacao por criterio de risco e controle
+- `app/templates/procurement_inbox.html:1107` `js`: Registro final com foco em estabilidade operacional
+- `app/templates/procurement_inbox.html:1108` `js`: Escolha aprovada por menor criticidade
+- `app/templates/procurement_inbox.html:1122` `html`: ${escapeHtml(reason)}
+- `app/templates/procurement_inbox.html:1135` `js`: menor total
+- `app/templates/procurement_inbox.html:1195` `js`: Sem dados
+- `app/templates/procurement_inbox.html:1215` `js`: ") === String(bestLead.supplier_id ||
+- `app/templates/procurement_inbox.html:1232` `js`: badge warning
+- `app/templates/procurement_inbox.html:1235` `js`: badge success
+- `app/templates/procurement_inbox.html:1239` `js`: Sem analise consolidada
+- `app/templates/procurement_inbox.html:1242` `js`: A matriz compara item a item para apoiar a decisao final.
+- `app/templates/procurement_inbox.html:1244` `js`: Existe trade off entre preco e prazo. A melhor opcao geral pode diferir da melhor opcao por item.
+- `app/templates/procurement_inbox.html:1246` `js`: Existem itens sem proposta. A recomendacao geral pode mudar com cobertura completa.
+- `app/templates/procurement_inbox.html:1250` `html`: ${escapeHtml(matrixHint)}
+- `app/templates/procurement_inbox.html:1258` `html`: ${itemName}
+- `app/templates/procurement_inbox.html:1259` `html`: Sem proposta
+- `app/templates/procurement_inbox.html:1261` `html`: Sem proposta registrada para este item.
+- `app/templates/procurement_inbox.html:1277` `js`: Trade off
+- `app/templates/procurement_inbox.html:1283` `html`: ${typeLabel}
+- `app/templates/procurement_inbox.html:1286` `html`: ${recommendedName}
+- `app/templates/procurement_inbox.html:1286` `html`: Fornecedor sugerido
+- `app/templates/procurement_inbox.html:1287` `html`: ${recommendedTotal}
+- `app/templates/procurement_inbox.html:1287` `html`: Total sugerido
+- `app/templates/procurement_inbox.html:1288` `html`: ${bestPriceName}
+- `app/templates/procurement_inbox.html:1288` `html`: Melhor preco
+- `app/templates/procurement_inbox.html:1289` `html`: ${bestLeadName}
+- `app/templates/procurement_inbox.html:1289` `html`: Melhor prazo
+- `app/templates/procurement_inbox.html:1297` `html`: Itens sem proposta: ${escapeHtml(missingCount)}
+- `app/templates/procurement_inbox.html:1349` `js`: skeleton numeric
+
+#### `app/templates/procurement_integration_logs.html`
+- `app/templates/procurement_integration_logs.html:3` `block`: Logs de Integracao | Plataforma Compras
+- `app/templates/procurement_integration_logs.html:4` `block`: Integracoes e trilha de cotacoes
+- `app/templates/procurement_integration_logs.html:6` `html`: Integracoes e trilha
+- `app/templates/procurement_integration_logs.html:9` `html`: Voltar para inbox
+- `app/templates/procurement_integration_logs.html:16` `html`: Filtros de consulta
+- `app/templates/procurement_integration_logs.html:17` `html`: Execucoes e eventos
+- `app/templates/procurement_integration_logs.html:19` `attr:aria-label`: Filtros de logs
+- `app/templates/procurement_integration_logs.html:21` `html`: Todos os escopos
+- `app/templates/procurement_integration_logs.html:22` `html`: Ordens de compra
+- `app/templates/procurement_integration_logs.html:36` `html`: Sync manual
+- `app/templates/procurement_integration_logs.html:37` `html`: Pronto para executar
+- `app/templates/procurement_integration_logs.html:39` `attr:aria-label`: Sincronizacao manual
+- `app/templates/procurement_integration_logs.html:41` `html`: Selecionar escopo
+- `app/templates/procurement_integration_logs.html:48` `html`: Sincronizar agora
+- `app/templates/procurement_integration_logs.html:67` `html`: Ultimo status
+- `app/templates/procurement_integration_logs.html:68` `html`: Nao informado
+- `app/templates/procurement_integration_logs.html:75` `html`: Execucoes de integracao
+- `app/templates/procurement_integration_logs.html:76` `html`: ERP e jobs
+- `app/templates/procurement_integration_logs.html:83` `html`: Eventos de status
+- `app/templates/procurement_integration_logs.html:84` `html`: Auditoria funcional
+- `app/templates/procurement_integration_logs.html:119` `js`: Nao informado
+- `app/templates/procurement_integration_logs.html:120` `js`: &amp;
+- `app/templates/procurement_integration_logs.html:121` `js`: &lt;
+- `app/templates/procurement_integration_logs.html:122` `js`: &gt;
+- `app/templates/procurement_integration_logs.html:123` `js`: &quot;
+- `app/templates/procurement_integration_logs.html:148` `js`: ").replace(/s$/,
+- `app/templates/procurement_integration_logs.html:177` `html`: ${escapeHtml(prettyStatus(status))}
+- `app/templates/procurement_integration_logs.html:191` `html`: Sem execucoes de integracao
+- `app/templates/procurement_integration_logs.html:192` `html`: Execute uma sincronizacao manual para gerar eventos.
+- `app/templates/procurement_integration_logs.html:201` `js`: list-item log-row
+- `app/templates/procurement_integration_logs.html:203` `html`: Execucao #${escapeHtml(s.id)}
+- `app/templates/procurement_integration_logs.html:205` `html`: ${escapeHtml(prettyScope(s.scope))}
+- `app/templates/procurement_integration_logs.html:207` `html`: Inicio ${escapeHtml(s.started_at)} | tentativa ${escapeHtml(s.attempt)} | duracao ${escapeHtml(s.duration_ms || "-")} ms
+- `app/templates/procurement_integration_logs.html:209` `html`: In ${escapeHtml(s.records_in)}
+- `app/templates/procurement_integration_logs.html:210` `html`: Upsert ${escapeHtml(s.records_upserted)}
+- `app/templates/procurement_integration_logs.html:211` `html`: Falhas ${escapeHtml(s.records_failed)}
+- `app/templates/procurement_integration_logs.html:213` `html`: Erro ${escapeHtml(s.error_summary)}
+- `app/templates/procurement_integration_logs.html:224` `html`: Sem eventos recentes
+- `app/templates/procurement_integration_logs.html:225` `html`: A trilha sera exibida conforme novos status forem registrados.
+- `app/templates/procurement_integration_logs.html:234` `js`: list-item timeline-row
+- `app/templates/procurement_integration_logs.html:236` `html`: ${escapeHtml(prettyScope(e.entity))} #${escapeHtml(e.entity_id)}
+- `app/templates/procurement_integration_logs.html:239` `html`: ${escapeHtml(e.occurred_at)}
+- `app/templates/procurement_integration_logs.html:241` `html`: De ${escapeHtml(prettyStatus(e.from_status || "-"))}
+- `app/templates/procurement_integration_logs.html:242` `html`: Motivo ${escapeHtml(e.reason || "-")}
+- `app/templates/procurement_integration_logs.html:262` `js`: <div class="list-item skeleton">Carregando execucoes</div>
+- `app/templates/procurement_integration_logs.html:262` `html`: Carregando execucoes
+- `app/templates/procurement_integration_logs.html:263` `js`: <div class="list-item skeleton">Carregando eventos</div>
+- `app/templates/procurement_integration_logs.html:263` `html`: Carregando eventos
+- `app/templates/procurement_integration_logs.html:270` `js`: Nao foi possivel carregar os logs
+- `app/templates/procurement_integration_logs.html:292` `js`: Selecione um escopo para sincronizar
+- `app/templates/procurement_integration_logs.html:296` `js`: Sincronizar agora
+- `app/templates/procurement_integration_logs.html:305` `js`: application/json
+- `app/templates/procurement_integration_logs.html:311` `js`: motivo nao informado
+- `app/templates/procurement_integration_logs.html:315` `js`: Sincronizacao concluida com sucesso
+- `app/templates/procurement_integration_logs.html:319` `js`: Falha, erro inesperado na sincronizacao
+
+#### `app/templates/procurement_ordens_compra.html`
+- `app/templates/procurement_ordens_compra.html:3` `block`: Ordens de compra | Plataforma Compras
+- `app/templates/procurement_ordens_compra.html:4` `block`: Ordens de compra
+- `app/templates/procurement_ordens_compra.html:6` `html`: Ordens de compra
+- `app/templates/procurement_ordens_compra.html:10` `html`: Nova ordem
+- `app/templates/procurement_ordens_compra.html:18` `html`: Prontas para envio ao ERP
+- `app/templates/procurement_ordens_compra.html:21` `html`: Em envio
+- `app/templates/procurement_ordens_compra.html:23` `html`: Aguardando retorno de integracao
+- `app/templates/procurement_ordens_compra.html:26` `html`: Com erro ERP
+- `app/templates/procurement_ordens_compra.html:28` `html`: Necessitam ajuste operacional
+- `app/templates/procurement_ordens_compra.html:33` `html`: Fluxo finalizado
+- `app/templates/procurement_ordens_compra.html:39` `html`: Painel de ordens
+- `app/templates/procurement_ordens_compra.html:40` `html`: Carregando ordens de compra
+- `app/templates/procurement_ordens_compra.html:44` `html`: Todos os status
+- `app/templates/procurement_ordens_compra.html:47` `html`: Enviada ao ERP
+- `app/templates/procurement_ordens_compra.html:48` `html`: Aceita no ERP
+- `app/templates/procurement_ordens_compra.html:49` `html`: Recebimento parcial
+- `app/templates/procurement_ordens_compra.html:51` `html`: Erro ERP
+- `app/templates/procurement_ordens_compra.html:57` `html`: Somente origem ERP
+- `app/templates/procurement_ordens_compra.html:59` `html`: Aplicar filtros
+- `app/templates/procurement_ordens_compra.html:122` `html`: Salvar ordem
+- `app/templates/procurement_ordens_compra.html:161` `js`: ?
+- `app/templates/procurement_ordens_compra.html:166` `js`: Nao informado
+- `app/templates/procurement_ordens_compra.html:167` `js`: &amp;
+- `app/templates/procurement_ordens_compra.html:168` `js`: &lt;
+- `app/templates/procurement_ordens_compra.html:169` `js`: &gt;
+- `app/templates/procurement_ordens_compra.html:170` `js`: &quot;
+- `app/templates/procurement_ordens_compra.html:194` `html`: ${escapeHtml(message)}
+- `app/templates/procurement_ordens_compra.html:195` `html`: Ajuste os filtros ou sincronize ordens do ERP
+- `app/templates/procurement_ordens_compra.html:206` `js`: Sem ordens para o filtro
+- `app/templates/procurement_ordens_compra.html:207` `js`: Nenhuma ordem encontrada
+- `app/templates/procurement_ordens_compra.html:216` `js`: <span class="meta">Gerenciada pelo ERP</span>
+- `app/templates/procurement_ordens_compra.html:216` `html`: Gerenciada pelo ERP
+- `app/templates/procurement_ordens_compra.html:223` `html`: ${escapeHtml(item.number || \`OC-${item.id}\`)}
+- `app/templates/procurement_ordens_compra.html:224` `html`: ${escapeHtml(item.supplier_name || "-")}
+- `app/templates/procurement_ordens_compra.html:225` `html`: ${escapeHtml(statusLabel(item.status))}
+- `app/templates/procurement_ordens_compra.html:226` `html`: ${escapeHtml(totalValue)}
+- `app/templates/procurement_ordens_compra.html:227` `html`: ${escapeHtml(source)}
+- `app/templates/procurement_ordens_compra.html:228` `html`: ${escapeHtml(item.updated_at || "-")}
+- `app/templates/procurement_ordens_compra.html:240` `js`: [data-edit-order]
+- `app/templates/procurement_ordens_compra.html:243` `js`: [data-delete-order]
+- `app/templates/procurement_ordens_compra.html:247` `js`: Deseja cancelar esta ordem de compra?
+- `app/templates/procurement_ordens_compra.html:254` `js`: Ordem cancelada
+- `app/templates/procurement_ordens_compra.html:276` `js`: Nova ordem
+- `app/templates/procurement_ordens_compra.html:277` `js`: Salvar ordem
+- `app/templates/procurement_ordens_compra.html:296` `js`: Editar ordem
+- `app/templates/procurement_ordens_compra.html:297` `js`: Salvar alteracoes
+- `app/templates/procurement_ordens_compra.html:302` `js`: Atualizando ordens
+- `app/templates/procurement_ordens_compra.html:315` `js`: Falha ao carregar ordens
+- `app/templates/procurement_ordens_compra.html:325` `js`: Informe o fornecedor
+- `app/templates/procurement_ordens_compra.html:349` `js`: application/json
+- `app/templates/procurement_ordens_compra.html:355` `js`: Ordem atualizada
+- `app/templates/procurement_ordens_compra.html:355` `js`: Ordem criada
+
+#### `app/templates/procurement_purchase_order.html`
+- `app/templates/procurement_purchase_order.html:4` `block`: OC {{ purchase_order_id }} | Plataforma Compras
+- `app/templates/procurement_purchase_order.html:5` `block`: Ordem de compra
+- `app/templates/procurement_purchase_order.html:10` `html`: Voltar para inbox
+- `app/templates/procurement_purchase_order.html:11` `html`: Enviar ao ERP
+- `app/templates/procurement_purchase_order.html:16` `html`: Proxima acao da ordem
+- `app/templates/procurement_purchase_order.html:17` `html`: Aguardando dados
+- `app/templates/procurement_purchase_order.html:21` `html`: Abrir fila de OC
+- `app/templates/procurement_purchase_order.html:23` `html`: Valide o status e conclua o envio ao ERP.
+- `app/templates/procurement_purchase_order.html:29` `html`: Resumo da ordem
+- `app/templates/procurement_purchase_order.html:37` `html`: Historico de eventos
+- `app/templates/procurement_purchase_order.html:44` `html`: Execucoes de integracao ERP
+- `app/templates/procurement_purchase_order.html:68` `js`: Nao informado
+- `app/templates/procurement_purchase_order.html:69` `js`: &amp;
+- `app/templates/procurement_purchase_order.html:70` `js`: &lt;
+- `app/templates/procurement_purchase_order.html:71` `js`: &gt;
+- `app/templates/procurement_purchase_order.html:72` `js`: &quot;
+- `app/templates/procurement_purchase_order.html:116` `html`: ${escapeHtml(prettyStatus(status))}
+- `app/templates/procurement_purchase_order.html:126` `js`: ID externo
+- `app/templates/procurement_purchase_order.html:127` `js`: Erro ERP
+- `app/templates/procurement_purchase_order.html:128` `js`: Criada em
+- `app/templates/procurement_purchase_order.html:129` `js`: Atualizada em
+- `app/templates/procurement_purchase_order.html:133` `html`: ${escapeHtml(k)}
+- `app/templates/procurement_purchase_order.html:133` `html`: ${escapeHtml(v)}
+- `app/templates/procurement_purchase_order.html:137` `js`: ERP ok
+- `app/templates/procurement_purchase_order.html:137` `js`: Enviar ao ERP
+- `app/templates/procurement_purchase_order.html:153` `js`: Ordem enviada com retorno aceito pelo ERP.
+- `app/templates/procurement_purchase_order.html:154` `js`: Atualizar dados
+- `app/templates/procurement_purchase_order.html:160` `js`: Falha ERP
+- `app/templates/procurement_purchase_order.html:162` `js`: Revise o erro e execute novo envio da ordem.
+- `app/templates/procurement_purchase_order.html:163` `js`: Reenviar ao ERP
+- `app/templates/procurement_purchase_order.html:168` `js`: Aguardando retorno
+- `app/templates/procurement_purchase_order.html:170` `js`: A ordem foi enviada, acompanhe o retorno nas execucoes de integracao.
+- `app/templates/procurement_purchase_order.html:177` `js`: Envie a ordem ao ERP para concluir o fluxo operacional.
+- `app/templates/procurement_purchase_order.html:184` `html`: Sem eventos ainda
+- `app/templates/procurement_purchase_order.html:185` `html`: A trilha de status aparecera conforme novas mudancas ocorrerem.
+- `app/templates/procurement_purchase_order.html:193` `js`: list-item timeline-row
+- `app/templates/procurement_purchase_order.html:195` `html`: Evento de status
+- `app/templates/procurement_purchase_order.html:198` `html`: ${escapeHtml(e.occurred_at)}
+- `app/templates/procurement_purchase_order.html:200` `html`: De ${escapeHtml(prettyStatus(e.from_status || "Nao informado"))}
+- `app/templates/procurement_purchase_order.html:201` `html`: Motivo ${escapeHtml(e.reason || "Nao informado")}
+- `app/templates/procurement_purchase_order.html:213` `html`: Sem execucoes de integracao
+- `app/templates/procurement_purchase_order.html:214` `html`: Use Enviar ao ERP para iniciar uma execucao.
+- `app/templates/procurement_purchase_order.html:222` `js`: list-item log-row
+- `app/templates/procurement_purchase_order.html:224` `html`: Execucao ${escapeHtml(s.id)}
+- `app/templates/procurement_purchase_order.html:226` `html`: ${escapeHtml(prettyScope(s.scope))}
+- `app/templates/procurement_purchase_order.html:228` `html`: ${escapeHtml(s.started_at)} | duracao ${escapeHtml(s.duration_ms || "Nao informado")} ms
+- `app/templates/procurement_purchase_order.html:230` `html`: In ${escapeHtml(s.records_in)}
+- `app/templates/procurement_purchase_order.html:231` `html`: Upsert ${escapeHtml(s.records_upserted)}
+- `app/templates/procurement_purchase_order.html:232` `html`: Falhas ${escapeHtml(s.records_failed)}
+- `app/templates/procurement_purchase_order.html:265` `js`: motivo nao informado
+- `app/templates/procurement_purchase_order.html:268` `js`: Ordem enviada ao ERP com sucesso
+
+#### `app/templates/procurement_solicitacoes.html`
+- `app/templates/procurement_solicitacoes.html:3` `block`: Solicitacoes | Plataforma Compras
+- `app/templates/procurement_solicitacoes.html:4` `block`: Solicitacoes de compra
+- `app/templates/procurement_solicitacoes.html:10` `html`: Nova solicitacao
+- `app/templates/procurement_solicitacoes.html:11` `html`: Abrir cotacao
+- `app/templates/procurement_solicitacoes.html:17` `html`: Pendentes de cotacao
+- `app/templates/procurement_solicitacoes.html:19` `html`: Solicitacoes prontas para sourcing
+- `app/templates/procurement_solicitacoes.html:22` `html`: Em cotacao
+- `app/templates/procurement_solicitacoes.html:24` `html`: Ja encaminhadas para fornecedores
+- `app/templates/procurement_solicitacoes.html:29` `html`: Com ordem de compra emitida
+- `app/templates/procurement_solicitacoes.html:34` `html`: Fluxo concluido no ERP
+- `app/templates/procurement_solicitacoes.html:40` `html`: Painel de solicitacoes
+- `app/templates/procurement_solicitacoes.html:41` `html`: Carregando solicitacoes
+- `app/templates/procurement_solicitacoes.html:45` `html`: Todos os status
+- `app/templates/procurement_solicitacoes.html:46` `html`: Pendente de cotacao
+- `app/templates/procurement_solicitacoes.html:48` `html`: Com decisao
+- `app/templates/procurement_solicitacoes.html:50` `html`: Recebimento parcial
+- `app/templates/procurement_solicitacoes.html:55` `html`: Somente origem ERP
+- `app/templates/procurement_solicitacoes.html:57` `html`: Aplicar filtros
+- `app/templates/procurement_solicitacoes.html:58` `html`: Ir para abrir cotacao
+- `app/templates/procurement_solicitacoes.html:71` `html`: Vinculo ERP
+- `app/templates/procurement_solicitacoes.html:130` `html`: Item inicial da solicitacao (obrigatorio na criacao)
+- `app/templates/procurement_solicitacoes.html:134` `attr:placeholder`: Item de compra
+- `app/templates/procurement_solicitacoes.html:148` `html`: Salvar solicitacao
+- `app/templates/procurement_solicitacoes.html:189` `js`: ?
+- `app/templates/procurement_solicitacoes.html:194` `js`: Nao informado
+- `app/templates/procurement_solicitacoes.html:195` `js`: &amp;
+- `app/templates/procurement_solicitacoes.html:196` `js`: &lt;
+- `app/templates/procurement_solicitacoes.html:197` `js`: &gt;
+- `app/templates/procurement_solicitacoes.html:198` `js`: &quot;
+- `app/templates/procurement_solicitacoes.html:227` `html`: ${escapeHtml(message)}
+- `app/templates/procurement_solicitacoes.html:228` `html`: Use o sync ERP ou ajuste filtros para listar solicitacoes
+- `app/templates/procurement_solicitacoes.html:238` `js`: Sem solicitacoes para o filtro
+- `app/templates/procurement_solicitacoes.html:239` `js`: Nenhuma solicitacao encontrada
+- `app/templates/procurement_solicitacoes.html:249` `js`: <span class="meta">Gerenciado pelo ERP</span>
+- `app/templates/procurement_solicitacoes.html:249` `html`: Gerenciado pelo ERP
+- `app/templates/procurement_solicitacoes.html:256` `html`: ${escapeHtml(item.number || \`SR-${item.id}\`)}
+- `app/templates/procurement_solicitacoes.html:257` `html`: ${escapeHtml(statusLabel(item.status))}
+- `app/templates/procurement_solicitacoes.html:258` `html`: ${escapeHtml(item.priority || "-")}
+- `app/templates/procurement_solicitacoes.html:259` `html`: ${escapeHtml(item.requested_by || "-")}
+- `app/templates/procurement_solicitacoes.html:260` `html`: ${escapeHtml(item.needed_at || "-")}
+- `app/templates/procurement_solicitacoes.html:261` `html`: ${escapeHtml(item.item_count)}
+- `app/templates/procurement_solicitacoes.html:262` `html`: ${escapeHtml(sourceLabel)}
+- `app/templates/procurement_solicitacoes.html:263` `html`: ${escapeHtml(erpRef)}
+- `app/templates/procurement_solicitacoes.html:263` `js`: Vinculo ERP
+- `app/templates/procurement_solicitacoes.html:266` `html`: Ver na inbox
+- `app/templates/procurement_solicitacoes.html:276` `js`: [data-edit-request]
+- `app/templates/procurement_solicitacoes.html:282` `js`: [data-delete-request]
+- `app/templates/procurement_solicitacoes.html:286` `js`: Deseja cancelar esta solicitacao?
+- `app/templates/procurement_solicitacoes.html:296` `js`: Solicitacao cancelada
+- `app/templates/procurement_solicitacoes.html:323` `js`: Nova solicitacao
+- `app/templates/procurement_solicitacoes.html:324` `js`: Salvar solicitacao
+- `app/templates/procurement_solicitacoes.html:345` `js`: Editar solicitacao
+- `app/templates/procurement_solicitacoes.html:346` `js`: Atualizar solicitacao
+- `app/templates/procurement_solicitacoes.html:351` `js`: Atualizando solicitacoes
+- `app/templates/procurement_solicitacoes.html:365` `js`: Falha ao carregar
+- `app/templates/procurement_solicitacoes.html:366` `js`: Falha ao carregar solicitacoes
+- `app/templates/procurement_solicitacoes.html:368` `js`: Nao foi possivel carregar solicitacoes
+- `app/templates/procurement_solicitacoes.html:402` `js`: Descricao do item inicial e obrigatoria
+- `app/templates/procurement_solicitacoes.html:418` `js`: application/json
+- `app/templates/procurement_solicitacoes.html:426` `js`: Solicitacao atualizada
+- `app/templates/procurement_solicitacoes.html:426` `js`: Solicitacao criada
+
+#### `app/templates/register.html`
+- `app/templates/register.html:6` `html`: Criar conta - Plataforma Compras
+- `app/templates/register.html:14` `attr:alt`: Plataforma Compras
+- `app/templates/register.html:16` `html`: Plataforma Compras
+- `app/templates/register.html:17` `html`: Cadastro rapido para acessar o MVP
+- `app/templates/register.html:20` `html`: Criar conta
+- `app/templates/register.html:21` `html`: Informe seus dados para criar o login.
+- `app/templates/register.html:32` `attr:placeholder`: Ex: Alfa Industrial
+- `app/templates/register.html:33` `html`: Se ja existir, use o mesmo nome para entrar no mesmo tenant.
+
+#### `app/templates/supplier_quote_portal.html`
+- `app/templates/supplier_quote_portal.html:6` `html`: Portal do fornecedor | Plataforma Compras
+- `app/templates/supplier_quote_portal.html:14` `html`: Portal do fornecedor
+- `app/templates/supplier_quote_portal.html:15` `html`: Validando convite
+- `app/templates/supplier_quote_portal.html:17` `html`: Aguarde o carregamento dos dados da cotacao.
+- `app/templates/supplier_quote_portal.html:22` `html`: Dados da cotacao
+- `app/templates/supplier_quote_portal.html:38` `html`: Enviar proposta
+- `app/templates/supplier_quote_portal.html:39` `html`: Preencha preco unitario e prazo por item
+- `app/templates/supplier_quote_portal.html:48` `html`: Preco unitario
+- `app/templates/supplier_quote_portal.html:49` `html`: Prazo em dias
+- `app/templates/supplier_quote_portal.html:79` `js`: Nao informado
+- `app/templates/supplier_quote_portal.html:80` `js`: &amp;
+- `app/templates/supplier_quote_portal.html:81` `js`: &lt;
+- `app/templates/supplier_quote_portal.html:82` `js`: &gt;
+- `app/templates/supplier_quote_portal.html:83` `js`: &quot;
+- `app/templates/supplier_quote_portal.html:93` `html`: Sem itens disponiveis
+- `app/templates/supplier_quote_portal.html:94` `html`: Contate o comprador para revisar o convite
+- `app/templates/supplier_quote_portal.html:107` `html`: ${escapeHtml(item.description)}
+- `app/templates/supplier_quote_portal.html:109` `html`: ${escapeHtml(item.quantity)} ${escapeHtml(item.uom)}
+- `app/templates/supplier_quote_portal.html:110` `js`: Preco unitario
+- `app/templates/supplier_quote_portal.html:113` `js`: Prazo em dias
+- `app/templates/supplier_quote_portal.html:124` `js`: Buscando dados da cotacao
+- `app/templates/supplier_quote_portal.html:133` `js`: nao informada
+- `app/templates/supplier_quote_portal.html:139` `js`: Convite indisponivel
+- `app/templates/supplier_quote_portal.html:160` `js`: Preencha ao menos um item com preco
+- `app/templates/supplier_quote_portal.html:164` `js`: Enviando proposta
+- `app/templates/supplier_quote_portal.html:164` `js`: Enviar proposta
+- `app/templates/supplier_quote_portal.html:170` `js`: application/json
+- `app/templates/supplier_quote_portal.html:177` `js`: Proposta enviada
+- `app/templates/supplier_quote_portal.html:178` `js`: Proposta enviada com sucesso
+
+### 1.2 Rotas Flask/Auth (mensagens e textos de interface)
+
+#### `app/auth.py`
+- `app/auth.py:39`: Autenticacao necessaria.
+- `app/auth.py:65`: Credenciais invalidas. Tente novamente.
+- `app/auth.py:83`: Informe email e senha.
+- `app/auth.py:161`: Email ja cadastrado. Use outro email ou faca login.
+
+#### `app/routes/procurement_routes.py`
+- `app/routes/procurement_routes.py:197`: Status da solicitacao invalido.
+- `app/routes/procurement_routes.py:201`: Prioridade invalida.
+- `app/routes/procurement_routes.py:209`: Informe ao menos um item da solicitacao.
+- `app/routes/procurement_routes.py:253`: Nenhum item valido informado.
+- `app/routes/procurement_routes.py:309`: Solicitacao nao encontrada.
+- `app/routes/procurement_routes.py:323`: Solicitacao com origem ERP e somente leitura na plataforma.
+- `app/routes/procurement_routes.py:373`: Prioridade invalida.
+- `app/routes/procurement_routes.py:381`: Status da solicitacao invalido.
+- `app/routes/procurement_routes.py:387`: Nenhum campo enviado para atualizacao.
+- `app/routes/procurement_routes.py:426`: Solicitacao nao encontrada.
+- `app/routes/procurement_routes.py:432`: Solicitacao com origem ERP e somente leitura na plataforma.
+- `app/routes/procurement_routes.py:438`: Somente solicitacoes pendentes aceitam novos itens.
+- `app/routes/procurement_routes.py:443`: Descricao do item e obrigatoria.
+- `app/routes/procurement_routes.py:488`: Solicitacao nao encontrada.
+- `app/routes/procurement_routes.py:494`: Solicitacao com origem ERP e somente leitura na plataforma.
+- `app/routes/procurement_routes.py:500`: Somente solicitacoes pendentes aceitam alteracao de itens.
+- `app/routes/procurement_routes.py:512`: Item da solicitacao nao encontrado.
+- `app/routes/procurement_routes.py:528`: Descricao nao pode ser vazia.
+- `app/routes/procurement_routes.py:534`: Quantidade invalida.
+- `app/routes/procurement_routes.py:543`: Linha do item invalida.
+- `app/routes/procurement_routes.py:551`: Nenhuma alteracao informada.
+- `app/routes/procurement_routes.py:620`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:662`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:670`: Item da cotacao nao encontrado.
+- `app/routes/procurement_routes.py:679`: Informe supplier_ids.
+- `app/routes/procurement_routes.py:712`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:718`: Informe supplier_id.
+- `app/routes/procurement_routes.py:720`: Informe items.
+- `app/routes/procurement_routes.py:725`: supplier_id invalido.
+- `app/routes/procurement_routes.py:729`: Fornecedor nao encontrado.
+- `app/routes/procurement_routes.py:770`: Informe ao menos um item valido com preco unitario.
+- `app/routes/procurement_routes.py:794`: Um ou mais itens da cotacao nao foram encontrados.
+- `app/routes/procurement_routes.py:816`: Fornecedor nao convidado para um ou mais itens desta cotacao.
+- `app/routes/procurement_routes.py:851`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:858`: Fornecedor nao encontrado.
+- `app/routes/procurement_routes.py:915`: Proposta nao encontrada para este fornecedor.
+- `app/routes/procurement_routes.py:939`: Convite nao encontrado.
+- `app/routes/procurement_routes.py:947`: Convite expirado.
+- `app/routes/procurement_routes.py:969`: Convite nao encontrado.
+- `app/routes/procurement_routes.py:976`: Convite expirado.
+- `app/routes/procurement_routes.py:981`: Informe itens com preco e prazo.
+- `app/routes/procurement_routes.py:988`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:994`: Cotacao nao aceita novas propostas neste status.
+- `app/routes/procurement_routes.py:1011`: Cotacao sem itens disponiveis.
+- `app/routes/procurement_routes.py:1027`: Fornecedor nao esta convidado para itens desta cotacao.
+- `app/routes/procurement_routes.py:1056`: Nenhum item valido para envio.
+- `app/routes/procurement_routes.py:1147`: Informe o fornecedor.
+- `app/routes/procurement_routes.py:1151`: Status da ordem de compra invalido.
+- `app/routes/procurement_routes.py:1208`: Ordem de compra nao encontrada.
+- `app/routes/procurement_routes.py:1221`: Ordem de compra com origem ERP e somente leitura na plataforma.
+- `app/routes/procurement_routes.py:1252`: Ordem de compra com origem ERP e somente leitura na plataforma.
+- `app/routes/procurement_routes.py:1278`: Valor total invalido.
+- `app/routes/procurement_routes.py:1286`: Status da ordem de compra invalido.
+- `app/routes/procurement_routes.py:1292`: Nenhum campo enviado para atualizacao.
+- `app/routes/procurement_routes.py:1368`: Informe scope.
+- `app/routes/procurement_routes.py:1376`: Scope nao suportado neste MVP.
+- `app/routes/procurement_routes.py:1418`: Falha ao sincronizar.
+- `app/routes/procurement_routes.py:1679`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:1715`: Status da cotacao invalido.
+- `app/routes/procurement_routes.py:1728`: Nenhum campo enviado para atualizacao.
+- `app/routes/procurement_routes.py:1767`: Selecione ao menos um fornecedor para convite.
+- `app/routes/procurement_routes.py:1774`: Nenhum fornecedor valido para convite.
+- `app/routes/procurement_routes.py:1801`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:1808`: Informe supplier_ids para convite.
+- `app/routes/procurement_routes.py:1819`: Nenhum item valido para convite.
+- `app/routes/procurement_routes.py:1839`: Nenhum fornecedor valido para convite.
+- `app/routes/procurement_routes.py:1850`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:1864`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:1868`: Convite nao encontrado.
+- `app/routes/procurement_routes.py:1927`: Acao invalida, use reopen, extend ou cancel.
+- `app/routes/procurement_routes.py:1936`: Convite nao encontrado apos atualizacao.
+- `app/routes/procurement_routes.py:1948`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:1975`: Cotacao nao encontrada.
+- `app/routes/procurement_routes.py:1981`: Motivo da decisao e obrigatorio.
+- `app/routes/procurement_routes.py:2026`: Decisao nao encontrada.
+- `app/routes/procurement_routes.py:2033`: Esta decisao ja possui uma ordem de compra.
+- `app/routes/procurement_routes.py:2089`: Ordem de compra nao encontrada.
+- `app/routes/procurement_routes.py:2101`: Ordem ja aceita no ERP.
+- `app/routes/procurement_routes.py:2141`: Falha ao enviar ao ERP.
+- `app/routes/procurement_routes.py:2181`: Ordem enviada ao ERP.
+- `app/routes/procurement_routes.py:2462`: Selecione ao menos um item de solicitacao.
+- `app/routes/procurement_routes.py:2473`: Itens de solicitacao nao encontrados ou ja em cotacao.
+
+### 1.3 Flash messages
+
+- Nenhum uso de `flash(...)` encontrado nas rotas Flask auditadas.
+
+## 2) Status de processo (defini??o e exibi??o)
+
+Legenda: **Defini??es** = locais can?nicos (constraints, enums/sets, dicion?rios de label). **Exibi??o** = filtros, badges, selects, tabelas, payloads.
+
+| Status | Defini??es (arquivo:linha) | Exibi??o (arquivo:linha) |
+|---|---|---|
+| `pending_rfq` | `app/routes/procurement_routes.py:23`, `app/routes/procurement_routes.py:195`, `app/routes/procurement_routes.py:437`, `app/routes/procurement_routes.py:499`, `app/routes/procurement_routes.py:1453`, `app/routes/procurement_routes.py:1480` | `app/templates/procurement_home.html:77`, `app/templates/procurement_home.html:79`, `app/templates/procurement_home.html:121`, `app/templates/procurement_home.html:294`, `app/templates/procurement_home.html:308`, `app/templates/procurement_home.html:415` |
+| `in_rfq` | `app/routes/procurement_routes.py:24`, `app/routes/procurement_routes.py:1491`, `app/routes/procurement_routes.py:2564`, `app/routes/procurement_routes.py:2567`, `app/routes/procurement_routes.py:2573`, `app/routes/procurement_routes.py:3591` | `app/templates/procurement_home.html:122`, `app/templates/procurement_solicitacoes.html:23`, `app/templates/procurement_solicitacoes.html:47`, `app/templates/procurement_solicitacoes.html:106`, `app/templates/procurement_solicitacoes.html:209`, `app/routes/procurement_routes.py:24` |
+| `awarded` | `app/routes/procurement_routes.py:25`, `app/routes/procurement_routes.py:42`, `app/routes/procurement_routes.py:1534`, `app/routes/procurement_routes.py:1988`, `app/routes/procurement_routes.py:1997`, `app/routes/procurement_routes.py:2004` | `app/templates/procurement_cotacoes.html:28`, `app/templates/procurement_cotacoes.html:50`, `app/templates/procurement_cotacoes.html:93`, `app/templates/procurement_cotacoes.html:162`, `app/templates/procurement_cotacoes.html:324`, `app/templates/procurement_home.html:125` |
+| `ordered` | `app/routes/procurement_routes.py:26`, `app/db.py:186`, `app/db.py:779`, `app/static/js/ui_labels.js:6` | `app/templates/procurement_solicitacoes.html:28`, `app/templates/procurement_solicitacoes.html:49`, `app/templates/procurement_solicitacoes.html:108`, `app/templates/procurement_solicitacoes.html:210`, `app/routes/procurement_routes.py:26` |
+| `partially_received` | `app/routes/procurement_routes.py:27`, `app/routes/procurement_routes.py:36`, `app/routes/procurement_routes.py:41`, `app/routes/procurement_routes.py:4322`, `app/db.py:186`, `app/db.py:347` | `app/templates/procurement_ordens_compra.html:49`, `app/templates/procurement_ordens_compra.html:103`, `app/templates/procurement_solicitacoes.html:50`, `app/templates/procurement_solicitacoes.html:109`, `app/routes/procurement_routes.py:27`, `app/routes/procurement_routes.py:36` |
+| `received` | `app/routes/procurement_routes.py:28`, `app/routes/procurement_routes.py:37`, `app/routes/procurement_routes.py:41`, `app/routes/procurement_routes.py:4302`, `app/routes/procurement_routes.py:4304`, `app/routes/procurement_routes.py:4322` | `app/templates/procurement_ordens_compra.html:32`, `app/templates/procurement_ordens_compra.html:50`, `app/templates/procurement_ordens_compra.html:104`, `app/templates/procurement_ordens_compra.html:179`, `app/templates/procurement_solicitacoes.html:33`, `app/templates/procurement_solicitacoes.html:51` |
+| `cancelled` | `app/routes/procurement_routes.py:29`, `app/routes/procurement_routes.py:38`, `app/routes/procurement_routes.py:42`, `app/routes/procurement_routes.py:330`, `app/routes/procurement_routes.py:331`, `app/routes/procurement_routes.py:335` | `app/templates/procurement_cotacoes.html:33`, `app/templates/procurement_cotacoes.html:51`, `app/templates/procurement_cotacoes.html:94`, `app/templates/procurement_cotacoes.html:162`, `app/templates/procurement_cotacoes.html:194`, `app/templates/procurement_cotacoes.html:234` |
+| `draft` | `app/routes/procurement_routes.py:32`, `app/routes/procurement_routes.py:42`, `app/routes/procurement_routes.py:1149`, `app/routes/procurement_routes.py:3512`, `app/routes/procurement_routes.py:3641`, `app/routes/procurement_routes.py:4238` | `app/templates/procurement_approvals.html:25`, `app/templates/procurement_cotacoes.html:46`, `app/templates/procurement_cotacoes.html:89`, `app/templates/procurement_cotacoes.html:220`, `app/templates/procurement_cotacoes.html:228`, `app/templates/procurement_home.html:87` |
+| `open` | `app/routes/procurement_routes.py:42`, `app/routes/procurement_routes.py:168`, `app/routes/procurement_routes.py:178`, `app/routes/procurement_routes.py:989`, `app/routes/procurement_routes.py:2478`, `app/routes/procurement_routes.py:2896` | `app/templates/_layout.html:259`, `app/templates/_layout.html:260`, `app/templates/_layout.html:262`, `app/templates/_layout.html:268`, `app/templates/procurement_approvals.html:15`, `app/templates/procurement_cotacoes.html:18` |
+| `collecting_quotes` | `app/routes/procurement_routes.py:42`, `app/routes/procurement_routes.py:989`, `app/routes/procurement_routes.py:1085`, `app/routes/procurement_routes.py:1088`, `app/routes/procurement_routes.py:1530`, `app/routes/procurement_routes.py:3494` | `app/templates/procurement_approvals.html:15`, `app/templates/procurement_cotacoes.html:23`, `app/templates/procurement_cotacoes.html:48`, `app/templates/procurement_cotacoes.html:91`, `app/templates/procurement_cotacoes.html:162`, `app/templates/procurement_home.html:38` |
+| `closed` | `app/routes/procurement_routes.py:42`, `app/db.py:228`, `app/db.py:821`, `app/static/js/ui_labels.js:13` | `app/templates/procurement_cotacoes.html:49`, `app/templates/procurement_cotacoes.html:92`, `app/routes/procurement_routes.py:42` |
+| `approved` | `app/routes/procurement_routes.py:33`, `app/routes/procurement_routes.py:1542`, `app/routes/procurement_routes.py:2046`, `app/routes/procurement_routes.py:2069`, `app/routes/procurement_routes.py:2075`, `app/routes/procurement_routes.py:3512` | `app/templates/procurement_approvals.html:25`, `app/templates/procurement_home.html:87`, `app/templates/procurement_home.html:127`, `app/templates/procurement_home.html:336`, `app/templates/procurement_home.html:365`, `app/templates/procurement_inbox.html:67` |
+| `sent_to_erp` | `app/routes/procurement_routes.py:34`, `app/routes/procurement_routes.py:2108`, `app/routes/procurement_routes.py:2114`, `app/routes/procurement_routes.py:2134`, `app/routes/procurement_routes.py:2147`, `app/routes/procurement_routes.py:2160` | `app/templates/procurement_approvals.html:25`, `app/templates/procurement_home.html:87`, `app/templates/procurement_home.html:128`, `app/templates/procurement_home.html:336`, `app/templates/procurement_home.html:365`, `app/templates/procurement_inbox.html:67` |
+| `erp_accepted` | `app/routes/procurement_routes.py:35`, `app/routes/procurement_routes.py:2096`, `app/routes/procurement_routes.py:2099`, `app/routes/procurement_routes.py:3641`, `app/routes/procurement_routes.py:3748`, `app/routes/procurement_routes.py:3755` | `app/templates/procurement_approvals.html:122`, `app/templates/procurement_approvals.html:192`, `app/templates/procurement_cotacao.html:1334`, `app/templates/procurement_cotacao.html:1368`, `app/templates/procurement_inbox.html:624`, `app/templates/procurement_inbox.html:662` |
+| `erp_error` | `app/routes/procurement_routes.py:39`, `app/routes/procurement_routes.py:1549`, `app/routes/procurement_routes.py:2126`, `app/routes/procurement_routes.py:2134`, `app/routes/procurement_routes.py:3512`, `app/routes/procurement_routes.py:3641` | `app/templates/procurement_approvals.html:25`, `app/templates/procurement_home.html:87`, `app/templates/procurement_home.html:129`, `app/templates/procurement_home.html:336`, `app/templates/procurement_home.html:365`, `app/templates/procurement_inbox.html:67` |
+| `pending` | `app/routes/procurement_routes.py:41`, `app/routes/procurement_routes.py:949`, `app/routes/procurement_routes.py:1895`, `app/routes/procurement_routes.py:2656`, `app/routes/procurement_routes.py:2667`, `app/routes/procurement_routes.py:2683` | `app/templates/procurement_cotacao.html:961`, `app/templates/procurement_integration_logs.html:164`, `app/templates/procurement_purchase_order.html:110`, `app/routes/procurement_routes.py:41`, `app/routes/procurement_routes.py:949`, `app/routes/procurement_routes.py:1895` |
+| `opened` | `app/routes/procurement_routes.py:923`, `app/routes/procurement_routes.py:953`, `app/routes/procurement_routes.py:2656`, `app/db.py:276`, `app/db.py:869` | `app/routes/procurement_routes.py:923`, `app/routes/procurement_routes.py:953`, `app/routes/procurement_routes.py:2656` |
+| `submitted` | `app/routes/procurement_routes.py:923`, `app/routes/procurement_routes.py:1072`, `app/routes/procurement_routes.py:1093`, `app/routes/procurement_routes.py:3474`, `app/db.py:276`, `app/db.py:294` | `app/routes/procurement_routes.py:923`, `app/routes/procurement_routes.py:1072`, `app/routes/procurement_routes.py:1093`, `app/routes/procurement_routes.py:3474` |
+| `expired` | `app/routes/procurement_routes.py:943`, `app/routes/procurement_routes.py:972`, `app/db.py:276`, `app/db.py:869` | `app/routes/procurement_routes.py:943`, `app/routes/procurement_routes.py:972` |
+| `converted_to_po` | `app/routes/procurement_routes.py:2055`, `app/routes/procurement_routes.py:2062`, `app/db.py:328`, `app/db.py:921`, `app/static/js/ui_labels.js:18` | `app/routes/procurement_routes.py:2055`, `app/routes/procurement_routes.py:2062` |
+| `running` | `app/routes/procurement_routes.py:3797`, `app/static/js/ui_labels.js:19` | `app/templates/procurement_integration_logs.html:163`, `app/templates/procurement_purchase_order.html:110`, `app/routes/procurement_routes.py:3797` |
+| `succeeded` | `app/routes/procurement_routes.py:1401`, `app/routes/procurement_routes.py:1424`, `app/routes/procurement_routes.py:2165`, `app/static/js/ui_labels.js:20` | `app/routes/procurement_routes.py:1401`, `app/routes/procurement_routes.py:1424`, `app/routes/procurement_routes.py:2165` |
+| `failed` | `app/routes/procurement_routes.py:1407`, `app/routes/procurement_routes.py:2138`, `app/routes/procurement_routes.py:3756`, `app/static/js/ui_labels.js:21` | `app/templates/procurement_integration_logs.html:158`, `app/templates/procurement_purchase_order.html:109`, `app/routes/procurement_routes.py:1407`, `app/routes/procurement_routes.py:2138`, `app/routes/procurement_routes.py:3756` |
+
+### 2.1 Fontes centrais de status
+
+- Dicion?rio de labels de status UI: `app/static/js/ui_labels.js:2`
+- Sets de status aceitos no backend: `app/routes/procurement_routes.py:22` at? `app/routes/procurement_routes.py:43`
+- Constraints de status no banco (SQLite/Postgres): `app/db.py:185`, `app/db.py:227`, `app/db.py:275`, `app/db.py:327`, `app/db.py:346`
+
+## 3) Pontos onde exce??es backend podem vazar para a UI
+
+### SYNC-DETAILS (Alto)
+
+- Resumo: `integration_sync_api` retorna `details: str(exc)[:200]`; UI exibe `message/error` em toast/status.
+- Backend: `app/routes/procurement_routes.py:1406`, `app/routes/procurement_routes.py:1418`, `app/routes/procurement_routes.py:1414`
+- Superf?cie UI: `app/templates/procurement_integration_logs.html:311`, `app/templates/procurement_integration_logs.html:312`
+
+### SYNC-RUN-ERROR-SUMMARY (Alto)
+
+- Resumo: Resumo de excecao salvo em `sync_runs.error_summary` e devolvido pela API de logs; tela renderiza o texto diretamente.
+- Backend: `app/routes/procurement_routes.py:1411`, `app/routes/procurement_routes.py:1414`, `app/routes/procurement_routes.py:4791`
+- Superf?cie UI: `app/templates/procurement_integration_logs.html:213`
+
+### ERP-PUSH-DETAILS (Alto)
+
+- Resumo: Falha de integra??o ERP (`ErpError`) ? enviada em `details` e aparece na UI via `err.message`.
+- Backend: `app/routes/procurement_routes.py:2121`, `app/routes/procurement_routes.py:2122`, `app/routes/procurement_routes.py:2141`
+- Superf?cie UI: `app/templates/procurement_purchase_order.html:265`, `app/templates/procurement_inbox.html:915`, `app/templates/procurement_cotacao.html:1565`
+
+### AUTH-REGISTER-ERROR (M?dio)
+
+- Resumo: Erros de cadastro propagados como `str(exc)` para vari?vel `error`, renderizada diretamente no template de auth.
+- Backend: `app/auth.py:88`, `app/auth.py:89`, `app/auth.py:161`
+- Superf?cie UI: `app/templates/register.html:23`, `app/templates/login.html:23`
+
+### GENERIC-API-MESSAGE-TO-TOAST (M?dio)
+
+- Resumo: Frontend usa padr?o `payload.message || payload.error` em m?ltiplas telas; qualquer mensagem backend pode chegar ao usu?rio final.
+- Backend: `app/routes/procurement_routes.py:197`, `app/routes/procurement_routes.py:2141`
+- Superf?cie UI: `app/templates/procurement_solicitacoes.html:423`, `app/templates/procurement_cotacoes.html:243`, `app/templates/supplier_quote_portal.html:181`
+
+## Observa??es
+
+- O invent?rio de textos usa extra??o heur?stica. Em templates grandes com JS inline, alguns textos t?cnicos podem aparecer junto dos textos de UX.
+- Refer?ncias s?o aproximadas por linha no snapshot auditado.

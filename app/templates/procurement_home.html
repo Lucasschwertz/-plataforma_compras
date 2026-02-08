@@ -1,8 +1,8 @@
 {% extends "_layout.html" %}
 {% set active_nav = "dashboard" %}
 {% set ui_role = role | default("buyer") %}
-{% block title %}Dashboard | Plataforma Compras{% endblock %}
-{% block page_title %}{% if ui_role == "approver" %}Painel de aprovacoes{% elif ui_role == "admin" %}Painel administrativo{% elif ui_role == "manager" %}Painel gestor{% else %}Dashboard de compras{% endif %}{% endblock %}
+{% block title %}{{ ui_text("title.home") }}{% endblock %}
+{% block page_title %}{% if ui_role == "approver" %}{{ ui_text("page.home.approver") }}{% elif ui_role == "admin" %}{{ ui_text("page.home.admin") }}{% elif ui_role == "manager" %}{{ ui_text("page.home.manager") }}{% else %}{{ ui_text("page.home.default") }}{% endif %}{% endblock %}
 {% block breadcrumb_tail %}
   <span class="crumb-sep">/</span><span class="crumb current">Painel</span>
 {% endblock %}
@@ -75,7 +75,7 @@
       <div class="meta">Cotacoes abertas para receber propostas</div>
     </a>
     <a class="kpi-card" href="/procurement/inbox?type=purchase_request&status=pending_rfq&workspace_id={{ workspace_id }}">
-      <div class="kpi-label">Pendentes de cotacao</div>
+      <div class="kpi-label">{{ ui_status_labels["pending_rfq"] }}</div>
       <div class="kpi-value skeleton" data-kpi="pending_rfq">0</div>
       <div class="meta">Solicitacoes prontas para iniciar cotacao</div>
     </a>
@@ -112,21 +112,15 @@
     <div class="grid grid-4">
       <select class="select" id="quickType">
         <option value="">Todos os tipos</option>
-        <option value="purchase_request">Solicitacao</option>
-        <option value="rfq">Cotacao</option>
-        <option value="purchase_order">Ordem de compra</option>
+        <option value="purchase_request">{{ ui_terms["purchase_request"] }}</option>
+        <option value="rfq">{{ ui_terms["rfq"] }}</option>
+        <option value="purchase_order">{{ ui_terms["purchase_order"] }}</option>
       </select>
       <select class="select" id="quickStatus">
-        <option value="">Todos os status</option>
-        <option value="pending_rfq">Pendente de cotacao</option>
-        <option value="in_rfq">Em cotacao</option>
-        <option value="open">Cotacao aberta</option>
-        <option value="collecting_quotes">Coletando propostas</option>
-        <option value="awarded">Com decisao</option>
-        <option value="draft">OC rascunho</option>
-        <option value="approved">OC aprovada</option>
-        <option value="sent_to_erp">OC enviada ao ERP</option>
-        <option value="erp_error">Falha no ERP</option>
+        <option value="">{{ ui_text("label.all_statuses") }}</option>
+        {% for key in ["pending_rfq", "in_rfq", "open", "collecting_quotes", "awarded", "draft", "approved", "sent_to_erp", "erp_error"] %}
+          <option value="{{ key }}" title="{{ ui_status_descriptions.get(key, '') }}">{{ ui_status_labels[key] }}</option>
+        {% endfor %}
       </select>
       <select class="select" id="quickPriority">
         <option value="">Todas as prioridades</option>

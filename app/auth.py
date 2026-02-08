@@ -4,14 +4,21 @@ from typing import Iterable
 
 import re
 
-from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.db import get_db
+from app.errors import PermissionError as AppPermissionError
+from app.errors import ValidationError
 from app.tenant import DEFAULT_TENANT_ID
+from app.ui_strings import error_message
 
 
 auth_bp = Blueprint("auth", __name__)
+
+
+def _err(key: str, fallback: str | None = None) -> str:
+    return error_message(key, fallback)
 
 
 def register_auth(app) -> None:
@@ -36,7 +43,12 @@ def register_auth(app) -> None:
             return None
 
         if path.startswith("/api/"):
-            return jsonify({"error": "auth_required", "message": "Autenticacao necessaria."}), 401
+            raise AppPermissionError(
+                code="auth_required",
+                message_key="auth_required",
+                http_status=401,
+                critical=False,
+            )
 
         next_url = request.full_path or "/"
         if next_url.endswith("?"):
@@ -62,7 +74,7 @@ def login():
             session["user_role"] = user.get("role", "buyer")
             return redirect(_safe_next_url() or url_for("home.home"))
 
-        error = "Credenciais invalidas. Tente novamente."
+        error = _err("auth_invalid_credentials")
 
     return render_template("login.html", error=error)
 
@@ -80,13 +92,13 @@ def register():
         company_name = (request.form.get("company_name") or "").strip()
 
         if not email or not password:
-            error = "Informe email e senha."
+            error = _err("auth_missing_credentials")
         else:
             tenant_id = _resolve_tenant_id(company_name)
             try:
                 user = _create_user(email, password, display_name, tenant_id, company_name or None)
-            except ValueError as exc:
-                error = str(exc)
+            except ValidationError as exc:
+                error = exc.user_message()
             else:
                 session["user_email"] = user["email"]
                 session["display_name"] = user["display_name"]
@@ -158,7 +170,12 @@ def _create_user(
         (email,),
     ).fetchone()
     if existing:
-        raise ValueError("Email ja cadastrado. Use outro email ou faca login.")
+        raise ValidationError(
+            code="email_already_registered",
+            message_key="email_already_registered",
+            http_status=400,
+            critical=False,
+        )
 
     _ensure_tenant(db, tenant_id, company_name or f"Tenant {tenant_id}")
 

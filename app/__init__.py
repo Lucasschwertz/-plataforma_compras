@@ -1,7 +1,13 @@
-from flask import Flask, g, request, session
+import uuid
+
+from flask import Flask, g, jsonify, request, session
+from werkzeug.exceptions import HTTPException
 
 from app.config import Config
 from app.db import close_db, init_db
+from app.procurement.critical_actions import CRITICAL_ACTIONS
+from app.procurement.flow_policy import build_process_steps
+from app.ui_strings import confirm_message, get_ui_text, template_bundle
 
 
 def create_app(config_class=Config):
@@ -9,6 +15,7 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
 
     _ensure_database_dir(app)
+    _register_error_handlers(app)
     _register_auth(app)
     _register_tenant(app)
     _register_template_context(app)
@@ -49,6 +56,85 @@ def _register_scheduler(app: Flask) -> None:
     from app.scheduler import start_sync_scheduler
 
     start_sync_scheduler(app)
+
+
+def _register_error_handlers(app: Flask) -> None:
+    from app.erp_client import ErpError
+    from app.errors import AppError, IntegrationError, SystemError, classify_erp_failure
+
+    def _resolve_request_id() -> str:
+        request_id = (getattr(g, "request_id", None) or "").strip()
+        if request_id:
+            return request_id
+        incoming = (request.headers.get("X-Request-Id") or "").strip()
+        request_id = incoming or str(uuid.uuid4())
+        g.request_id = request_id
+        return request_id
+
+    @app.before_request
+    def _ensure_request_id() -> None:
+        _resolve_request_id()
+
+    @app.after_request
+    def _append_request_id(response):
+        response.headers["X-Request-Id"] = _resolve_request_id()
+        return response
+
+    def _log_error(error: AppError, request_id: str) -> None:
+        log_method = app.logger.error if error.critical else app.logger.warning
+        log_method(
+            "request_id=%s code=%s status=%s message_key=%s details=%s path=%s method=%s",
+            request_id,
+            error.code,
+            error.http_status,
+            error.message_key,
+            error.details,
+            request.path,
+            request.method,
+            exc_info=error.critical,
+        )
+
+    @app.errorhandler(AppError)
+    def _handle_app_error(exc: AppError):
+        request_id = _resolve_request_id()
+        _log_error(exc, request_id)
+        return jsonify(exc.to_response_payload(request_id)), exc.http_status
+
+    @app.errorhandler(ErpError)
+    def _handle_erp_error(exc: ErpError):
+        request_id = _resolve_request_id()
+        code, message_key, http_status = classify_erp_failure(str(exc))
+        mapped = IntegrationError(
+            code=code,
+            message_key=message_key,
+            http_status=http_status,
+            critical=False,
+            details=str(exc),
+        )
+        _log_error(mapped, request_id)
+        return jsonify(mapped.to_response_payload(request_id)), mapped.http_status
+
+    @app.errorhandler(Exception)
+    def _handle_unexpected(exc: Exception):
+        if isinstance(exc, HTTPException):
+            return exc
+
+        request_id = _resolve_request_id()
+        mapped = SystemError(
+            code="unexpected_error",
+            message_key="unexpected_error",
+            http_status=500,
+            critical=True,
+            details=str(exc),
+        )
+        app.logger.exception(
+            "request_id=%s code=%s path=%s method=%s",
+            request_id,
+            mapped.code,
+            request.path,
+            request.method,
+        )
+        return jsonify(mapped.to_response_payload(request_id)), mapped.http_status
 
 
 def _register_tenant(app: Flask) -> None:
@@ -138,12 +224,32 @@ def _register_template_context(app: Flask) -> None:
             # UI resiliente: nunca quebrar render por falha de lookup.
             pass
 
+        ui_bundle = template_bundle()
+        critical_actions_bundle = {}
+        for action_key, meta in CRITICAL_ACTIONS.items():
+            confirm_key = meta.get("confirm_message_key") or action_key
+            impact_key = meta.get("impact_text_key") or f"impact.{action_key}"
+            critical_actions_bundle[action_key] = {
+                "action_key": action_key,
+                "confirm_key": confirm_key,
+                "confirm_message": confirm_message(confirm_key, confirm_key),
+                "impact_key": impact_key,
+                "impact": get_ui_text(impact_key, impact_key),
+            }
+        frontend_bundle = dict(ui_bundle.get("ui_frontend_bundle") or {})
+        frontend_bundle["critical_actions"] = critical_actions_bundle
+        ui_bundle["ui_frontend_bundle"] = frontend_bundle
+
         return {
             "role": role,
             "workspace_id": workspace_id,
             "workspace_name": workspace_name,
             "workspace_options": workspace_options,
             "workspace_user_name": session.get("display_name") or "usuario",
+            "ui_text": get_ui_text,
+            "ui_process_steps": build_process_steps,
+            "ui_critical_actions": critical_actions_bundle,
+            **ui_bundle,
         }
 
 
