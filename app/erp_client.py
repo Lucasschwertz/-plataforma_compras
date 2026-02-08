@@ -287,7 +287,7 @@ def _load_purchase_request_records_from_csv(schema_path: Path) -> List[dict]:
         raise ErpError("Schema E405SOL sem coluna NumSol.")
 
     result: List[dict] = []
-    for row in _iter_csv_rows(data_path):
+    for row_number, row in enumerate(_iter_csv_rows(data_path), start=1):
         num_sol = _safe_value(row, index.get("NumSol"))
         if not num_sol:
             continue
@@ -297,16 +297,36 @@ def _load_purchase_request_records_from_csv(schema_path: Path) -> List[dict]:
         num_cot = _safe_value(row, index.get("NumCot"))
         num_pct = _safe_value(row, index.get("NumPct"))
         cod_dep = _safe_value(row, index.get("CodDep"))
+        seq_sol = _safe_value(row, index.get("SeqSol"))
+        qtd_apr = _safe_value(row, index.get("QtdApr"))
+        qtd_sol = _safe_value(row, index.get("QtdSol"))
+        uni_med = _safe_value(row, index.get("UniMed"))
+        pro_ser = _safe_value(row, index.get("ProSer"))
+        cod_pro = _safe_value(row, index.get("CodPro"))
+        cod_der = _safe_value(row, index.get("CodDer"))
+        cod_ser = _safe_value(row, index.get("CodSer"))
+        obs_sol = _safe_value(row, index.get("ObsSol"))
         updated_at = _parse_iso_datetime(dat_efc) or _stable_epoch()
+        line_key = seq_sol or str(row_number)
         result.append(
             {
-                "external_id": num_sol,
+                # External row id no bridge CSV, para watermark incremental por item da solicitacao.
+                "external_id": f"{num_sol}:{line_key}",
                 "updated_at": updated_at,
                 "NumSol": num_sol,
                 "DatEfc": dat_efc,
                 "NumCot": num_cot,
                 "NumPct": num_pct,
                 "CodDep": cod_dep,
+                "SeqSol": seq_sol,
+                "QtdApr": qtd_apr,
+                "QtdSol": qtd_sol,
+                "UniMed": uni_med,
+                "ProSer": pro_ser,
+                "CodPro": cod_pro,
+                "CodDer": cod_der,
+                "CodSer": cod_ser,
+                "ObsSol": obs_sol,
             }
         )
     return result

@@ -52,6 +52,8 @@ class Config:
     ERP_CSV_E440NFC = os.environ.get("ERP_CSV_E440NFC")
     ERP_CSV_E440IPC = os.environ.get("ERP_CSV_E440IPC")
     ERP_CSV_E440ISC = os.environ.get("ERP_CSV_E440ISC")
+    ERP_MIRROR_SCHEMA = os.environ.get("ERP_MIRROR_SCHEMA", os.path.join(BASE_DIR, "tabelas.csv"))
+    ERP_MIRROR_AUTO_CREATE = _bool_env("ERP_MIRROR_AUTO_CREATE", True)
     ERP_TIMEOUT_SECONDS = _int_env("ERP_TIMEOUT_SECONDS", 20)
     ERP_VERIFY_SSL = _bool_env("ERP_VERIFY_SSL", True)
     ERP_RETRY_ATTEMPTS = _int_env("ERP_RETRY_ATTEMPTS", 2)

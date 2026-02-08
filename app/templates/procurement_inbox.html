@@ -1,4 +1,4 @@
-﻿
+
 {% extends "_layout.html" %}
 {% set active_nav = "procurement" %}
 {% block title %}Inbox | Plataforma Compras{% endblock %}
@@ -22,7 +22,7 @@
       </div>
       <div class="page-actions" style="margin-bottom: 10px">
         <a class="btn btn-ghost btn-small" href="/procurement/inbox?type=purchase_request&workspace_id={{ workspace_id }}">Solicitacoes</a>
-        <a class="btn btn-ghost btn-small" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Cotacoes</a>
+        <a class="btn btn-ghost btn-small" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Cotacoes</a>
         <a class="btn btn-ghost btn-small" href="/procurement/inbox?type=purchase_order&workspace_id={{ workspace_id }}">Ordens de compra</a>
       </div>
       <div class="grid grid-3" aria-label="Filtros da inbox">
@@ -56,11 +56,11 @@
           <span class="workflow-tab-label">1 Solicitacoes</span>
           <span class="workflow-tab-count" data-workflow-count="pending_rfq">0</span>
         </a>
-        <a class="workflow-tab" data-step="quotes" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
+        <a class="workflow-tab" data-step="quotes" href="/procurement/cotacoes?status=open,collecting_quotes&workspace_id={{ workspace_id }}">
           <span class="workflow-tab-label">2 Cotacao</span>
           <span class="workflow-tab-count" data-workflow-count="awaiting_quotes">0</span>
         </a>
-        <a class="workflow-tab" data-step="award" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
+        <a class="workflow-tab" data-step="award" href="/procurement/cotacoes?awaiting_po=1&workspace_id={{ workspace_id }}">
           <span class="workflow-tab-label">3 Decisao</span>
           <span class="workflow-tab-count" data-workflow-count="awarded_waiting_po">0</span>
         </a>
@@ -76,11 +76,11 @@
         <div class="kpi-label">Pendentes de cotacao</div>
         <div class="kpi-value" data-kpi="pending_rfq">0</div>
       </a>
-      <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
+      <a class="kpi-card" href="/procurement/cotacoes?status=open,collecting_quotes&workspace_id={{ workspace_id }}">
         <div class="kpi-label">Aguardando cotacoes</div>
         <div class="kpi-value" data-kpi="awaiting_quotes">0</div>
       </a>
-      <a class="kpi-card" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
+      <a class="kpi-card" href="/procurement/cotacoes?awaiting_po=1&workspace_id={{ workspace_id }}">
         <div class="kpi-label">Decisao sem OC</div>
         <div class="kpi-value" data-kpi="awarded_waiting_po">0</div>
       </a>
@@ -1359,3 +1359,4 @@
       loadInbox();
     </script>
 {% endblock %}
+

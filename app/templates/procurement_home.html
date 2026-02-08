@@ -1,4 +1,4 @@
-﻿{% extends "_layout.html" %}
+{% extends "_layout.html" %}
 {% set active_nav = "dashboard" %}
 {% set ui_role = role | default("buyer") %}
 {% block title %}Dashboard | Plataforma Compras{% endblock %}
@@ -9,7 +9,7 @@
 {% block page_actions %}
   {% if ui_role == "approver" %}
     <a class="btn btn-primary" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Abrir aprovacoes</a>
-    <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
+    <a class="btn btn-ghost" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Abrir cotacoes</a>
   {% elif ui_role == "manager" %}
     <a class="btn btn-primary" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Abrir aprovacoes</a>
     <a class="btn btn-ghost" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">Abrir trilha</a>
@@ -18,7 +18,7 @@
     <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Abrir integracoes</a>
   {% else %}
     <a class="btn btn-primary" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir inbox</a>
-    <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
+    <a class="btn btn-ghost" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Abrir cotacoes</a>
   {% endif %}
 {% endblock %}
 {% block content %}
@@ -35,7 +35,7 @@
       {% elif ui_role == "admin" %}
         <a class="btn btn-primary" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Revisar integracoes</a>
       {% else %}
-        <a class="btn btn-primary" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">Conduzir cotacoes</a>
+        <a class="btn btn-primary" href="/procurement/cotacoes?status=open,collecting_quotes&workspace_id={{ workspace_id }}">Conduzir cotacoes</a>
       {% endif %}
       <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Abrir inbox</a>
     </div>
@@ -69,7 +69,7 @@
   </section>
 
   <section class="grid grid-4">
-    <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
+    <a class="kpi-card" href="/procurement/cotacoes?status=open,collecting_quotes&workspace_id={{ workspace_id }}">
       <div class="kpi-label">Aguardando cotacoes</div>
       <div class="kpi-value skeleton" data-kpi="awaiting_quotes">0</div>
       <div class="meta">Cotacoes abertas para receber propostas</div>
@@ -79,7 +79,7 @@
       <div class="kpi-value skeleton" data-kpi="pending_rfq">0</div>
       <div class="meta">Solicitacoes prontas para iniciar cotacao</div>
     </a>
-    <a class="kpi-card" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
+    <a class="kpi-card" href="/procurement/cotacoes?awaiting_po=1&workspace_id={{ workspace_id }}">
       <div class="kpi-label">Decisao sem OC</div>
       <div class="kpi-value skeleton" data-kpi="awarded_waiting_po">0</div>
       <div class="meta">Cotacoes decididas sem ordem de compra</div>
@@ -181,7 +181,7 @@
           <div class="title">Executar cotacoes</div>
           <div class="meta">Selecionar itens e convidar fornecedores com link</div>
         </a>
-        <a class="list-item" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
+        <a class="list-item" href="/procurement/cotacoes?awaiting_po=1&workspace_id={{ workspace_id }}">
           <div class="title">Registrar decisoes</div>
           <div class="meta">Definir fornecedor e gerar ordem de compra</div>
         </a>
@@ -207,7 +207,7 @@
           <div class="title">2. Executar cotacoes</div>
           <div class="meta">Selecionar itens, convidar fornecedores e gerar links</div>
         </a>
-        <a class="list-item" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
+        <a class="list-item" href="/procurement/cotacoes?awaiting_po=1&workspace_id={{ workspace_id }}">
           <div class="title">3. Registrar decisoes</div>
           <div class="meta">Escolher fornecedor e justificar decisao</div>
         </a>
@@ -223,7 +223,7 @@
         <h2 class="card-title">Pilares da plataforma</h2>
       </div>
       <div class="list">
-        <a class="list-item" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">
+        <a class="list-item" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">
           <div class="title">Cotacoes</div>
           <div class="meta">RFX, comparacao de fornecedores e decisao</div>
         </a>
@@ -319,14 +319,14 @@
               title: "Conducao de cotacoes",
               value: `${awaitingQuotes}`,
               detail: "Cotacoes ativas que precisam de fechamento",
-              href: withWorkspace("/procurement/inbox?type=rfq&status=open,collecting_quotes"),
+              href: withWorkspace("/procurement/cotacoes?status=open,collecting_quotes"),
               cta: "Abrir cotacoes",
             },
             {
               title: "Decisoes sem OC",
               value: `${waitingPo}`,
               detail: "Decisoes registradas, aguardando ordem de compra",
-              href: withWorkspace("/procurement/inbox?type=rfq&awaiting_po=1"),
+              href: withWorkspace("/procurement/cotacoes?awaiting_po=1"),
               cta: "Converter",
             },
             {
@@ -355,7 +355,7 @@
               title: "Converter decisoes",
               value: `${waitingPo}`,
               detail: "Decisoes prontas para gerar ordem de compra",
-              href: withWorkspace("/procurement/inbox?type=rfq&awaiting_po=1"),
+              href: withWorkspace("/procurement/cotacoes?awaiting_po=1"),
               cta: "Gerar OC",
             },
             {
@@ -405,7 +405,7 @@
             title: "Abrir cotacoes",
             value: `${awaitingQuotes}`,
             detail: "Cotacoes aguardando proposta de fornecedor",
-            href: withWorkspace("/procurement/inbox?type=rfq&status=open,collecting_quotes"),
+            href: withWorkspace("/procurement/cotacoes?status=open,collecting_quotes"),
             cta: "Conduzir",
           },
           {
@@ -419,7 +419,7 @@
             title: "Concluir ciclo de compra",
             value: `${waitingPo}`,
             detail: "Cotacoes com decisao pendente de ordem",
-            href: withWorkspace("/procurement/inbox?type=rfq&awaiting_po=1"),
+            href: withWorkspace("/procurement/cotacoes?awaiting_po=1"),
             cta: "Finalizar",
           },
         ],
@@ -557,3 +557,4 @@
     loadDashboardData();
   </script>
 {% endblock %}
+

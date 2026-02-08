@@ -1,0 +1,331 @@
+{% extends "_layout.html" %}
+{% set active_nav = "sourcing" %}
+{% block title %}Cotacoes | Plataforma Compras{% endblock %}
+{% block page_title %}Cotacoes{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb current">Cotacoes</span>
+{% endblock %}
+{% block page_actions %}
+  <button class="btn" id="refreshBtn">Atualizar</button>
+  <a class="btn btn-ghost" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">Solicitacoes</a>
+  <a class="btn btn-primary" href="/procurement/cotacoes/abrir?workspace_id={{ workspace_id }}">Nova cotacao</a>
+{% endblock %}
+
+{% block content %}
+  <section class="grid grid-4">
+    <article class="kpi-card">
+      <div class="kpi-label">Abertas</div>
+      <div class="kpi-value" data-kpi="open">0</div>
+      <div class="meta">Em coleta com fornecedores</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Coletando propostas</div>
+      <div class="kpi-value" data-kpi="collecting_quotes">0</div>
+      <div class="meta">Com convites e respostas em andamento</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Com decisao</div>
+      <div class="kpi-value" data-kpi="awarded">0</div>
+      <div class="meta">Prontas para ordem de compra</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Canceladas</div>
+      <div class="kpi-value" data-kpi="cancelled">0</div>
+      <div class="meta">Encerradas sem compra</div>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Painel de cotacoes</h2>
+      <span class="meta" id="summary">Carregando cotacoes</span>
+    </div>
+    <div class="grid grid-4" style="margin-bottom: 12px">
+      <select class="select" id="statusFilter">
+        <option value="">Todos os status</option>
+        <option value="draft">Rascunho</option>
+        <option value="open">Aberta</option>
+        <option value="collecting_quotes">Coletando propostas</option>
+        <option value="closed">Fechada</option>
+        <option value="awarded">Com decisao</option>
+        <option value="cancelled">Cancelada</option>
+      </select>
+      <input class="input" id="titleFilter" placeholder="Buscar por titulo" />
+      <button class="btn btn-ghost" id="applyBtn">Aplicar filtros</button>
+      <a class="btn btn-ghost" href="/procurement/cotacoes/abrir?workspace_id={{ workspace_id }}">Abrir cotacao</a>
+    </div>
+    <div class="table-wrap">
+      <table class="table-mobile-cards table-compact">
+        <thead>
+          <tr>
+            <th>Cotacao</th>
+            <th>Status</th>
+            <th class="numeric">Itens</th>
+            <th class="numeric">Fornecedores</th>
+            <th>Atualizada</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody id="rfqsBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="modal-backdrop" id="rfqModalBackdrop" role="dialog" aria-modal="true" hidden>
+    <article class="modal-card">
+      <div class="card-header">
+        <h2 class="card-title">Atualizar cotacao</h2>
+        <button class="btn btn-ghost btn-small" type="button" id="rfqModalCloseBtn">Fechar</button>
+      </div>
+      <form id="rfqForm" class="stack">
+        <input type="hidden" id="rfqIdInput" />
+        <div>
+          <label class="meta" for="rfqTitleInput">Titulo</label>
+          <input class="input" id="rfqTitleInput" required />
+        </div>
+        <div>
+          <label class="meta" for="rfqStatusInput">Status</label>
+          <select class="select" id="rfqStatusInput">
+            <option value="draft">Rascunho</option>
+            <option value="open">Aberta</option>
+            <option value="collecting_quotes">Coletando propostas</option>
+            <option value="closed">Fechada</option>
+            <option value="awarded">Com decisao</option>
+            <option value="cancelled">Cancelada</option>
+          </select>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-ghost" type="button" id="rfqCancelBtn">Cancelar</button>
+          <button class="btn btn-primary" type="submit" id="rfqSubmitBtn">Salvar cotacao</button>
+        </div>
+      </form>
+    </article>
+  </div>
+{% endblock %}
+
+{% block page_scripts %}
+  <script>
+    const workspaceId = "{{ workspace_id }}";
+    const Platform = window.PlatformUI || {};
+    const rfqsBody = document.getElementById("rfqsBody");
+    const summary = document.getElementById("summary");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const applyBtn = document.getElementById("applyBtn");
+    const statusFilter = document.getElementById("statusFilter");
+    const titleFilter = document.getElementById("titleFilter");
+
+    const rfqModalBackdrop = document.getElementById("rfqModalBackdrop");
+    const rfqModalCloseBtn = document.getElementById("rfqModalCloseBtn");
+    const rfqCancelBtn = document.getElementById("rfqCancelBtn");
+    const rfqForm = document.getElementById("rfqForm");
+    const rfqIdInput = document.getElementById("rfqIdInput");
+    const rfqTitleInput = document.getElementById("rfqTitleInput");
+    const rfqStatusInput = document.getElementById("rfqStatusInput");
+    const rfqSubmitBtn = document.getElementById("rfqSubmitBtn");
+
+    const state = { items: [], query: { status: "", title: "" } };
+
+    const withWorkspace = (path) =>
+      Platform.withWorkspace
+        ? Platform.withWorkspace(path, workspaceId)
+        : `${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
+
+    const escapeHtml = Platform.escapeHtml
+      ? Platform.escapeHtml
+      : (value) =>
+          String(value ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+
+    function statusLabel(value) {
+      if (window.UiLabels?.prettyStatus) return window.UiLabels.prettyStatus(value);
+      return value || "Nao informado";
+    }
+
+    function renderEmpty(message) {
+      rfqsBody.innerHTML = `
+        <tr>
+          <td colspan="6" class="empty-row">
+            <div class="empty-state-inline">
+              <div class="empty-state-title">${escapeHtml(message)}</div>
+              <div class="meta">Abra uma cotacao a partir das solicitacoes para iniciar a negociacao</div>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    function updateKpis(items) {
+      const counters = { open: 0, collecting_quotes: 0, awarded: 0, cancelled: 0 };
+      items.forEach((item) => {
+        if (item.status in counters) counters[item.status] += 1;
+      });
+      Object.entries(counters).forEach(([key, value]) => {
+        const el = document.querySelector(`[data-kpi='${key}']`);
+        if (el) el.textContent = String(value);
+      });
+    }
+
+    function renderRows(items) {
+      state.items = items;
+      updateKpis(items);
+      if (!items.length) {
+        summary.textContent = "Sem cotacoes para o filtro atual";
+        renderEmpty("Nenhuma cotacao encontrada");
+        return;
+      }
+
+      summary.textContent = `${items.length} cotacoes carregadas`;
+      rfqsBody.innerHTML = items
+        .map((item) => `
+          <tr>
+            <td data-label="Cotacao"><strong>${escapeHtml(item.title || `Cotacao ${item.id}`)}</strong><br /><span class="meta">ID ${item.id}</span></td>
+            <td data-label="Status">${escapeHtml(statusLabel(item.status))}</td>
+            <td class="numeric" data-label="Itens">${escapeHtml(item.item_count ?? 0)}</td>
+            <td class="numeric" data-label="Fornecedores">${escapeHtml(item.supplier_count ?? 0)}</td>
+            <td data-label="Atualizada">${escapeHtml(item.updated_at || "-")}</td>
+            <td class="cell-actions" data-label="Acoes">
+              <div class="actions-cell">
+                <a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/cotacoes/${item.id}`)}">Mesa</a>
+                <button class="btn btn-small btn-ghost" type="button" data-edit-rfq="${item.id}">Editar</button>
+                <button class="btn btn-small" type="button" data-cancel-rfq="${item.id}" ${item.status === "cancelled" ? "disabled" : ""}>Cancelar</button>
+              </div>
+            </td>
+          </tr>
+        `)
+        .join("");
+
+      rfqsBody.querySelectorAll("[data-edit-rfq]").forEach((button) => {
+        button.addEventListener("click", () => openEditModal(Number(button.getAttribute("data-edit-rfq"))));
+      });
+
+      rfqsBody.querySelectorAll("[data-cancel-rfq]").forEach((button) => {
+        button.addEventListener("click", () => cancelRfq(Number(button.getAttribute("data-cancel-rfq"))));
+      });
+    }
+
+    function openModal() {
+      rfqModalBackdrop.hidden = false;
+      document.body.classList.add("modal-open");
+    }
+
+    function closeModal() {
+      rfqModalBackdrop.hidden = true;
+      document.body.classList.remove("modal-open");
+      rfqForm.reset();
+      rfqIdInput.value = "";
+      rfqStatusInput.value = "draft";
+    }
+
+    function openEditModal(rfqId) {
+      const rfq = state.items.find((item) => Number(item.id) === Number(rfqId));
+      if (!rfq) return;
+      rfqIdInput.value = String(rfq.id);
+      rfqTitleInput.value = rfq.title || "";
+      rfqStatusInput.value = rfq.status || "draft";
+      openModal();
+    }
+
+    async function cancelRfq(rfqId) {
+      const target = state.items.find((item) => Number(item.id) === Number(rfqId));
+      if (!target || target.status === "cancelled") return;
+      if (!confirm("Confirmar cancelamento da cotacao?")) return;
+      try {
+        const response = await fetch(withWorkspace(`/api/procurement/rfqs/${rfqId}`), { method: "DELETE" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.message || payload?.error || "erro");
+        if (window.showToast) window.showToast("success", "Cotacao cancelada");
+        await loadRfqs();
+      } catch (error) {
+        if (window.showToast) window.showToast("danger", `Falha ao cancelar cotacao, ${error.message || "erro"}`);
+      }
+    }
+
+    async function loadRfqs() {
+      const params = new URLSearchParams();
+      if (state.query.status) params.set("status", state.query.status);
+      const url = withWorkspace(`/api/procurement/rfqs${params.toString() ? `?${params.toString()}` : ""}`);
+
+      try {
+        const response = await fetch(url);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.message || payload?.error || "erro");
+        let items = Array.isArray(payload.items) ? payload.items : [];
+        if (state.query.title) {
+          const q = state.query.title.toLowerCase();
+          items = items.filter((item) => String(item.title || "").toLowerCase().includes(q));
+        }
+        renderRows(items);
+      } catch (error) {
+        summary.textContent = "Falha ao carregar";
+        renderEmpty("Falha ao carregar cotacoes");
+        if (window.showToast) window.showToast("danger", "Nao foi possivel carregar cotacoes");
+      }
+    }
+
+    refreshBtn.addEventListener("click", loadRfqs);
+    applyBtn.addEventListener("click", () => {
+      state.query.status = statusFilter.value;
+      state.query.title = titleFilter.value.trim();
+      loadRfqs();
+    });
+
+    rfqModalCloseBtn.addEventListener("click", closeModal);
+    rfqCancelBtn.addEventListener("click", closeModal);
+    rfqModalBackdrop.addEventListener("click", (event) => {
+      if (event.target === rfqModalBackdrop) closeModal();
+    });
+
+    rfqForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const rfqId = Number(rfqIdInput.value);
+      if (!rfqId) return;
+
+      const payload = {
+        title: rfqTitleInput.value.trim(),
+        status: rfqStatusInput.value,
+      };
+
+      if (Platform.setButtonBusy) {
+        Platform.setButtonBusy(rfqSubmitBtn, true, { loading: "Salvando", idle: "Salvar cotacao" });
+      } else {
+        rfqSubmitBtn.disabled = true;
+      }
+
+      try {
+        const response = await fetch(withWorkspace(`/api/procurement/rfqs/${rfqId}`), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result?.message || result?.error || "erro");
+        if (window.showToast) window.showToast("success", "Cotacao atualizada");
+        closeModal();
+        await loadRfqs();
+      } catch (error) {
+        if (window.showToast) window.showToast("danger", `Falha ao atualizar cotacao, ${error.message || "erro"}`);
+      } finally {
+        if (Platform.setButtonBusy) {
+          Platform.setButtonBusy(rfqSubmitBtn, false, { idle: "Salvar cotacao" });
+        } else {
+          rfqSubmitBtn.disabled = false;
+        }
+      }
+    });
+
+    const initialParams = new URLSearchParams(window.location.search);
+    state.query.status = initialParams.get("status") || "";
+    state.query.title = initialParams.get("title") || "";
+    if (!state.query.status && initialParams.get("awaiting_po") === "1") {
+      state.query.status = "awarded";
+    }
+    if (state.query.status) statusFilter.value = state.query.status;
+    if (state.query.title) titleFilter.value = state.query.title;
+
+    loadRfqs();
+  </script>
+{% endblock %}

@@ -17,7 +17,11 @@ def _schema_line(table: str, field_name: str, order: int) -> str:
 
 class ErpCsvSyncTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self._tmpdir = tempfile.TemporaryDirectory(
+            prefix="pc_test_",
+            dir=os.getcwd(),
+            ignore_cleanup_errors=True,
+        )
         self._create_csv_fixture_files(self._tmpdir.name)
         db_path = os.path.join(self._tmpdir.name, "plataforma_compras_test.db")
 
@@ -154,6 +158,11 @@ class ErpCsvSyncTest(unittest.TestCase):
                 (self.tenant_id,),
             ).fetchone()["total"]
             self.assertEqual(total, 2)
+            item_total = db.execute(
+                "SELECT COUNT(*) AS total FROM purchase_request_items WHERE tenant_id = ?",
+                (self.tenant_id,),
+            ).fetchone()["total"]
+            self.assertGreaterEqual(item_total, 2)
 
     def test_supplier_and_quote_scopes_sync_from_csv(self) -> None:
         supplier_sync = self.client.post(
@@ -271,6 +280,43 @@ class ErpCsvSyncTest(unittest.TestCase):
             ).fetchone()
             self.assertIsNotNone(po_row)
             self.assertEqual(po_row["status"], "received")
+
+    def test_purchase_order_crud_for_local_orders(self) -> None:
+        create = self.client.post(
+            "/api/procurement/purchase-orders",
+            headers=self.headers,
+            json={
+                "number": "OC-LOCAL-1",
+                "supplier_name": "Fornecedor Local",
+                "status": "draft",
+                "currency": "BRL",
+                "total_amount": 123.45,
+            },
+        )
+        self.assertEqual(create.status_code, 201)
+        created_id = create.get_json()["id"]
+
+        update = self.client.patch(
+            f"/api/procurement/purchase-orders/{created_id}",
+            headers=self.headers,
+            json={"status": "approved", "total_amount": 150.0},
+        )
+        self.assertEqual(update.status_code, 200)
+        self.assertEqual(update.get_json()["status"], "approved")
+
+        read = self.client.get(
+            f"/api/procurement/purchase-orders/{created_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(read.status_code, 200)
+        self.assertEqual(read.get_json()["purchase_order"]["status"], "approved")
+
+        delete = self.client.delete(
+            f"/api/procurement/purchase-orders/{created_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(delete.status_code, 200)
+        self.assertEqual(delete.get_json()["status"], "cancelled")
 
 
 if __name__ == "__main__":

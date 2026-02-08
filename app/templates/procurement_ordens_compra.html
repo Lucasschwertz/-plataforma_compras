@@ -1,0 +1,382 @@
+{% extends "_layout.html" %}
+{% set active_nav = "orders" %}
+{% block title %}Ordens de compra | Plataforma Compras{% endblock %}
+{% block page_title %}Ordens de compra{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb current">Ordens de compra</span>
+{% endblock %}
+{% block page_actions %}
+  <button class="btn" id="refreshBtn">Atualizar</button>
+  <button class="btn btn-primary" id="newOrderBtn">Nova ordem</button>
+{% endblock %}
+
+{% block content %}
+  <section class="grid grid-4">
+    <article class="kpi-card">
+      <div class="kpi-label">Aprovadas</div>
+      <div class="kpi-value" data-kpi="approved">0</div>
+      <div class="meta">Prontas para envio ao ERP</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Em envio</div>
+      <div class="kpi-value" data-kpi="sent_to_erp">0</div>
+      <div class="meta">Aguardando retorno de integracao</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Com erro ERP</div>
+      <div class="kpi-value" data-kpi="erp_error">0</div>
+      <div class="meta">Necessitam ajuste operacional</div>
+    </article>
+    <article class="kpi-card">
+      <div class="kpi-label">Recebidas</div>
+      <div class="kpi-value" data-kpi="received">0</div>
+      <div class="meta">Fluxo finalizado</div>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Painel de ordens</h2>
+      <span class="meta" id="summary">Carregando ordens de compra</span>
+    </div>
+    <div class="grid grid-4" style="margin-bottom: 12px">
+      <select class="select" id="statusFilter">
+        <option value="">Todos os status</option>
+        <option value="draft">Rascunho</option>
+        <option value="approved">Aprovada</option>
+        <option value="sent_to_erp">Enviada ao ERP</option>
+        <option value="erp_accepted">Aceita no ERP</option>
+        <option value="partially_received">Recebimento parcial</option>
+        <option value="received">Recebida</option>
+        <option value="erp_error">Erro ERP</option>
+        <option value="cancelled">Cancelada</option>
+      </select>
+      <input class="input" id="supplierFilter" placeholder="Fornecedor" />
+      <label class="checkbox-line">
+        <input type="checkbox" id="erpOnlyFilter" />
+        <span>Somente origem ERP</span>
+      </label>
+      <button class="btn btn-ghost" id="applyBtn">Aplicar filtros</button>
+    </div>
+    <div class="table-wrap">
+      <table class="table-mobile-cards table-compact">
+        <thead>
+          <tr>
+            <th>Ordem</th>
+            <th>Fornecedor</th>
+            <th>Status</th>
+            <th>Total</th>
+            <th>Origem</th>
+            <th>Atualizada</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody id="ordersBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="modal-backdrop" id="orderModalBackdrop" role="dialog" aria-modal="true" hidden>
+    <article class="modal-card">
+      <div class="card-header">
+        <h2 class="card-title" id="orderModalTitle">Nova ordem</h2>
+        <button class="btn btn-ghost btn-small" type="button" id="orderModalCloseBtn">Fechar</button>
+      </div>
+      <form id="orderForm" class="stack">
+        <input type="hidden" id="orderIdInput" />
+        <div class="grid grid-3">
+          <div>
+            <label class="meta" for="numberInput">Numero</label>
+            <input class="input" id="numberInput" placeholder="OC-2026-0001" />
+          </div>
+          <div>
+            <label class="meta" for="supplierInput">Fornecedor</label>
+            <input class="input" id="supplierInput" required />
+          </div>
+          <div>
+            <label class="meta" for="statusInput">Status</label>
+            <select class="select" id="statusInput">
+              <option value="draft">Rascunho</option>
+              <option value="approved">Aprovada</option>
+              <option value="sent_to_erp">Enviada ao ERP</option>
+              <option value="erp_accepted">Aceita no ERP</option>
+              <option value="partially_received">Recebimento parcial</option>
+              <option value="received">Recebida</option>
+              <option value="erp_error">Erro ERP</option>
+              <option value="cancelled">Cancelada</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-3">
+          <div>
+            <label class="meta" for="currencyInput">Moeda</label>
+            <input class="input" id="currencyInput" value="BRL" />
+          </div>
+          <div>
+            <label class="meta" for="totalInput">Total</label>
+            <input class="input" id="totalInput" type="number" min="0" step="0.01" value="0" />
+          </div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-ghost" type="button" id="cancelBtn">Cancelar</button>
+          <button class="btn btn-primary" type="submit" id="submitBtn">Salvar ordem</button>
+        </div>
+      </form>
+    </article>
+  </div>
+{% endblock %}
+
+{% block page_scripts %}
+  <script>
+    const workspaceId = "{{ workspace_id }}";
+    const Platform = window.PlatformUI || {};
+
+    const ordersBody = document.getElementById("ordersBody");
+    const summary = document.getElementById("summary");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const applyBtn = document.getElementById("applyBtn");
+    const newOrderBtn = document.getElementById("newOrderBtn");
+    const statusFilter = document.getElementById("statusFilter");
+    const supplierFilter = document.getElementById("supplierFilter");
+    const erpOnlyFilter = document.getElementById("erpOnlyFilter");
+
+    const orderModalBackdrop = document.getElementById("orderModalBackdrop");
+    const orderModalTitle = document.getElementById("orderModalTitle");
+    const orderModalCloseBtn = document.getElementById("orderModalCloseBtn");
+    const cancelBtn = document.getElementById("cancelBtn");
+    const orderForm = document.getElementById("orderForm");
+    const orderIdInput = document.getElementById("orderIdInput");
+    const numberInput = document.getElementById("numberInput");
+    const supplierInput = document.getElementById("supplierInput");
+    const statusInput = document.getElementById("statusInput");
+    const currencyInput = document.getElementById("currencyInput");
+    const totalInput = document.getElementById("totalInput");
+    const submitBtn = document.getElementById("submitBtn");
+
+    const state = { items: [], editMode: false };
+
+    const withWorkspace = (path) =>
+      Platform.withWorkspace
+        ? Platform.withWorkspace(path, workspaceId)
+        : `${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
+
+    const escapeHtml = Platform.escapeHtml
+      ? Platform.escapeHtml
+      : (value) =>
+          String(value ?? "Nao informado")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+
+    function statusLabel(value) {
+      if (window.UiLabels?.prettyStatus) return window.UiLabels.prettyStatus(value);
+      return value || "Nao informado";
+    }
+
+    function updateKpis(items) {
+      const counters = { approved: 0, sent_to_erp: 0, erp_error: 0, received: 0 };
+      items.forEach((item) => {
+        if (item.status in counters) counters[item.status] += 1;
+      });
+      Object.entries(counters).forEach(([key, value]) => {
+        const el = document.querySelector(`[data-kpi='${key}']`);
+        if (el) el.textContent = String(value);
+      });
+    }
+
+    function renderEmpty(message) {
+      ordersBody.innerHTML = `
+        <tr>
+          <td colspan="7" class="empty-row">
+            <div class="empty-state-inline">
+              <div class="empty-state-title">${escapeHtml(message)}</div>
+              <div class="meta">Ajuste os filtros ou sincronize ordens do ERP</div>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    function renderRows(items) {
+      state.items = items;
+      updateKpis(items);
+      if (!items.length) {
+        summary.textContent = "Sem ordens para o filtro";
+        renderEmpty("Nenhuma ordem encontrada");
+        return;
+      }
+      summary.textContent = `${items.length} ordens carregadas`;
+      ordersBody.innerHTML = items
+        .map((item) => {
+          const source = item.source === "erp" ? "ERP" : "Local";
+          const totalValue = Number(item.total_amount || 0).toLocaleString("pt-BR", { style: "currency", currency: item.currency || "BRL" });
+          const localActions = item.source === "erp"
+            ? '<span class="meta">Gerenciada pelo ERP</span>'
+            : `
+                <button class="btn btn-small btn-ghost" type="button" data-edit-order="${item.id}">Editar</button>
+                <button class="btn btn-small" type="button" data-delete-order="${item.id}">Cancelar</button>
+              `;
+          return `
+            <tr>
+              <td data-label="Ordem"><strong>${escapeHtml(item.number || `OC-${item.id}`)}</strong></td>
+              <td data-label="Fornecedor">${escapeHtml(item.supplier_name || "-")}</td>
+              <td data-label="Status">${escapeHtml(statusLabel(item.status))}</td>
+              <td data-label="Total">${escapeHtml(totalValue)}</td>
+              <td data-label="Origem"><span class="pill ${item.source === "erp" ? "info" : ""}">${escapeHtml(source)}</span></td>
+              <td data-label="Atualizada">${escapeHtml(item.updated_at || "-")}</td>
+              <td class="cell-actions" data-label="Acoes">
+                <div class="actions-cell">
+                  <a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/purchase-orders/${item.id}`)}">Detalhe</a>
+                  ${localActions}
+                </div>
+              </td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      ordersBody.querySelectorAll("[data-edit-order]").forEach((button) => {
+        button.addEventListener("click", () => openModalForEdit(Number(button.getAttribute("data-edit-order"))));
+      });
+      ordersBody.querySelectorAll("[data-delete-order]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const orderId = Number(button.getAttribute("data-delete-order"));
+          if (!orderId) return;
+          if (!window.confirm("Deseja cancelar esta ordem de compra?")) return;
+          const response = await fetch(withWorkspace(`/api/procurement/purchase-orders/${orderId}`), { method: "DELETE" });
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            window.showToast?.("danger", `Falha ao cancelar ordem, ${err.message || err.error || "erro"}`);
+            return;
+          }
+          window.showToast?.("success", "Ordem cancelada");
+          await loadOrders();
+        });
+      });
+    }
+
+    function openModal() {
+      orderModalBackdrop.hidden = false;
+    }
+
+    function closeModal() {
+      orderModalBackdrop.hidden = true;
+    }
+
+    function resetForm() {
+      orderIdInput.value = "";
+      numberInput.value = "";
+      supplierInput.value = "";
+      statusInput.value = "draft";
+      currencyInput.value = "BRL";
+      totalInput.value = "0";
+      state.editMode = false;
+      orderModalTitle.textContent = "Nova ordem";
+      submitBtn.textContent = "Salvar ordem";
+    }
+
+    function openModalForCreate() {
+      resetForm();
+      openModal();
+    }
+
+    function openModalForEdit(orderId) {
+      const item = state.items.find((row) => Number(row.id) === Number(orderId));
+      if (!item) return;
+      resetForm();
+      state.editMode = true;
+      orderIdInput.value = String(item.id);
+      numberInput.value = item.number || "";
+      supplierInput.value = item.supplier_name || "";
+      statusInput.value = item.status || "draft";
+      currencyInput.value = item.currency || "BRL";
+      totalInput.value = String(item.total_amount || 0);
+      orderModalTitle.textContent = "Editar ordem";
+      submitBtn.textContent = "Salvar alteracoes";
+      openModal();
+    }
+
+    async function loadOrders() {
+      summary.textContent = "Atualizando ordens";
+      const params = new URLSearchParams();
+      params.set("limit", "200");
+      if (statusFilter.value) params.set("status", statusFilter.value);
+      if (supplierFilter.value.trim()) params.set("supplier", supplierFilter.value.trim());
+      if (erpOnlyFilter.checked) params.set("erp_only", "1");
+
+      try {
+        const response = await fetch(withWorkspace(`/api/procurement/purchase-orders?${params.toString()}`));
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || payload.error || "erro");
+        renderRows(payload.items || []);
+      } catch (error) {
+        summary.textContent = "Falha ao carregar ordens";
+        renderEmpty("Falha ao carregar ordens");
+        window.showToast?.("danger", `Nao foi possivel carregar ordens, ${error.message || "erro"}`);
+      }
+    }
+
+    orderForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const supplier_name = supplierInput.value.trim();
+      if (!supplier_name) {
+        window.showToast?.("warning", "Informe o fornecedor");
+        return;
+      }
+
+      const payload = {
+        number: numberInput.value.trim() || null,
+        supplier_name,
+        status: statusInput.value,
+        currency: currencyInput.value.trim() || "BRL",
+        total_amount: Number(totalInput.value || 0),
+      };
+
+      const orderId = Number(orderIdInput.value);
+      const endpoint = state.editMode && orderId
+        ? withWorkspace(`/api/procurement/purchase-orders/${orderId}`)
+        : withWorkspace("/api/procurement/purchase-orders");
+      const method = state.editMode && orderId ? "PATCH" : "POST";
+
+      submitBtn.disabled = true;
+      const previousLabel = submitBtn.textContent;
+      submitBtn.textContent = "Salvando";
+      try {
+        const response = await fetch(endpoint, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || data.error || "erro");
+        closeModal();
+        window.showToast?.("success", state.editMode ? "Ordem atualizada" : "Ordem criada");
+        await loadOrders();
+      } catch (error) {
+        window.showToast?.("danger", `Falha ao salvar ordem, ${error.message || "erro"}`);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = previousLabel;
+      }
+    });
+
+    refreshBtn.addEventListener("click", loadOrders);
+    applyBtn.addEventListener("click", loadOrders);
+    newOrderBtn.addEventListener("click", openModalForCreate);
+    orderModalCloseBtn.addEventListener("click", closeModal);
+    cancelBtn.addEventListener("click", closeModal);
+    orderModalBackdrop.addEventListener("click", (event) => {
+      if (event.target === orderModalBackdrop) closeModal();
+    });
+    supplierFilter.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        loadOrders();
+      }
+    });
+
+    loadOrders();
+  </script>
+{% endblock %}

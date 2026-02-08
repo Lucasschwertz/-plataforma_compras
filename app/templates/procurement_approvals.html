@@ -7,17 +7,17 @@
 {% endblock %}
 {% block page_actions %}
   <button class="btn" id="refreshBtn">Atualizar dados</button>
-  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Abrir cotacoes</a>
+  <a class="btn btn-ghost" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Abrir cotacoes</a>
 {% endblock %}
 
 {% block content %}
   <section class="grid grid-4">
-    <a class="kpi-card" href="/procurement/inbox?type=rfq&status=open,collecting_quotes&workspace_id={{ workspace_id }}">
+    <a class="kpi-card" href="/procurement/cotacoes?status=open,collecting_quotes&workspace_id={{ workspace_id }}">
       <div class="kpi-label">Aguardando decisao</div>
       <div class="kpi-value skeleton" data-kpi="awaiting_decision">0</div>
       <div class="meta">Cotacoes sem decisao registrada</div>
     </a>
-    <a class="kpi-card" href="/procurement/inbox?type=rfq&awaiting_po=1&workspace_id={{ workspace_id }}">
+    <a class="kpi-card" href="/procurement/cotacoes?awaiting_po=1&workspace_id={{ workspace_id }}">
       <div class="kpi-label">Decisao sem OC</div>
       <div class="kpi-value skeleton" data-kpi="awarded_waiting_po">0</div>
       <div class="meta">Cotacoes com decisao pendente de ordem</div>
@@ -213,3 +213,4 @@
     loadApprovals();
   </script>
 {% endblock %}
+

@@ -1,4 +1,4 @@
-﻿
+
 {% extends "_layout.html" %}
 {% set active_nav = "sourcing" %}
 {% block title %}Cotacao {{ rfq_id }} | Plataforma Compras{% endblock %}
@@ -7,7 +7,7 @@
   <span class="crumb-sep">/</span><span class="crumb current">Mesa {{ rfq_id }}</span>
 {% endblock %}
 {% block page_actions %}
-  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Voltar para cotacoes</a>
+  <a class="btn btn-ghost" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Voltar para cotacoes</a>
   <a class="btn btn-primary" href="#decisao">Ir para decisao</a>
 {% endblock %}
 {% block content %}

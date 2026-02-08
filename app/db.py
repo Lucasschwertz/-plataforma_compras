@@ -1,5 +1,6 @@
-﻿import os
+import os
 import sqlite3
+from pathlib import Path
 from typing import Iterable, List
 
 try:
@@ -577,6 +578,7 @@ def _init_db_sqlite(db: Database):
     _ensure_sync_scope_support(db)
     _ensure_sqlite_unique_indexes(db)
     _ensure_tenant_backfill(db)
+    _ensure_erp_mirror_tables(db)
 
     # Padroniza titulos antigos para PT-BR (RFQ -> Cotacao).
     db.execute(
@@ -1167,6 +1169,7 @@ def _init_db_postgres(db: Database) -> None:
     _ensure_column(db, "integration_watermarks", "last_success_cursor", "TEXT")
 
     _ensure_tenant_backfill(db)
+    _ensure_erp_mirror_tables(db)
     _backfill_demo_items_and_quotes(db)
     _create_postgres_updated_at_triggers(db)
 
@@ -1219,6 +1222,37 @@ def _create_postgres_updated_at_triggers(db: Database) -> None:
         )
 
 
+
+def _ensure_erp_mirror_tables(db: Database) -> None:
+    """Create ERP mirror tables from schema file when enabled."""
+    try:
+        auto_create = bool(current_app.config.get("ERP_MIRROR_AUTO_CREATE", True))
+        schema_path_raw = current_app.config.get("ERP_MIRROR_SCHEMA")
+    except RuntimeError:
+        auto_create = os.environ.get("ERP_MIRROR_AUTO_CREATE", "1").strip().lower() in {"1", "true", "yes", "on"}
+        schema_path_raw = os.environ.get("ERP_MIRROR_SCHEMA")
+
+    if not auto_create:
+        return
+
+    schema_path = None
+    if schema_path_raw:
+        schema_path = Path(str(schema_path_raw)).expanduser()
+    if not schema_path:
+        schema_path = Path(__file__).resolve().parents[1] / "tabelas.csv"
+    if not schema_path.exists():
+        return
+
+    try:
+        from database.erp_mirror import ensure_mirror_tables, load_schema_tables
+
+        schema_tables = load_schema_tables(schema_path)
+        ensure_mirror_tables(db, schema_tables)
+    except Exception as exc:
+        try:
+            current_app.logger.warning("Falha ao criar espelho ERP (%s): %s", schema_path, exc)
+        except RuntimeError:
+            pass
 def _ensure_column(db: Database, table: str, column: str, definition: str) -> None:
     try:
         if db.backend == "postgres":
@@ -1669,5 +1703,8 @@ def _get_or_create_quote(db, rfq_id: int, supplier_id: int, tenant_id: str) -> i
     )
     row = cursor.fetchone()
     return int(row["id"] if isinstance(row, dict) else row[0])
+
+
+
 
 

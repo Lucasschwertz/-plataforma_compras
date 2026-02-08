@@ -1,4 +1,4 @@
-﻿
+
 from __future__ import annotations
 
 import json
@@ -93,6 +93,12 @@ def cotacao_open_page():
     return render_template("procurement_cotacao_abertura.html", tenant_id=tenant_id)
 
 
+@procurement_bp.route("/procurement/cotacoes", methods=["GET"])
+def cotacoes_page():
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    return render_template("procurement_cotacoes.html", tenant_id=tenant_id)
+
+
 @procurement_bp.route("/procurement/cotacoes/<int:rfq_id>", methods=["GET"])
 def cotacao_detail_page(rfq_id: int):
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
@@ -107,6 +113,12 @@ def purchase_order_detail_page(purchase_order_id: int):
         tenant_id=tenant_id,
         purchase_order_id=purchase_order_id,
     )
+
+
+@procurement_bp.route("/procurement/ordens-compra", methods=["GET"])
+def purchase_orders_page():
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    return render_template("procurement_ordens_compra.html", tenant_id=tenant_id)
 
 
 @procurement_bp.route("/procurement/integrations/logs", methods=["GET"])
@@ -155,8 +167,9 @@ def procurement_inbox():
 
 @procurement_bp.route("/api/procurement/purchase-requests/open", methods=["GET"])
 def purchase_requests_open():
-    db = get_read_db()
+    db = get_db()
     tenant_id = current_tenant_id()
+    _hydrate_purchase_requests_from_erp_raw(db, tenant_id)
     limit = _parse_int(request.args.get("limit"), default=80, min_value=1, max_value=200)
     items = _load_open_purchase_requests(db, tenant_id, limit)
     return jsonify({"items": items})
@@ -164,8 +177,9 @@ def purchase_requests_open():
 
 @procurement_bp.route("/api/procurement/purchase-request-items/open", methods=["GET"])
 def purchase_request_items_open():
-    db = get_read_db()
+    db = get_db()
     tenant_id = current_tenant_id()
+    _hydrate_purchase_requests_from_erp_raw(db, tenant_id)
     limit = _parse_int(request.args.get("limit"), default=120, min_value=1, max_value=300)
     items = _load_open_purchase_request_items(db, tenant_id, limit)
     return jsonify({"items": items})
@@ -258,8 +272,9 @@ def procurement_solicitacoes_api():
             201,
         )
 
-    db = get_read_db()
+    db = get_db()
     tenant_id = current_tenant_id()
+    _hydrate_purchase_requests_from_erp_raw(db, tenant_id)
     limit = _parse_int(request.args.get("limit"), default=120, min_value=1, max_value=300)
     status_values = _parse_csv_values(request.args.get("status"))
     erp_only = request.args.get("erp_only") == "1"
@@ -1119,10 +1134,70 @@ def _upsert_quote_item(
     )
 
 
-@procurement_bp.route("/api/procurement/purchase-orders/<int:purchase_order_id>", methods=["GET"])
-def purchase_order_detail_api(purchase_order_id: int):
+@procurement_bp.route("/api/procurement/purchase-orders", methods=["GET", "POST"])
+def purchase_orders_api():
+    if request.method == "POST":
+        db = get_db()
+        tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+        payload = request.get_json(silent=True) or {}
+
+        number = (payload.get("number") or "").strip() or None
+        supplier_name = (payload.get("supplier_name") or payload.get("fornecedor") or "").strip() or None
+        if not supplier_name:
+            return jsonify({"error": "supplier_name_required", "message": "Informe o fornecedor."}), 400
+
+        status = str(payload.get("status") or "draft").strip()
+        if status not in ALLOWED_PO_STATUSES:
+            return jsonify({"error": "status_invalid", "message": "Status da ordem de compra invalido."}), 400
+
+        currency = (payload.get("currency") or "BRL").strip() or "BRL"
+        total_amount = _parse_optional_float(payload.get("total_amount"))
+        if total_amount is None:
+            total_amount = 0.0
+
+        cursor = db.execute(
+            """
+            INSERT INTO purchase_orders (
+                number, supplier_name, status, currency, total_amount, tenant_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id
+            """,
+            (number, supplier_name, status, currency, total_amount, tenant_id),
+        )
+        created_row = cursor.fetchone()
+        purchase_order_id = int(created_row["id"] if isinstance(created_row, dict) else created_row[0])
+
+        db.execute(
+            """
+            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
+            VALUES ('purchase_order', ?, NULL, ?, 'purchase_order_created', ?)
+            """,
+            (purchase_order_id, status, tenant_id),
+        )
+        db.commit()
+        return jsonify({"id": purchase_order_id, "status": status}), 201
+
     db = get_read_db()
     tenant_id = current_tenant_id()
+    limit = _parse_int(request.args.get("limit"), default=100, min_value=1, max_value=300)
+    status_values = _parse_csv_values(request.args.get("status"))
+    supplier_search = (request.args.get("supplier") or "").strip()
+    erp_only = request.args.get("erp_only") == "1"
+    items = _load_purchase_orders_panel(
+        db,
+        tenant_id=tenant_id,
+        limit=limit,
+        status_values=status_values,
+        supplier_search=supplier_search,
+        erp_only=erp_only,
+    )
+    return jsonify({"items": items})
+
+
+@procurement_bp.route("/api/procurement/purchase-orders/<int:purchase_order_id>", methods=["GET", "PATCH", "DELETE"])
+def purchase_order_detail_api(purchase_order_id: int):
+    db = get_db() if request.method in {"PATCH", "DELETE"} else get_read_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
 
     po = _load_purchase_order(db, tenant_id, purchase_order_id)
     if not po:
@@ -1136,6 +1211,107 @@ def purchase_order_detail_api(purchase_order_id: int):
             ),
             404,
         )
+
+    if request.method == "DELETE":
+        if po["external_id"]:
+            return (
+                jsonify(
+                    {
+                        "error": "erp_managed_purchase_order_readonly",
+                        "message": "Ordem de compra com origem ERP e somente leitura na plataforma.",
+                    }
+                ),
+                409,
+            )
+        previous_status = po["status"]
+        if previous_status != "cancelled":
+            db.execute(
+                """
+                UPDATE purchase_orders
+                SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND tenant_id = ?
+                """,
+                (purchase_order_id, tenant_id),
+            )
+            db.execute(
+                """
+                INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
+                VALUES ('purchase_order', ?, ?, 'cancelled', 'purchase_order_cancelled', ?)
+                """,
+                (purchase_order_id, previous_status, tenant_id),
+            )
+            db.commit()
+        return jsonify({"purchase_order_id": purchase_order_id, "status": "cancelled"}), 200
+
+    if request.method == "PATCH":
+        if po["external_id"]:
+            return (
+                jsonify(
+                    {
+                        "error": "erp_managed_purchase_order_readonly",
+                        "message": "Ordem de compra com origem ERP e somente leitura na plataforma.",
+                    }
+                ),
+                409,
+            )
+        payload = request.get_json(silent=True) or {}
+        updates: List[str] = []
+        params: List[object] = []
+
+        if "number" in payload:
+            updates.append("number = ?")
+            params.append((payload.get("number") or "").strip() or None)
+
+        if "supplier_name" in payload or "fornecedor" in payload:
+            supplier_name = (payload.get("supplier_name") or payload.get("fornecedor") or "").strip() or None
+            updates.append("supplier_name = ?")
+            params.append(supplier_name)
+
+        if "currency" in payload:
+            currency = (payload.get("currency") or "BRL").strip() or "BRL"
+            updates.append("currency = ?")
+            params.append(currency)
+
+        if "total_amount" in payload:
+            total_amount = _parse_optional_float(payload.get("total_amount"))
+            if total_amount is None:
+                return jsonify({"error": "total_amount_invalid", "message": "Valor total invalido."}), 400
+            updates.append("total_amount = ?")
+            params.append(total_amount)
+
+        next_status = po["status"]
+        if "status" in payload:
+            status = str(payload.get("status") or "").strip()
+            if status not in ALLOWED_PO_STATUSES:
+                return jsonify({"error": "status_invalid", "message": "Status da ordem de compra invalido."}), 400
+            next_status = status
+            updates.append("status = ?")
+            params.append(status)
+
+        if not updates:
+            return jsonify({"error": "no_changes", "message": "Nenhum campo enviado para atualizacao."}), 400
+
+        params.extend([purchase_order_id, tenant_id])
+        db.execute(
+            f"""
+            UPDATE purchase_orders
+            SET {", ".join(updates)}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            tuple(params),
+        )
+
+        if next_status != po["status"]:
+            db.execute(
+                """
+                INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
+                VALUES ('purchase_order', ?, ?, ?, 'purchase_order_updated', ?)
+                """,
+                (purchase_order_id, po["status"], next_status, tenant_id),
+            )
+
+        db.commit()
+        return jsonify({"purchase_order_id": purchase_order_id, "status": next_status}), 200
 
     events = _load_status_events(db, tenant_id, entity="purchase_order", entity_id=purchase_order_id)
     sync_runs = _load_sync_runs(db, tenant_id, scope="purchase_order", limit=20)
@@ -1430,15 +1606,37 @@ def _seed_demo_items_for_pending_requests(db, tenant_id: str, limit: int = 2) ->
 def list_rfqs():
     db = get_read_db()
     tenant_id = current_tenant_id()
-    clause, params = _tenant_clause(tenant_id)
+    clause, params = _tenant_clause(tenant_id, alias="r")
+
+    filters: List[str] = []
+    status_values = _parse_csv_values(request.args.get("status"))
+    normalized_statuses = [status for status in status_values if status in ALLOWED_RFQ_STATUSES]
+    if normalized_statuses:
+        filters.append(f"r.status IN ({','.join('?' for _ in normalized_statuses)})")
+        params.extend(normalized_statuses)
+
+    where_sql = clause
+    if filters:
+        where_sql = f"{clause} AND {' AND '.join(filters)}"
 
     rows = db.execute(
         f"""
-        SELECT id, title, status, updated_at
-        FROM rfqs
-        WHERE {clause}
-        ORDER BY updated_at DESC, id DESC
-        LIMIT 100
+        SELECT
+            r.id,
+            r.title,
+            r.status,
+            r.updated_at,
+            COUNT(DISTINCT ri.id) AS item_count,
+            COUNT(DISTINCT ris.supplier_id) AS supplier_count
+        FROM rfqs r
+        LEFT JOIN rfq_items ri
+          ON ri.rfq_id = r.id AND ri.tenant_id = r.tenant_id
+        LEFT JOIN rfq_item_suppliers ris
+          ON ris.rfq_item_id = ri.id AND ris.tenant_id = r.tenant_id
+        WHERE {where_sql}
+        GROUP BY r.id, r.title, r.status, r.updated_at
+        ORDER BY r.updated_at DESC, r.id DESC
+        LIMIT 150
         """,
         tuple(params),
     ).fetchall()
@@ -1449,6 +1647,8 @@ def list_rfqs():
             "title": row["title"],
             "status": row["status"],
             "updated_at": row["updated_at"],
+            "item_count": int(row["item_count"] or 0),
+            "supplier_count": int(row["supplier_count"] or 0),
         }
         for row in rows
     ]
@@ -1468,6 +1668,86 @@ def create_rfq():
 
     db.commit()
     return jsonify(created), 201
+
+
+@procurement_bp.route("/api/procurement/rfqs/<int:rfq_id>", methods=["PATCH", "DELETE"])
+def rfq_crud_api(rfq_id: int):
+    db = get_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    rfq = _load_rfq(db, tenant_id, rfq_id)
+    if not rfq:
+        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}), 404
+
+    previous_status = rfq["status"]
+    if request.method == "DELETE":
+        if previous_status == "cancelled":
+            return jsonify({"rfq_id": rfq_id, "status": "cancelled"}), 200
+        db.execute(
+            """
+            UPDATE rfqs
+            SET status = 'cancelled', cancel_reason = COALESCE(cancel_reason, 'rfq_cancelled'), updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (rfq_id, tenant_id),
+        )
+        db.execute(
+            """
+            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
+            VALUES ('rfq', ?, ?, 'cancelled', 'rfq_cancelled', ?)
+            """,
+            (rfq_id, previous_status, tenant_id),
+        )
+        db.commit()
+        return jsonify({"rfq_id": rfq_id, "status": "cancelled"}), 200
+
+    payload = request.get_json(silent=True) or {}
+    updates: List[str] = []
+    params: List[object] = []
+    next_status = previous_status
+
+    if "title" in payload:
+        updates.append("title = ?")
+        params.append((payload.get("title") or "").strip() or None)
+
+    if "status" in payload:
+        status = str(payload.get("status") or "").strip()
+        if status not in ALLOWED_RFQ_STATUSES:
+            return jsonify({"error": "status_invalid", "message": "Status da cotacao invalido."}), 400
+        next_status = status
+        updates.append("status = ?")
+        params.append(status)
+        if status == "cancelled":
+            updates.append("cancel_reason = ?")
+            params.append((payload.get("cancel_reason") or "rfq_cancelled").strip() or "rfq_cancelled")
+
+    if "cancel_reason" in payload and "status" not in payload:
+        updates.append("cancel_reason = ?")
+        params.append((payload.get("cancel_reason") or "").strip() or None)
+
+    if not updates:
+        return jsonify({"error": "no_changes", "message": "Nenhum campo enviado para atualizacao."}), 400
+
+    params.extend([rfq_id, tenant_id])
+    db.execute(
+        f"""
+        UPDATE rfqs
+        SET {", ".join(updates)}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND tenant_id = ?
+        """,
+        tuple(params),
+    )
+
+    if next_status != previous_status:
+        db.execute(
+            """
+            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
+            VALUES ('rfq', ?, ?, ?, 'rfq_updated', ?)
+            """,
+            (rfq_id, previous_status, next_status, tenant_id),
+        )
+
+    db.commit()
+    return jsonify({"rfq_id": rfq_id, "status": next_status}), 200
 
 
 @procurement_bp.route("/api/procurement/cotacoes/abertura", methods=["POST"])
@@ -2048,6 +2328,74 @@ def _load_purchase_requests_panel(
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
                 "source": "erp" if row["external_id"] or row["erp_num_cot"] or row["erp_num_pct"] else "local",
+            }
+        )
+    return result
+
+
+def _load_purchase_orders_panel(
+    db,
+    tenant_id: str | None,
+    limit: int = 120,
+    status_values: List[str] | None = None,
+    supplier_search: str | None = None,
+    erp_only: bool = False,
+) -> List[dict]:
+    effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
+    params: List[object] = [effective_tenant_id]
+    filters: List[str] = []
+
+    normalized_statuses = [status for status in (status_values or []) if status in ALLOWED_PO_STATUSES]
+    if normalized_statuses:
+        filters.append(f"po.status IN ({','.join('?' for _ in normalized_statuses)})")
+        params.extend(normalized_statuses)
+
+    if supplier_search:
+        filters.append("LOWER(COALESCE(po.supplier_name, '')) LIKE ?")
+        params.append(f"%{supplier_search.lower()}%")
+
+    if erp_only:
+        filters.append("po.external_id IS NOT NULL")
+
+    where_sql = " AND ".join(filters) if filters else "1=1"
+    params.append(limit)
+
+    rows = db.execute(
+        f"""
+        SELECT
+            po.id,
+            po.number,
+            po.supplier_name,
+            po.status,
+            po.currency,
+            po.total_amount,
+            po.external_id,
+            po.erp_last_error,
+            po.created_at,
+            po.updated_at
+        FROM purchase_orders po
+        WHERE po.tenant_id = ? AND {where_sql}
+        ORDER BY po.updated_at DESC, po.id DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    ).fetchall()
+
+    result: List[dict] = []
+    for row in rows:
+        result.append(
+            {
+                "id": row["id"],
+                "number": row["number"],
+                "supplier_name": row["supplier_name"],
+                "status": row["status"],
+                "currency": row["currency"],
+                "total_amount": row["total_amount"],
+                "external_id": row["external_id"],
+                "erp_last_error": row["erp_last_error"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "source": "erp" if row["external_id"] else "local",
             }
         )
     return result
@@ -3368,9 +3716,10 @@ def _parse_inbox_filters(args) -> Dict[str, str]:
     return filters
 
 
-def _tenant_clause(tenant_id: str | None) -> Tuple[str, List[str]]:
+def _tenant_clause(tenant_id: str | None, alias: str | None = None) -> Tuple[str, List[str]]:
     effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
-    return "tenant_id = ?", [effective_tenant_id]
+    prefix = f"{alias}." if alias else ""
+    return f"{prefix}tenant_id = ?", [effective_tenant_id]
 
 
 def _tenant_filter(tenant_id: str | None, occurrences: int) -> Tuple[str, List[str]]:
@@ -3576,8 +3925,115 @@ def _upsert_supplier(db, tenant_id: str, record: dict) -> int:
     return 1
 
 
+def _table_exists_runtime(db, table_name: str) -> bool:
+    if getattr(db, "backend", "sqlite") == "postgres":
+        row = db.execute(
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = ?
+            LIMIT 1
+            """,
+            (table_name,),
+        ).fetchone()
+        return bool(row)
+    row = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return bool(row)
+
+
+def _column_exists_runtime(db, table_name: str, column_name: str) -> bool:
+    if getattr(db, "backend", "sqlite") == "postgres":
+        row = db.execute(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = ? AND column_name = ?
+            LIMIT 1
+            """,
+            (table_name, column_name),
+        ).fetchone()
+        return bool(row)
+    rows = db.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return any(str(row["name"]) == column_name for row in rows)
+
+
+def _hydrate_purchase_requests_from_erp_raw(db, tenant_id: str | None) -> None:
+    """Populate domain requests from E405SOL mirror when domain has requests without items."""
+    effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
+    if not _table_exists_runtime(db, "e405sol"):
+        return
+    if not _column_exists_runtime(db, "e405sol", "numsol"):
+        return
+
+    counts_row = db.execute(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM purchase_request_items WHERE tenant_id = ?) AS item_total
+        """,
+        (effective_tenant_id,),
+    ).fetchone()
+    item_total = int(counts_row["item_total"] or 0)
+    if item_total > 0:
+        return
+
+    mirror_to_erp = {
+        "numsol": "NumSol",
+        "seqsol": "SeqSol",
+        "qtdapr": "QtdApr",
+        "qtdsol": "QtdSol",
+        "unimed": "UniMed",
+        "proser": "ProSer",
+        "codpro": "CodPro",
+        "codder": "CodDer",
+        "codser": "CodSer",
+        "obssol": "ObsSol",
+        "datefc": "DatEfc",
+        "numcot": "NumCot",
+        "numpct": "NumPct",
+        "coddep": "CodDep",
+    }
+    selected_columns = [column for column in mirror_to_erp if _column_exists_runtime(db, "e405sol", column)]
+    if "numsol" not in selected_columns:
+        return
+
+    rows = db.execute(
+        f"""
+        SELECT {", ".join(selected_columns)}
+        FROM e405sol
+        WHERE tenant_id = ?
+        ORDER BY numsol, COALESCE(seqsol, '0')
+        LIMIT 10000
+        """,
+        (effective_tenant_id,),
+    ).fetchall()
+    if not rows:
+        return
+
+    imported = 0
+    for row in rows:
+        record: Dict[str, str] = {}
+        for column in selected_columns:
+            value = row[column]
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            record[mirror_to_erp[column]] = text
+        if not record.get("NumSol"):
+            continue
+        _upsert_purchase_request(db, effective_tenant_id, record)
+        imported += 1
+
+    if imported > 0:
+        db.commit()
+
+
 def _upsert_purchase_request(db, tenant_id: str, record: dict) -> int:
-    external_id = record.get("external_id") or _extract_erp_field(record, ("NumSol", "num_sol", "numero_solicitacao"))
+    external_id = _extract_erp_field(record, ("NumSol", "num_sol", "numero_solicitacao")) or record.get("external_id")
     number = record.get("number") or _extract_erp_field(record, ("NumSol", "num_sol", "numero_solicitacao")) or external_id
     status = record.get("status") or "pending_rfq"
     priority = record.get("priority") or "medium"
@@ -3604,6 +4060,7 @@ def _upsert_purchase_request(db, tenant_id: str, record: dict) -> int:
         (external_id, tenant_id),
     ).fetchone()
 
+    purchase_request_id: int
     if existing:
         db.execute(
             """
@@ -3627,43 +4084,148 @@ def _upsert_purchase_request(db, tenant_id: str, record: dict) -> int:
                 tenant_id,
             ),
         )
-        return 1
+        purchase_request_id = int(existing["id"])
+    else:
+        cursor = db.execute(
+            """
+            INSERT INTO purchase_requests (
+                number,
+                status,
+                priority,
+                requested_by,
+                department,
+                needed_at,
+                erp_num_cot,
+                erp_num_pct,
+                erp_sent_at,
+                external_id,
+                tenant_id,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+            """,
+            (
+                number,
+                status,
+                priority,
+                requested_by,
+                department,
+                needed_at,
+                erp_num_cot,
+                erp_num_pct,
+                erp_sent_at,
+                external_id,
+                tenant_id,
+                updated_at,
+                updated_at,
+            ),
+        )
+        created = cursor.fetchone()
+        purchase_request_id = int(created["id"] if isinstance(created, dict) else created[0])
+
+    _upsert_purchase_request_item_from_record(
+        db=db,
+        tenant_id=tenant_id,
+        purchase_request_id=purchase_request_id,
+        record=record,
+    )
+    return 1
+
+
+def _upsert_purchase_request_item_from_record(db, tenant_id: str, purchase_request_id: int, record: dict) -> None:
+    line_no = _parse_optional_int(
+        _extract_erp_field(
+            record,
+            ("SeqSol", "seq_sol", "line_no", "linha"),
+        )
+    )
+    quantity = _parse_optional_float(
+        _extract_erp_field(
+            record,
+            ("QtdApr", "qtd_apr", "QtdSol", "qtd_sol", "quantity", "quantidade"),
+        )
+    )
+    if quantity is None or quantity <= 0:
+        quantity = 1.0
+
+    uom = _extract_erp_field(record, ("UniMed", "uni_med", "uom", "unidade")) or "UN"
+    category = _extract_erp_field(record, ("ProSer", "pro_ser", "category", "categoria"))
+    product_code = _extract_erp_field(record, ("CodPro", "cod_pro", "produto"))
+    product_variant = _extract_erp_field(record, ("CodDer", "cod_der"))
+    service_code = _extract_erp_field(record, ("CodSer", "cod_ser", "servico"))
+    note = _extract_erp_field(record, ("ObsSol", "obs_sol", "observacao", "descricao"))
+
+    description_parts: List[str] = []
+    if product_code:
+        if product_variant:
+            description_parts.append(f"Produto {product_code}/{product_variant}")
+        else:
+            description_parts.append(f"Produto {product_code}")
+    elif service_code:
+        description_parts.append(f"Servico {service_code}")
+    elif category:
+        description_parts.append(f"Item {category}")
+    else:
+        description_parts.append("Item ERP")
+
+    if note:
+        clean_note = " ".join(str(note).split())
+        if clean_note:
+            description_parts.append(clean_note[:120])
+    description = " | ".join(description_parts)
+
+    if line_no is None or line_no <= 0:
+        existing_same = db.execute(
+            """
+            SELECT id, line_no
+            FROM purchase_request_items
+            WHERE purchase_request_id = ? AND tenant_id = ? AND description = ?
+            LIMIT 1
+            """,
+            (purchase_request_id, tenant_id, description),
+        ).fetchone()
+        if existing_same:
+            line_no = int(existing_same["line_no"] or 1)
+        else:
+            next_line = db.execute(
+                """
+                SELECT COALESCE(MAX(line_no), 0) + 1 AS next_line
+                FROM purchase_request_items
+                WHERE purchase_request_id = ? AND tenant_id = ?
+                """,
+                (purchase_request_id, tenant_id),
+            ).fetchone()
+            line_no = int(next_line["next_line"] or 1)
+
+    existing_item = db.execute(
+        """
+        SELECT id
+        FROM purchase_request_items
+        WHERE purchase_request_id = ? AND line_no = ? AND tenant_id = ?
+        LIMIT 1
+        """,
+        (purchase_request_id, line_no, tenant_id),
+    ).fetchone()
+    if existing_item:
+        db.execute(
+            """
+            UPDATE purchase_request_items
+            SET description = ?, quantity = ?, uom = ?, category = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND tenant_id = ?
+            """,
+            (description, quantity, uom, category, int(existing_item["id"]), tenant_id),
+        )
+        return
 
     db.execute(
         """
-        INSERT INTO purchase_requests (
-            number,
-            status,
-            priority,
-            requested_by,
-            department,
-            needed_at,
-            erp_num_cot,
-            erp_num_pct,
-            erp_sent_at,
-            external_id,
-            tenant_id,
-            created_at,
-            updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO purchase_request_items (
+            purchase_request_id, line_no, description, quantity, uom, category, tenant_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """,
-        (
-            number,
-            status,
-            priority,
-            requested_by,
-            department,
-            needed_at,
-            erp_num_cot,
-            erp_num_pct,
-            erp_sent_at,
-            external_id,
-            tenant_id,
-            updated_at,
-            updated_at,
-        ),
+        (purchase_request_id, line_no, description, quantity, uom, category, tenant_id),
     )
-    return 1
 
 
 def _upsert_purchase_order(db, tenant_id: str, record: dict) -> int:

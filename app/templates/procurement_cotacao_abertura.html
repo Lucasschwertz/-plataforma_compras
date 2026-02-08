@@ -8,7 +8,7 @@
 {% block page_actions %}
   <button class="btn" id="refreshBtn">Atualizar</button>
   <a class="btn btn-ghost" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">Ver solicitacoes</a>
-  <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Ver cotacoes</a>
+  <a class="btn btn-ghost" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Ver cotacoes</a>
 {% endblock %}
 
 {% block content %}
@@ -84,7 +84,7 @@
     </div>
     <div class="page-actions" style="margin-top: 12px">
       <a class="btn btn-primary" id="openRfqDeskBtn" href="#">Abrir mesa da cotacao</a>
-      <a class="btn btn-ghost" href="/procurement/inbox?type=rfq&workspace_id={{ workspace_id }}">Voltar para cotacoes</a>
+      <a class="btn btn-ghost" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Voltar para cotacoes</a>
     </div>
   </section>
 {% endblock %}
