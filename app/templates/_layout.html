@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{% block title %}Plataforma Compras{% endblock %}</title>
+    <title>{% block title %}{{ ui_terms["app_name"] }}{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/design_tokens.css') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}" />
     {% block head %}{% endblock %}
@@ -12,6 +12,8 @@
   {% set workspace_id = workspace_id | default(tenant_id | default("default")) %}
   {% set workspace_name = workspace_name | default("Empresa " ~ workspace_id) %}
   {% set workspace_options = workspace_options | default([{"id": workspace_id, "name": workspace_name}]) %}
+  {% set process_stage = process_stage | default(None) %}
+  {% set process_steps = process_steps | default([]) %}
   {% set default_breadcrumb_module =
       "Dashboard" if active_nav == "dashboard"
       else "Solicitacoes" if active_nav == "requests"
@@ -40,9 +42,9 @@
     <div class="app-shell">
       <aside class="sidebar">
         <a class="brand" href="/procurement/inbox?workspace_id={{ workspace_id }}">
-          <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="Plataforma Compras" />
+          <img class="brand-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="{{ ui_terms['app_name'] }}" />
           <div>
-            <div class="brand-title">Plataforma Compras</div>
+            <div class="brand-title">{{ ui_terms["app_name"] }}</div>
             <div class="brand-subtitle">Workspace ativo</div>
           </div>
         </a>
@@ -62,8 +64,8 @@
           <div class="nav-section-title">Plataforma</div>
           <a class="{% if active_nav == 'integration' %}active{% endif %}" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Integracoes</a>
           {% if ui_role == "admin" or ui_role == "manager" %}
+            <a href="/procurement/integrations/erp?workspace_id={{ workspace_id }}">Acompanhamento ERP</a>
             <a href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Automacao</a>
-            <a href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Configuracoes</a>
           {% endif %}
         </nav>
       </aside>
@@ -111,6 +113,9 @@
               {% if ui_role == "admin" %}
                 <a class="btn btn-ghost btn-small" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Integracoes</a>
               {% endif %}
+              {% if ui_role == "admin" or ui_role == "manager" %}
+                <a class="btn btn-ghost btn-small" href="/procurement/integrations/erp?workspace_id={{ workspace_id }}">ERP</a>
+              {% endif %}
             </div>
             <button class="btn btn-ghost" id="themeToggle">Alternar tema</button>
             <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Logs</a>
@@ -132,6 +137,18 @@
               {% block page_actions %}{% endblock %}
             </div>
           </div>
+          {% if process_steps %}
+            <section class="process-progress" data-process-progress data-process-stage="{{ process_stage }}">
+              <ol class="process-track">
+                {% for step in process_steps %}
+                  <li class="process-step {{ step.state }}" data-process-step="{{ step.key }}">
+                    <span class="process-node">{{ loop.index }}</span>
+                    <span class="process-label">{{ step.label }}</span>
+                  </li>
+                {% endfor %}
+              </ol>
+            </section>
+          {% endif %}
           {% block content %}{% endblock %}
         </main>
       </div>
@@ -139,6 +156,22 @@
 
     <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
     <div class="toast-root" id="toastRoot"></div>
+    <div class="modal-backdrop" id="criticalConfirmBackdrop" role="dialog" aria-modal="true" hidden>
+      <div class="card modal-panel critical-confirm-panel">
+        <div class="card-header">
+          <h2 class="card-title" id="criticalConfirmTitle">{{ ui_text("title.critical_confirmation") }}</h2>
+          <button class="btn btn-ghost btn-small" type="button" id="criticalConfirmCloseBtn">{{ ui_text("label.cancel_action") }}</button>
+        </div>
+        <div class="stack">
+          <p id="criticalConfirmMessage">{{ ui_text("title.critical_confirmation") }}</p>
+          <div class="meta" id="criticalConfirmImpact"></div>
+          <div class="page-actions">
+            <button class="btn btn-ghost" type="button" id="criticalConfirmCancelBtn">{{ ui_text("label.cancel_action") }}</button>
+            <button class="btn btn-primary" type="button" id="criticalConfirmAcceptBtn">{{ ui_text("label.confirm_action") }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <nav class="mobile-quick-nav" aria-label="Acoes rapidas">
       <a class="quick-link {% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Painel</a>
       <a class="quick-link {% if active_nav == 'requests' %}active{% endif %}" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">Solicitacoes</a>
@@ -154,6 +187,10 @@
       {% endif %}
     </nav>
 
+    <script>
+      window.UI_STRINGS = {{ ui_frontend_bundle | tojson }};
+      window.ProcessFlow = window.ProcessFlow || {};
+    </script>
     <script src="{{ url_for('static', filename='js/platform_core.js') }}"></script>
     <script src="{{ url_for('static', filename='js/ui_labels.js') }}"></script>
     <script>
@@ -180,10 +217,22 @@
         const workspaceIndicator = document.getElementById("workspaceIndicator");
         const workspaceSourceBadge = document.getElementById("workspaceSourceBadge");
         const globalSearchInput = document.getElementById("globalSearchInput");
+        const processRoot = document.querySelector("[data-process-progress]");
+        const flowBundle = (window.UI_STRINGS && window.UI_STRINGS.flow) || {};
+        const stageOrder = Array.isArray(flowBundle.stages) ? flowBundle.stages.map((item) => item.key) : [];
         let activeWorkspace = workspaceFromUrl || (workspaceSelect ? workspaceSelect.value : null);
         const sidebarToggle = document.getElementById("sidebarToggle");
         const sidebarBackdrop = document.getElementById("sidebarBackdrop");
         const workspaceRouteStoreKey = "platform.workspace.last_route.v1";
+        const criticalActionsBundle = (window.UI_STRINGS && window.UI_STRINGS.critical_actions) || {};
+        const criticalConfirmBackdrop = document.getElementById("criticalConfirmBackdrop");
+        const criticalConfirmMessage = document.getElementById("criticalConfirmMessage");
+        const criticalConfirmImpact = document.getElementById("criticalConfirmImpact");
+        const criticalConfirmCloseBtn = document.getElementById("criticalConfirmCloseBtn");
+        const criticalConfirmCancelBtn = document.getElementById("criticalConfirmCancelBtn");
+        const criticalConfirmAcceptBtn = document.getElementById("criticalConfirmAcceptBtn");
+        const cancelActionLabel = "{{ ui_text('label.cancel_action') }}";
+        const confirmActionLabel = "{{ ui_text('label.confirm_action') }}";
 
         function isOperationalPath(pathname) {
           if (!pathname || pathname === "/logout") return false;
@@ -338,6 +387,145 @@
         if (Platform && typeof Platform.setupGlobalShortcuts === "function") {
           Platform.setupGlobalShortcuts();
         }
+
+        function applyProcessStage(stage) {
+          if (!processRoot || !Array.isArray(stageOrder) || !stageOrder.length) return;
+          const normalizedStage = String(stage || "").trim();
+          const stageIndex = stageOrder.indexOf(normalizedStage);
+          const targetIndex = stageIndex >= 0 ? stageIndex : 0;
+          processRoot.dataset.processStage = stageOrder[targetIndex];
+          processRoot.querySelectorAll("[data-process-step]").forEach((stepNode) => {
+            const key = stepNode.getAttribute("data-process-step") || "";
+            const idx = stageOrder.indexOf(key);
+            stepNode.classList.remove("completed", "current", "future");
+            if (idx < 0) {
+              stepNode.classList.add("future");
+              return;
+            }
+            if (idx < targetIndex) {
+              stepNode.classList.add("completed");
+              return;
+            }
+            if (idx === targetIndex) {
+              stepNode.classList.add("current");
+              return;
+            }
+            stepNode.classList.add("future");
+          });
+        }
+
+        if (processRoot) {
+          applyProcessStage(processRoot.dataset.processStage);
+          window.ProcessFlow.setStage = applyProcessStage;
+          window.ProcessFlow.stageOrder = stageOrder;
+        }
+
+        function criticalActionMeta(actionKey) {
+          if (!actionKey) return null;
+          return criticalActionsBundle[actionKey] || null;
+        }
+
+        function appendCriticalConfirmation(path, actionKey) {
+          const url = new URL(path, window.location.origin);
+          url.searchParams.set("confirm", "true");
+          if (actionKey) {
+            url.searchParams.set("confirm_action", actionKey);
+          }
+          return `${url.pathname}${url.search}${url.hash}`;
+        }
+
+        function withCriticalPayload(payload, actionKey) {
+          const basePayload = payload && typeof payload === "object" ? { ...payload } : {};
+          basePayload.confirm = true;
+          if (actionKey) {
+            basePayload.confirm_action = actionKey;
+          }
+          return basePayload;
+        }
+
+        function setCriticalModalOpen(open) {
+          if (!criticalConfirmBackdrop) return;
+          criticalConfirmBackdrop.hidden = !open;
+          criticalConfirmBackdrop.classList.toggle("open", Boolean(open));
+        }
+
+        function confirmCriticalAction(actionKey) {
+          const meta = criticalActionMeta(actionKey);
+          if (!meta) return Promise.resolve(true);
+
+          const message = String(meta.confirm_message || "").trim() || "{{ ui_text('title.critical_confirmation') }}";
+          const impact = String(meta.impact || "").trim();
+
+          if (!criticalConfirmBackdrop || !criticalConfirmAcceptBtn || !criticalConfirmCancelBtn || !criticalConfirmMessage) {
+            return Promise.resolve(window.confirm(message));
+          }
+
+          criticalConfirmMessage.textContent = message;
+          if (criticalConfirmImpact) {
+            criticalConfirmImpact.textContent = impact;
+            criticalConfirmImpact.hidden = !impact;
+          }
+          criticalConfirmCancelBtn.textContent = cancelActionLabel;
+          criticalConfirmAcceptBtn.textContent = confirmActionLabel;
+
+          return new Promise((resolve) => {
+            let finished = false;
+            function done(accepted) {
+              if (finished) return;
+              finished = true;
+              cleanup();
+              setCriticalModalOpen(false);
+              resolve(Boolean(accepted));
+            }
+
+            function onAccept() {
+              done(true);
+            }
+
+            function onCancel() {
+              done(false);
+            }
+
+            function onBackdropClick(event) {
+              if (event.target === criticalConfirmBackdrop) {
+                done(false);
+              }
+            }
+
+            function onKeydown(event) {
+              if (event.key === "Escape") {
+                done(false);
+              }
+            }
+
+            function cleanup() {
+              criticalConfirmAcceptBtn.removeEventListener("click", onAccept);
+              criticalConfirmCancelBtn.removeEventListener("click", onCancel);
+              if (criticalConfirmCloseBtn) {
+                criticalConfirmCloseBtn.removeEventListener("click", onCancel);
+              }
+              criticalConfirmBackdrop.removeEventListener("click", onBackdropClick);
+              document.removeEventListener("keydown", onKeydown);
+            }
+
+            criticalConfirmAcceptBtn.addEventListener("click", onAccept);
+            criticalConfirmCancelBtn.addEventListener("click", onCancel);
+            if (criticalConfirmCloseBtn) {
+              criticalConfirmCloseBtn.addEventListener("click", onCancel);
+            }
+            criticalConfirmBackdrop.addEventListener("click", onBackdropClick);
+            document.addEventListener("keydown", onKeydown);
+            setCriticalModalOpen(true);
+            criticalConfirmAcceptBtn.focus();
+          });
+        }
+
+        window.CriticalActionUI = {
+          meta: criticalActionMeta,
+          confirm: confirmCriticalAction,
+          appendConfirmQuery: appendCriticalConfirmation,
+          withConfirmPayload: withCriticalPayload,
+        };
 
         window.showToast = function (type, message) {
           const root = document.getElementById("toastRoot");

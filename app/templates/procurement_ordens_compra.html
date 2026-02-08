@@ -1,7 +1,7 @@
 {% extends "_layout.html" %}
 {% set active_nav = "orders" %}
-{% block title %}Ordens de compra | Plataforma Compras{% endblock %}
-{% block page_title %}Ordens de compra{% endblock %}
+{% block title %}{{ ui_text("title.orders") }}{% endblock %}
+{% block page_title %}{{ ui_text("page.orders") }}{% endblock %}
 {% block breadcrumb_tail %}
   <span class="crumb-sep">/</span><span class="crumb current">Ordens de compra</span>
 {% endblock %}
@@ -13,22 +13,22 @@
 {% block content %}
   <section class="grid grid-4">
     <article class="kpi-card">
-      <div class="kpi-label">Aprovadas</div>
+      <div class="kpi-label">{{ ui_status_labels["approved"] }}</div>
       <div class="kpi-value" data-kpi="approved">0</div>
       <div class="meta">Prontas para envio ao ERP</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-label">Em envio</div>
+      <div class="kpi-label">{{ ui_status_labels["sent_to_erp"] }}</div>
       <div class="kpi-value" data-kpi="sent_to_erp">0</div>
       <div class="meta">Aguardando retorno de integracao</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-label">Com erro ERP</div>
+      <div class="kpi-label">{{ ui_status_labels["erp_error"] }}</div>
       <div class="kpi-value" data-kpi="erp_error">0</div>
       <div class="meta">Necessitam ajuste operacional</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-label">Recebidas</div>
+      <div class="kpi-label">{{ ui_status_labels["received"] }}</div>
       <div class="kpi-value" data-kpi="received">0</div>
       <div class="meta">Fluxo finalizado</div>
     </article>
@@ -41,15 +41,10 @@
     </div>
     <div class="grid grid-4" style="margin-bottom: 12px">
       <select class="select" id="statusFilter">
-        <option value="">Todos os status</option>
-        <option value="draft">Rascunho</option>
-        <option value="approved">Aprovada</option>
-        <option value="sent_to_erp">Enviada ao ERP</option>
-        <option value="erp_accepted">Aceita no ERP</option>
-        <option value="partially_received">Recebimento parcial</option>
-        <option value="received">Recebida</option>
-        <option value="erp_error">Erro ERP</option>
-        <option value="cancelled">Cancelada</option>
+        <option value="">{{ ui_text("label.all_statuses") }}</option>
+        {% for status in ui_status_groups["ordem_compra"] %}
+          <option value="{{ status.key }}" title="{{ status.description }}">{{ status.label }}</option>
+        {% endfor %}
       </select>
       <input class="input" id="supplierFilter" placeholder="Fornecedor" />
       <label class="checkbox-line">
@@ -96,14 +91,9 @@
           <div>
             <label class="meta" for="statusInput">Status</label>
             <select class="select" id="statusInput">
-              <option value="draft">Rascunho</option>
-              <option value="approved">Aprovada</option>
-              <option value="sent_to_erp">Enviada ao ERP</option>
-              <option value="erp_accepted">Aceita no ERP</option>
-              <option value="partially_received">Recebimento parcial</option>
-              <option value="received">Recebida</option>
-              <option value="erp_error">Erro ERP</option>
-              <option value="cancelled">Cancelada</option>
+              {% for status in ui_status_groups["ordem_compra"] %}
+                <option value="{{ status.key }}" title="{{ status.description }}">{{ status.label }}</option>
+              {% endfor %}
             </select>
           </div>
         </div>
@@ -153,7 +143,7 @@
     const totalInput = document.getElementById("totalInput");
     const submitBtn = document.getElementById("submitBtn");
 
-    const state = { items: [], editMode: false };
+    const state = { items: [], editMode: false, currentEditItem: null };
 
     const withWorkspace = (path) =>
       Platform.withWorkspace
@@ -173,6 +163,14 @@
     function statusLabel(value) {
       if (window.UiLabels?.prettyStatus) return window.UiLabels.prettyStatus(value);
       return value || "Nao informado";
+    }
+
+    function hasAction(item, action) {
+      return Array.isArray(item?.allowed_actions) && item.allowed_actions.includes(action);
+    }
+
+    function actionButtonClass(item, action, fallback = "btn btn-small btn-ghost") {
+      return item?.primary_action === action ? "btn btn-small btn-primary" : fallback;
     }
 
     function updateKpis(items) {
@@ -212,12 +210,29 @@
         .map((item) => {
           const source = item.source === "erp" ? "ERP" : "Local";
           const totalValue = Number(item.total_amount || 0).toLocaleString("pt-BR", { style: "currency", currency: item.currency || "BRL" });
-          const localActions = item.source === "erp"
-            ? '<span class="meta">Gerenciada pelo ERP</span>'
-            : `
-                <button class="btn btn-small btn-ghost" type="button" data-edit-order="${item.id}">Editar</button>
-                <button class="btn btn-small" type="button" data-delete-order="${item.id}">Cancelar</button>
-              `;
+          const actions = [];
+          actions.push(`<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/purchase-orders/${item.id}`)}">Detalhe</a>`);
+          if (hasAction(item, "push_to_erp")) {
+            const pushLabel = ["rejeitado", "reenvio_necessario"].includes(item?.erp_status?.key)
+              ? "Reenviar ao ERP"
+              : "Enviar ERP";
+            actions.push(
+              `<button class="${actionButtonClass(item, "push_to_erp", "btn btn-small")}" type="button" data-push-order="${item.id}">${pushLabel}</button>`
+            );
+          }
+          if (item.source !== "erp" && hasAction(item, "edit_order")) {
+            actions.push(
+              `<button class="${actionButtonClass(item, "edit_order", "btn btn-small btn-ghost")}" type="button" data-edit-order="${item.id}">Editar</button>`
+            );
+          }
+          if (item.source !== "erp" && hasAction(item, "cancel_order")) {
+            actions.push(
+              `<button class="${actionButtonClass(item, "cancel_order", "btn btn-small")}" type="button" data-delete-order="${item.id}">Cancelar</button>`
+            );
+          }
+          if (!actions.length) {
+            actions.push(item.source === "erp" ? '<span class="meta">Gerenciada pelo ERP</span>' : '<span class="meta">Sem acoes disponiveis</span>');
+          }
           return `
             <tr>
               <td data-label="Ordem"><strong>${escapeHtml(item.number || `OC-${item.id}`)}</strong></td>
@@ -227,10 +242,7 @@
               <td data-label="Origem"><span class="pill ${item.source === "erp" ? "info" : ""}">${escapeHtml(source)}</span></td>
               <td data-label="Atualizada">${escapeHtml(item.updated_at || "-")}</td>
               <td class="cell-actions" data-label="Acoes">
-                <div class="actions-cell">
-                  <a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/purchase-orders/${item.id}`)}">Detalhe</a>
-                  ${localActions}
-                </div>
+                <div class="actions-cell">${actions.join("")}</div>
               </td>
             </tr>
           `;
@@ -244,14 +256,43 @@
         button.addEventListener("click", async () => {
           const orderId = Number(button.getAttribute("data-delete-order"));
           if (!orderId) return;
-          if (!window.confirm("Deseja cancelar esta ordem de compra?")) return;
-          const response = await fetch(withWorkspace(`/api/procurement/purchase-orders/${orderId}`), { method: "DELETE" });
+          const criticalUi = window.CriticalActionUI;
+          const confirmed = criticalUi
+            ? await criticalUi.confirm("cancel_order")
+            : window.confirm("{{ ui_messages['confirm']['cancel_order'] }}");
+          if (!confirmed) return;
+          const endpoint = criticalUi
+            ? criticalUi.appendConfirmQuery(withWorkspace(`/api/procurement/purchase-orders/${orderId}`), "cancel_order")
+            : withWorkspace(`/api/procurement/purchase-orders/${orderId}`);
+          const response = await fetch(endpoint, { method: "DELETE" });
           if (!response.ok) {
             const err = await response.json().catch(() => ({}));
             window.showToast?.("danger", `Falha ao cancelar ordem, ${err.message || err.error || "erro"}`);
             return;
           }
           window.showToast?.("success", "Ordem cancelada");
+          await loadOrders();
+        });
+      });
+      ordersBody.querySelectorAll("[data-push-order]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const orderId = Number(button.getAttribute("data-push-order"));
+          if (!orderId) return;
+          const criticalUi = window.CriticalActionUI;
+          const confirmed = criticalUi
+            ? await criticalUi.confirm("push_to_erp")
+            : window.confirm("{{ ui_messages['confirm']['push_order_erp'] }}");
+          if (!confirmed) return;
+          const endpoint = criticalUi
+            ? criticalUi.appendConfirmQuery(withWorkspace(`/api/procurement/purchase-orders/${orderId}/push-to-erp`), "push_to_erp")
+            : withWorkspace(`/api/procurement/purchase-orders/${orderId}/push-to-erp`);
+          const response = await fetch(endpoint, { method: "POST" });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            window.showToast?.("danger", payload.message || payload.error || "Falha ao enviar ao ERP");
+            return;
+          }
+          window.showToast?.("success", payload.message || "Ordem enviada ao ERP");
           await loadOrders();
         });
       });
@@ -273,6 +314,11 @@
       currencyInput.value = "BRL";
       totalInput.value = "0";
       state.editMode = false;
+      state.currentEditItem = null;
+      [numberInput, supplierInput, statusInput, currencyInput, totalInput].forEach((input) => {
+        input.disabled = false;
+      });
+      submitBtn.disabled = false;
       orderModalTitle.textContent = "Nova ordem";
       submitBtn.textContent = "Salvar ordem";
     }
@@ -285,8 +331,13 @@
     function openModalForEdit(orderId) {
       const item = state.items.find((row) => Number(row.id) === Number(orderId));
       if (!item) return;
+      if (!hasAction(item, "edit_order")) {
+        window.showToast?.("warning", "Edicao indisponivel para o status atual");
+        return;
+      }
       resetForm();
       state.editMode = true;
+      state.currentEditItem = item;
       orderIdInput.value = String(item.id);
       numberInput.value = item.number || "";
       supplierInput.value = item.supplier_name || "";
@@ -310,16 +361,39 @@
         const response = await fetch(withWorkspace(`/api/procurement/purchase-orders?${params.toString()}`));
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.message || payload.error || "erro");
-        renderRows(payload.items || []);
+        const items = payload.items || [];
+        renderRows(items);
+        const stageByStatus = {
+          draft: "ordem_compra",
+          approved: "ordem_compra",
+          sent_to_erp: "ordem_compra",
+          erp_error: "ordem_compra",
+          erp_accepted: "erp",
+          partially_received: "erp",
+          received: "erp",
+          cancelled: "ordem_compra",
+        };
+        const selected = statusFilter.value || "";
+        const stage = stageByStatus[selected] || items[0]?.process_stage || "ordem_compra";
+        if (window.ProcessFlow?.setStage) {
+          window.ProcessFlow.setStage(stage);
+        }
       } catch (error) {
         summary.textContent = "Falha ao carregar ordens";
         renderEmpty("Falha ao carregar ordens");
+        if (window.ProcessFlow?.setStage) {
+          window.ProcessFlow.setStage("ordem_compra");
+        }
         window.showToast?.("danger", `Nao foi possivel carregar ordens, ${error.message || "erro"}`);
       }
     }
 
     orderForm.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (state.editMode && !hasAction(state.currentEditItem, "edit_order")) {
+        window.showToast?.("warning", "Edicao indisponivel para o status atual");
+        return;
+      }
       const supplier_name = supplierInput.value.trim();
       if (!supplier_name) {
         window.showToast?.("warning", "Informe o fornecedor");
@@ -333,6 +407,26 @@
         currency: currencyInput.value.trim() || "BRL",
         total_amount: Number(totalInput.value || 0),
       };
+      const isCancellationUpdate =
+        state.editMode &&
+        payload.status === "cancelled" &&
+        state.currentEditItem &&
+        state.currentEditItem.status !== "cancelled";
+      if (state.editMode && !hasAction(state.currentEditItem, "cancel_order") && payload.status === "cancelled") {
+        window.showToast?.("warning", "Cancelamento indisponivel para o status atual");
+        return;
+      }
+      if (isCancellationUpdate) {
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi
+          ? await criticalUi.confirm("cancel_order")
+          : window.confirm("{{ ui_messages['confirm']['cancel_order'] }}");
+        if (!confirmed) return;
+        if (criticalUi) {
+          payload.confirm = true;
+          payload.confirm_action = "cancel_order";
+        }
+      }
 
       const orderId = Number(orderIdInput.value);
       const endpoint = state.editMode && orderId

@@ -1,13 +1,14 @@
 ﻿
 {% extends "_layout.html" %}
 {% set active_nav = "procurement" %}
-{% block title %}OC {{ purchase_order_id }} | Plataforma Compras{% endblock %}
-{% block page_title %}Ordem de compra{% endblock %}
+{% block title %}{{ ui_text("title.po_detail") }} {{ purchase_order_id }} | {{ ui_terms["app_name"] }}{% endblock %}
+{% block page_title %}{{ ui_text("page.po_detail") }}{% endblock %}
 {% block breadcrumb_tail %}
   <span class="crumb-sep">/</span><span class="crumb current">Ordem de compra {{ purchase_order_id }}</span>
 {% endblock %}
 {% block page_actions %}
   <a class="btn btn-ghost" href="/procurement/inbox?workspace_id={{ workspace_id }}">Voltar para inbox</a>
+  <button class="btn btn-ghost" type="button" id="toggleHistoryBtn">{{ ui_text("label.view_integration_history") }}</button>
   <button class="btn btn-primary" id="pushErpBtn">Enviar ao ERP</button>
 {% endblock %}
 {% block content %}
@@ -34,16 +35,37 @@
 
     <article class="card">
       <div class="card-header">
-        <h2 class="card-title">Historico de eventos</h2>
+        <h2 class="card-title">Status ERP</h2>
+        <span class="badge" id="erpStatusBadge">ERP</span>
       </div>
-      <div class="list" id="eventsList"></div>
+      <div class="kv-grid" id="erpStatusSummary"></div>
     </article>
 
-    <article class="card">
+    <article class="card compact action-strip">
       <div class="card-header">
-        <h2 class="card-title">Execucoes de integracao ERP</h2>
+        <h2 class="card-title">{{ ui_text("label.integration_history") }}</h2>
+        <span class="meta" id="historyStatus">Oculto</span>
       </div>
-      <div class="list" id="syncRunsList"></div>
+      <div class="page-actions">
+        <button class="btn btn-ghost" type="button" id="historyActionBtn">{{ ui_text("label.view_integration_history") }}</button>
+      </div>
+      <div class="meta">{{ ui_text("text.integration_history_on_demand") }}</div>
+    </article>
+
+    <article class="card" id="integrationHistoryPanel" hidden>
+      <div class="card-header">
+        <h2 class="card-title">{{ ui_text("label.integration_history") }}</h2>
+      </div>
+      <div class="grid grid-2">
+        <div>
+          <div class="meta" style="margin-bottom: 8px">{{ ui_text("label.timeline") }}</div>
+          <div class="list" id="erpTimelineList"></div>
+        </div>
+        <div>
+          <div class="meta" style="margin-bottom: 8px">Execucoes de integracao ERP</div>
+          <div class="list" id="syncRunsList"></div>
+        </div>
+      </div>
     </article>
   </section>
 {% endblock %}
@@ -54,13 +76,26 @@
       const Platform = window.PlatformUI || {};
 
       const poSummary = document.getElementById("poSummary");
-      const eventsList = document.getElementById("eventsList");
+      const erpStatusSummary = document.getElementById("erpStatusSummary");
+      const erpStatusBadge = document.getElementById("erpStatusBadge");
+      const erpTimelineList = document.getElementById("erpTimelineList");
       const syncRunsList = document.getElementById("syncRunsList");
+      const toggleHistoryBtn = document.getElementById("toggleHistoryBtn");
+      const historyActionBtn = document.getElementById("historyActionBtn");
+      const historyStatus = document.getElementById("historyStatus");
+      const integrationHistoryPanel = document.getElementById("integrationHistoryPanel");
       const pushErpBtn = document.getElementById("pushErpBtn");
       const poStatusBadge = document.getElementById("poStatusBadge");
       const nextPoActionBadge = document.getElementById("nextPoActionBadge");
       const nextPoActionBtn = document.getElementById("nextPoActionBtn");
       const nextPoActionMeta = document.getElementById("nextPoActionMeta");
+      const historyViewLabel = "{{ ui_text('label.view_integration_history') }}";
+      const historyHideLabel = "{{ ui_text('label.hide_integration_history') }}";
+
+      const state = {
+        historyVisible: false,
+        historyLoaded: false,
+      };
 
       const escapeHtml = Platform.escapeHtml
         ? Platform.escapeHtml
@@ -92,11 +127,22 @@
         }
         return status || "Nao informado";
       }
+
+      function prettyErpStatus(status) {
+        if (window.UiLabels && window.UiLabels.prettyErpStatus) {
+          return window.UiLabels.prettyErpStatus(status);
+        }
+        return status || "Nao informado";
+      }
       function prettyScope(scope) {
         if (window.UiLabels && window.UiLabels.prettyScope) {
           return window.UiLabels.prettyScope(scope);
         }
         return scope || "Nao informado";
+      }
+
+      function hasPoAction(po, action) {
+        return Array.isArray(po?.allowed_actions) && po.allowed_actions.includes(action);
       }
 
       function formatCurrency(value) {
@@ -106,9 +152,22 @@
 
       function statusTone(status) {
         const normalized = String(status || "").toLowerCase();
+        if (normalized === "aceito") return "success";
+        if (normalized === "enviado") return "warning";
+        if (normalized === "rejeitado") return "danger";
+        if (normalized === "reenvio_necessario") return "warning";
         if (normalized.includes("error") || normalized.includes("failed") || normalized.includes("rejected")) return "danger";
         if (normalized.includes("sent") || normalized.includes("running") || normalized.includes("pending")) return "warning";
         if (normalized.includes("accepted") || normalized.includes("success") || normalized.includes("approved")) return "success";
+        return "info";
+      }
+
+      function erpStatusTone(erpStatusKey) {
+        const normalized = String(erpStatusKey || "").toLowerCase();
+        if (normalized === "aceito") return "success";
+        if (normalized === "enviado") return "warning";
+        if (normalized === "rejeitado") return "danger";
+        if (normalized === "reenvio_necessario") return "warning";
         return "info";
       }
 
@@ -116,15 +175,15 @@
         return `<span class="pill ${statusTone(status)}">${escapeHtml(prettyStatus(status))}</span>`;
       }
       function renderSummary(po) {
+        const erpStatus = po.erp_status || {};
         const rows = [
           ["Numero", po.number || `OC ${po.id}`],
-          ["Status", prettyStatus(po.status)],
+          ["Status operacional", prettyStatus(po.status)],
           ["Fornecedor", po.supplier_name || "Nao informado"],
           ["Decisao", po.award_id ?? "Nao informado"],
           ["Moeda", po.currency || "BRL"],
           ["Total", formatCurrency(po.total_amount)],
           ["ID externo", po.external_id || "Nao informado"],
-          ["Erro ERP", po.erp_last_error || "Nao informado"],
           ["Criada em", po.created_at || "Nao informado"],
           ["Atualizada em", po.updated_at || "Nao informado"],
         ];
@@ -133,72 +192,115 @@
           .map(([k, v]) => `<div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div>`)
           .join("");
 
-        pushErpBtn.disabled = po.status === "erp_accepted";
-        pushErpBtn.textContent = po.status === "erp_accepted" ? "ERP ok" : "Enviar ao ERP";
+        const canPush = hasPoAction(po, "push_to_erp");
+        pushErpBtn.disabled = !canPush;
+        if (canPush) {
+          pushErpBtn.textContent = ["rejeitado", "reenvio_necessario"].includes(erpStatus.key)
+            ? "Reenviar ao ERP"
+            : "Enviar ao ERP";
+        } else {
+          pushErpBtn.textContent = po.status === "erp_accepted" ? "ERP ok" : "Acao indisponivel";
+        }
         poStatusBadge.textContent = prettyStatus(po.status);
         poStatusBadge.className = `badge ${statusTone(po.status)}`;
+        if (window.ProcessFlow?.setStage) {
+          window.ProcessFlow.setStage(po.process_stage || "ordem_compra");
+        }
         renderNextPoAction(po);
+        renderErpStatus(po);
       }
 
       function renderNextPoAction(po) {
         if (!nextPoActionBtn || !nextPoActionBadge || !nextPoActionMeta) return;
+        const erpStatus = po.erp_status || {};
         nextPoActionBtn.disabled = false;
-        nextPoActionBtn.dataset.action = "push";
-        nextPoActionBtn.textContent = "Enviar ao ERP";
+        nextPoActionBtn.dataset.action = "refresh";
+        nextPoActionBtn.textContent = "Atualizar dados";
         nextPoActionBadge.className = "badge";
+        const canPush = hasPoAction(po, "push_to_erp");
+        const primary = po.erp_next_action || po.primary_action || "";
 
         if (po.status === "erp_accepted") {
           nextPoActionBadge.textContent = "Concluido";
           nextPoActionBadge.classList.add("success");
-          nextPoActionMeta.textContent = "Ordem enviada com retorno aceito pelo ERP.";
+          nextPoActionMeta.textContent = po.erp_status?.message || "Ordem enviada com retorno aceito pelo ERP.";
           nextPoActionBtn.textContent = "Atualizar dados";
           nextPoActionBtn.dataset.action = "refresh";
           return;
         }
 
-        if (po.status === "erp_error") {
+        if (canPush && ["rejeitado", "reenvio_necessario"].includes(erpStatus.key)) {
           nextPoActionBadge.textContent = "Falha ERP";
           nextPoActionBadge.classList.add("danger");
-          nextPoActionMeta.textContent = "Revise o erro e execute novo envio da ordem.";
+          nextPoActionMeta.textContent = po.erp_status?.message || "Revise o erro e execute novo envio da ordem.";
           nextPoActionBtn.textContent = "Reenviar ao ERP";
+          nextPoActionBtn.dataset.action = "push";
           return;
         }
 
         if (po.status === "sent_to_erp") {
           nextPoActionBadge.textContent = "Aguardando retorno";
           nextPoActionBadge.classList.add("warning");
-          nextPoActionMeta.textContent = "A ordem foi enviada, acompanhe o retorno nas execucoes de integracao.";
+          nextPoActionMeta.textContent = po.erp_status?.message || "A ordem foi enviada, acompanhe o retorno nas execucoes de integracao.";
           nextPoActionBtn.textContent = "Atualizar dados";
           nextPoActionBtn.dataset.action = "refresh";
           return;
         }
 
-        nextPoActionBadge.textContent = "Enviar";
-        nextPoActionMeta.textContent = "Envie a ordem ao ERP para concluir o fluxo operacional.";
+        if (canPush || primary === "push_to_erp") {
+          nextPoActionBadge.textContent = "Enviar";
+          nextPoActionMeta.textContent = po.erp_status?.message || "Envie a ordem ao ERP para concluir o fluxo operacional.";
+          nextPoActionBtn.textContent = ["rejeitado", "reenvio_necessario"].includes(erpStatus.key)
+            ? "Reenviar ao ERP"
+            : "Enviar ao ERP";
+          nextPoActionBtn.dataset.action = "push";
+          return;
+        }
+
+        nextPoActionBadge.textContent = "Acompanhar";
+        nextPoActionMeta.textContent = "Acompanhe os eventos e a trilha de integracao da ordem.";
+        nextPoActionBtn.textContent = "Atualizar dados";
+        nextPoActionBtn.dataset.action = "refresh";
       }
 
-      function renderEvents(events) {
+      function renderErpStatus(po) {
+        const status = po.erp_status || {};
+        const rows = [
+          ["Status ERP", prettyErpStatus(status.key || status.label)],
+          ["Ultima atualizacao", status.last_updated_at || po.updated_at || "Nao informado"],
+          ["Mensagem", status.message || "Nao informado"],
+          ["Detalhe", status.description || "Nao informado"],
+        ];
+        erpStatusSummary.innerHTML = rows
+          .map(([k, v]) => `<div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div>`)
+          .join("");
+        erpStatusBadge.textContent = prettyErpStatus(status.key || status.label || "nao_enviado");
+        erpStatusBadge.className = `badge ${erpStatusTone(status.key)}`;
+      }
+
+      function renderErpTimeline(events) {
         if (!events.length) {
-          eventsList.innerHTML = `
+          erpTimelineList.innerHTML = `
             <div class="list-item">
-              <div class="title">Sem eventos ainda</div>
-              <div class="meta">A trilha de status aparecera conforme novas mudancas ocorrerem.</div>
+              <div class="title">Sem eventos de integracao ERP</div>
+              <div class="meta">A linha do tempo aparecera apos envio ou retorno do ERP.</div>
             </div>
           `;
           return;
         }
-        eventsList.innerHTML = events
+        erpTimelineList.innerHTML = events
           .map(
             (e) => `
               <div class="list-item timeline-row">
                 <div class="head">
-                  <div class="title">Evento de status</div>
-                  ${renderStatusPill(e.to_status)}
+                  <div class="title">${escapeHtml(e.event_label || "Evento ERP")}</div>
+                  ${renderStatusPill(e.erp_status?.key || e.to_status)}
                 </div>
                 <div class="meta">${escapeHtml(e.occurred_at)}</div>
+                <div class="meta">${escapeHtml(e.message || "-")}</div>
                 <div class="chip-row">
                   <span class="pill">De ${escapeHtml(prettyStatus(e.from_status || "Nao informado"))}</span>
-                  <span class="pill">Motivo ${escapeHtml(e.reason || "Nao informado")}</span>
+                  <span class="pill">Para ${escapeHtml(prettyStatus(e.to_status || "Nao informado"))}</span>
                 </div>
               </div>
             `
@@ -237,50 +339,98 @@
           .join("");
       }
 
-      async function loadDetail() {
-        const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}`);
+      function setHistoryVisibility(visible) {
+        state.historyVisible = Boolean(visible);
+        if (integrationHistoryPanel) {
+          integrationHistoryPanel.hidden = !state.historyVisible;
+        }
+        const label = state.historyVisible ? historyHideLabel : historyViewLabel;
+        if (toggleHistoryBtn) toggleHistoryBtn.textContent = label;
+        if (historyActionBtn) historyActionBtn.textContent = label;
+        if (historyStatus) historyStatus.textContent = state.historyVisible ? "Visivel" : "Oculto";
+      }
+
+      async function loadDetail(options = {}) {
+        const includeHistory = Boolean(options.includeHistory);
+        const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}?include_history=${includeHistory ? "1" : "0"}`);
         const data = await res.json();
         if (!res.ok) {
           poSummary.innerHTML = `<div class="meta">Erro: ${escapeHtml(
             data.message || data.error || "desconhecido"
           )}</div>`;
-          eventsList.innerHTML = "";
-          syncRunsList.innerHTML = "";
+          erpStatusSummary.innerHTML = "";
+          if (includeHistory) {
+            erpTimelineList.innerHTML = "";
+            syncRunsList.innerHTML = "";
+          }
           pushErpBtn.disabled = true;
+          if (window.ProcessFlow?.setStage) {
+            window.ProcessFlow.setStage("ordem_compra");
+          }
           return;
         }
         renderSummary(data.purchase_order);
-        renderEvents(data.events || []);
-        renderSyncRuns(data.sync_runs || []);
+        if (includeHistory) {
+          renderErpTimeline(data.erp_timeline || []);
+          renderSyncRuns(data.sync_runs || []);
+          state.historyLoaded = true;
+        }
+      }
+
+      async function toggleIntegrationHistory() {
+        const nextVisible = !state.historyVisible;
+        setHistoryVisibility(nextVisible);
+        if (nextVisible && !state.historyLoaded) {
+          await loadDetail({ includeHistory: true });
+        }
       }
 
       pushErpBtn.addEventListener("click", async () => {
+        const currentStatus = poStatusBadge ? poStatusBadge.textContent : "";
+        if (pushErpBtn.disabled) {
+          window.showToast("warning", `Envio indisponivel para o status ${currentStatus || "atual"}`);
+          return;
+        }
+        const criticalUi = window.CriticalActionUI;
+        const confirmed = criticalUi ? await criticalUi.confirm("push_to_erp") : true;
+        if (!confirmed) return;
         setBusy(pushErpBtn, true, { idle: "Enviar ao ERP", loading: "Enviando" });
         try {
-          const res = await fetch(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, {
+          const endpoint = criticalUi
+            ? criticalUi.appendConfirmQuery(`/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`, "push_to_erp")
+            : `/api/procurement/purchase-orders/${purchaseOrderId}/push-to-erp`;
+          const res = await fetch(endpoint, {
             method: "POST",
           });
+          const payload = await res.json().catch(() => ({}));
           if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            window.showToast("danger", `Nao foi possivel enviar ao ERP, ${err.message || err.error || "motivo nao informado"}`);
+            window.showToast("danger", payload.message || payload.error || "Nao foi possivel enviar ao ERP");
             return;
           }
-          window.showToast("success", "Ordem enviada ao ERP com sucesso");
+          window.showToast("success", payload.message || "Ordem enviada ao ERP com sucesso");
         } finally {
           setBusy(pushErpBtn, false, { idle: "Enviar ao ERP", loading: "Enviando" });
-          await loadDetail();
+          await loadDetail({ includeHistory: state.historyVisible });
         }
       });
 
       nextPoActionBtn.addEventListener("click", async () => {
         const action = nextPoActionBtn.dataset.action || "push";
         if (action === "refresh") {
-          await loadDetail();
+          await loadDetail({ includeHistory: state.historyVisible });
           return;
         }
         pushErpBtn.click();
       });
 
-      loadDetail();
+      if (toggleHistoryBtn) {
+        toggleHistoryBtn.addEventListener("click", toggleIntegrationHistory);
+      }
+      if (historyActionBtn) {
+        historyActionBtn.addEventListener("click", toggleIntegrationHistory);
+      }
+
+      setHistoryVisibility(false);
+      loadDetail({ includeHistory: false });
     </script>
 {% endblock %}

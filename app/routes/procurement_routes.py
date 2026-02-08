@@ -7,11 +7,34 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
 from urllib.parse import quote
 
-from flask import Blueprint, current_app, jsonify, render_template, request
+from flask import Blueprint, current_app, g, jsonify, render_template, request, session
 
 from app.db import get_db, get_read_db
 from app.erp_client import DEFAULT_RISK_FLAGS, ErpError, fetch_erp_records, push_purchase_order
+from app.errors import IntegrationError, PermissionError as AppPermissionError, ValidationError, classify_erp_failure
+from app.procurement.critical_actions import get_critical_action, resolve_confirmation
+from app.procurement.flow_policy import (
+    action_label as flow_action_label,
+    action_allowed as flow_action_allowed,
+    allowed_actions as flow_allowed_actions,
+    build_process_steps,
+    flow_meta,
+    primary_action as flow_primary_action,
+    stage_for_award_status,
+    stage_for_purchase_order_status,
+    stage_for_purchase_request_status,
+    stage_for_rfq_status,
+)
 from app.tenant import DEFAULT_TENANT_ID, current_tenant_id
+from app.ui_strings import (
+    confirm_message,
+    erp_status_payload,
+    erp_timeline_event_label,
+    error_message,
+    get_ui_text,
+    status_keys_for_group,
+    success_message,
+)
 
 
 procurement_bp = Blueprint("procurement", __name__)
@@ -19,28 +42,224 @@ procurement_bp = Blueprint("procurement", __name__)
 
 ALLOWED_TYPES = {"purchase_request", "rfq", "purchase_order"}
 ALLOWED_PRIORITIES = {"low", "medium", "high", "urgent"}
-ALLOWED_PR_STATUSES = {
-    "pending_rfq",
-    "in_rfq",
-    "awarded",
-    "ordered",
-    "partially_received",
-    "received",
-    "cancelled",
-}
-ALLOWED_PO_STATUSES = {
-    "draft",
-    "approved",
-    "sent_to_erp",
-    "erp_accepted",
-    "partially_received",
-    "received",
-    "cancelled",
-    "erp_error",
-}
+ALLOWED_PR_STATUSES = set(status_keys_for_group("solicitacao"))
+ALLOWED_PO_STATUSES = set(status_keys_for_group("ordem_compra"))
 ALLOWED_RECEIPT_STATUSES = {"pending", "partially_received", "received"}
-ALLOWED_RFQ_STATUSES = {"draft", "open", "collecting_quotes", "closed", "awarded", "cancelled"}
+ALLOWED_RFQ_STATUSES = set(status_keys_for_group("cotacao"))
 ALLOWED_INBOX_STATUSES = ALLOWED_PR_STATUSES | ALLOWED_PO_STATUSES | ALLOWED_RFQ_STATUSES
+
+
+def _err(key: str, fallback: str | None = None) -> str:
+    return error_message(key, fallback)
+
+
+def _ok(key: str, fallback: str | None = None) -> str:
+    return success_message(key, fallback)
+
+
+def _confirm(key: str, fallback: str | None = None) -> str:
+    return confirm_message(key, fallback)
+
+
+def _process_context(stage: str) -> dict:
+    return {
+        "process_stage": stage,
+        "process_steps": build_process_steps(stage),
+    }
+
+
+def _current_role() -> str:
+    role = (session.get("user_role") or "buyer").strip().lower()
+    if role not in {"buyer", "admin", "approver", "manager", "supplier"}:
+        return "buyer"
+    return role
+
+
+def _require_roles(*allowed_roles: str) -> None:
+    allowed = {str(role).strip().lower() for role in allowed_roles if str(role).strip()}
+    if not allowed:
+        return
+    if _current_role() in allowed:
+        return
+    raise AppPermissionError(
+        code="permission_denied",
+        message_key="permission_denied",
+        http_status=403,
+        critical=False,
+    )
+
+
+def _forbidden_action(stage: str, status: str | None, action: str, http_status: int = 409):
+    raise ValidationError(
+        code="action_not_allowed_for_status",
+        message_key="action_not_allowed_for_status",
+        http_status=http_status,
+        critical=False,
+        payload={
+            "stage": stage,
+            "status": status,
+            "action": action,
+            "allowed_actions": flow_allowed_actions(stage, status),
+            "primary_action": flow_primary_action(stage, status),
+        },
+    )
+
+
+def _filter_actions(meta: Dict[str, object], blocked: set[str]) -> Dict[str, object]:
+    allowed = [action for action in list(meta.get("allowed_actions") or []) if action not in blocked]
+    primary = meta.get("primary_action")
+    if primary not in allowed:
+        primary = allowed[0] if allowed else None
+    return {"allowed_actions": allowed, "primary_action": primary}
+
+
+def _erp_timeline_event_type(reason: str | None, from_status: str | None, to_status: str | None) -> str | None:
+    normalized_reason = str(reason or "").strip().lower()
+    normalized_from = str(from_status or "").strip().lower()
+    normalized_to = str(to_status or "").strip().lower()
+
+    if normalized_reason == "po_push_retry_started":
+        return "reenvio"
+    if normalized_reason == "po_push_started":
+        return "reenvio" if normalized_from == "erp_error" else "envio"
+    if normalized_reason in {"po_push_failed"}:
+        return "erro"
+    if normalized_reason in {"po_push_rejected", "po_push_succeeded", "po_push_queued"}:
+        return "resposta"
+
+    if normalized_to == "sent_to_erp":
+        return "reenvio" if normalized_from == "erp_error" else "envio"
+    if normalized_to in {"erp_accepted", "erp_error"}:
+        return "resposta"
+    return None
+
+
+def _erp_timeline_event_message(event_type: str, reason: str | None, to_status: str | None) -> str:
+    normalized_reason = str(reason or "").strip().lower()
+    normalized_to = str(to_status or "").strip().lower()
+
+    if normalized_reason == "po_push_rejected":
+        return _err("erp_rejected", _err("erp_order_rejected"))
+    if event_type == "erro":
+        return _err("erp_unavailable", _err("erp_temporarily_unavailable"))
+    if normalized_to == "erp_accepted":
+        return _ok("erp_accepted")
+    if normalized_to == "erp_error":
+        return _err("erp_unavailable", _err("erp_temporarily_unavailable"))
+    return _ok("order_sent_to_erp")
+
+
+def _build_erp_timeline(events: List[dict]) -> List[dict]:
+    timeline: List[dict] = []
+    for event in events:
+        if str(event.get("entity") or "") != "purchase_order":
+            continue
+        event_type = _erp_timeline_event_type(
+            event.get("reason"),
+            event.get("from_status"),
+            event.get("to_status"),
+        )
+        if not event_type:
+            continue
+
+        reason_value = str(event.get("reason") or "").strip().lower()
+        error_hint = "rejected" if reason_value == "po_push_rejected" else None
+        status_view = erp_status_payload(
+            event.get("to_status"),
+            erp_last_error=error_hint,
+            last_updated_at=event.get("occurred_at"),
+        )
+        timeline.append(
+            {
+                "id": event.get("id"),
+                "event_type": event_type,
+                "event_label": erp_timeline_event_label(event_type, event_type),
+                "message": _erp_timeline_event_message(event_type, event.get("reason"), event.get("to_status")),
+                "from_status": event.get("from_status"),
+                "to_status": event.get("to_status"),
+                "reason": event.get("reason"),
+                "occurred_at": event.get("occurred_at"),
+                "erp_status": status_view,
+            }
+        )
+    return timeline
+
+
+def _erp_next_action_key(order_status: str | None, allowed_actions: List[str], primary_action: str | None, erp_ui_key: str) -> str | None:
+    normalized_status = str(order_status or "").strip().lower()
+    if "push_to_erp" in set(allowed_actions):
+        return "push_to_erp"
+    if normalized_status == "sent_to_erp":
+        return "refresh_order"
+    return primary_action or (allowed_actions[0] if allowed_actions else None)
+
+
+def _erp_action_label(action_key: str | None, erp_ui_key: str | None = None) -> str | None:
+    if not action_key:
+        return None
+    if action_key == "push_to_erp" and erp_ui_key in {"rejeitado", "reenvio_necessario"}:
+        return get_ui_text("erp.next_action.resend", "Reenviar ao ERP")
+    if action_key == "refresh_order":
+        return get_ui_text("erp.next_action.await_response", "Aguardar retorno do ERP.")
+    return flow_action_label(action_key, action_key)
+
+
+def _critical_confirmation_details(action_key: str) -> dict | None:
+    meta = get_critical_action(action_key)
+    if not meta:
+        return None
+
+    confirm_key = meta.get("confirm_message_key") or action_key
+    impact_key = meta.get("impact_text_key") or f"impact.{action_key}"
+    return {
+        "action_key": action_key,
+        "confirm_key": confirm_key,
+        "confirm_message": _confirm(confirm_key, confirm_key),
+        "impact_key": impact_key,
+        "impact": get_ui_text(impact_key, impact_key),
+    }
+
+
+def _audit_confirmation(action_key: str, entity: str, entity_id: int, mode: str) -> None:
+    request_id = (getattr(g, "request_id", None) or "").strip() or "n/a"
+    user = (session.get("user_email") or session.get("display_name") or "anonymous").strip() or "anonymous"
+    current_app.logger.info(
+        "confirmation_event request_id=%s user=%s action=%s entity=%s entity_id=%s mode=%s",
+        request_id,
+        user,
+        action_key,
+        entity,
+        entity_id,
+        mode,
+    )
+
+
+def _require_critical_confirmation(
+    action_key: str,
+    *,
+    entity: str,
+    entity_id: int,
+    payload: dict | None = None,
+) -> None:
+    meta = get_critical_action(action_key)
+    if not meta:
+        return
+
+    confirmed, mode = resolve_confirmation(request, payload)
+    if not confirmed:
+        raise ValidationError(
+            code="confirmation_required",
+            message_key="confirmation_required",
+            http_status=400,
+            critical=False,
+            payload={
+                "action": action_key,
+                "confirmation": _critical_confirmation_details(action_key),
+            },
+        )
+
+    _audit_confirmation(action_key, entity, entity_id, mode)
+
 
 # Compatibilidade: aceitar scopes antigos (plural) nos filtros de logs.
 SCOPE_ALIASES = {
@@ -78,31 +297,42 @@ SYNC_SUPPORTED_SCOPES = {
 @procurement_bp.route("/procurement/inbox", methods=["GET"])
 def procurement_inbox_page():
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    return render_template("procurement_inbox.html", tenant_id=tenant_id)
+    type_hint = (request.args.get("type") or "").strip().lower()
+    stage = "solicitacao"
+    if type_hint == "rfq":
+        stage = "cotacao"
+    elif type_hint == "purchase_order":
+        stage = "ordem_compra"
+    return render_template("procurement_inbox.html", tenant_id=tenant_id, **_process_context(stage))
 
 
 @procurement_bp.route("/procurement/solicitacoes", methods=["GET"])
 def purchase_requests_page():
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    return render_template("procurement_solicitacoes.html", tenant_id=tenant_id)
+    return render_template("procurement_solicitacoes.html", tenant_id=tenant_id, **_process_context("solicitacao"))
 
 
 @procurement_bp.route("/procurement/cotacoes/abrir", methods=["GET"])
 def cotacao_open_page():
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    return render_template("procurement_cotacao_abertura.html", tenant_id=tenant_id)
+    return render_template("procurement_cotacao_abertura.html", tenant_id=tenant_id, **_process_context("cotacao"))
 
 
 @procurement_bp.route("/procurement/cotacoes", methods=["GET"])
 def cotacoes_page():
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    return render_template("procurement_cotacoes.html", tenant_id=tenant_id)
+    return render_template("procurement_cotacoes.html", tenant_id=tenant_id, **_process_context("cotacao"))
 
 
 @procurement_bp.route("/procurement/cotacoes/<int:rfq_id>", methods=["GET"])
 def cotacao_detail_page(rfq_id: int):
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    return render_template("procurement_cotacao.html", tenant_id=tenant_id, rfq_id=rfq_id)
+    return render_template(
+        "procurement_cotacao.html",
+        tenant_id=tenant_id,
+        rfq_id=rfq_id,
+        **_process_context("cotacao"),
+    )
 
 
 @procurement_bp.route("/procurement/purchase-orders/<int:purchase_order_id>", methods=["GET"])
@@ -112,25 +342,33 @@ def purchase_order_detail_page(purchase_order_id: int):
         "procurement_purchase_order.html",
         tenant_id=tenant_id,
         purchase_order_id=purchase_order_id,
+        **_process_context("ordem_compra"),
     )
 
 
 @procurement_bp.route("/procurement/ordens-compra", methods=["GET"])
 def purchase_orders_page():
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    return render_template("procurement_ordens_compra.html", tenant_id=tenant_id)
+    return render_template("procurement_ordens_compra.html", tenant_id=tenant_id, **_process_context("ordem_compra"))
 
 
 @procurement_bp.route("/procurement/integrations/logs", methods=["GET"])
 def integration_logs_page():
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    return render_template("procurement_integration_logs.html", tenant_id=tenant_id)
+    return render_template("procurement_integration_logs.html", tenant_id=tenant_id, **_process_context("erp"))
+
+
+@procurement_bp.route("/procurement/integrations/erp", methods=["GET"])
+def erp_followup_page():
+    _require_roles("admin", "manager")
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    return render_template("procurement_erp_followup.html", tenant_id=tenant_id, **_process_context("erp"))
 
 
 @procurement_bp.route("/procurement/aprovacoes", methods=["GET"])
 def approvals_page():
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    return render_template("procurement_approvals.html", tenant_id=tenant_id)
+    return render_template("procurement_approvals.html", tenant_id=tenant_id, **_process_context("decisao"))
 
 
 @procurement_bp.route("/fornecedor/convite/<string:token>", methods=["GET"])
@@ -194,11 +432,11 @@ def procurement_solicitacoes_api():
 
         status = str(payload.get("status") or "pending_rfq").strip()
         if status not in ALLOWED_PR_STATUSES:
-            return jsonify({"error": "status_invalid", "message": "Status da solicitacao invalido."}), 400
+            return jsonify({"error": "status_invalid", "message": _err("status_invalid")}), 400
 
         priority = str(payload.get("priority") or "medium").strip()
         if priority not in ALLOWED_PRIORITIES:
-            return jsonify({"error": "priority_invalid", "message": "Prioridade invalida."}), 400
+            return jsonify({"error": "priority_invalid", "message": _err("priority_invalid")}), 400
 
         number = (payload.get("number") or "").strip() or None
         requested_by = (payload.get("requested_by") or "").strip() or None
@@ -206,7 +444,7 @@ def procurement_solicitacoes_api():
         needed_at = (payload.get("needed_at") or "").strip() or None
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
         if not items:
-            return jsonify({"error": "items_required", "message": "Informe ao menos um item da solicitacao."}), 400
+            return jsonify({"error": "items_required", "message": _err("items_required")}), 400
 
         cursor = db.execute(
             """
@@ -250,7 +488,7 @@ def procurement_solicitacoes_api():
                 (purchase_request_id, tenant_id),
             )
             db.commit()
-            return jsonify({"error": "items_required", "message": "Nenhum item valido informado."}), 400
+            return jsonify({"error": "items_required", "message": _err("items_required")}), 400
 
         db.execute(
             """
@@ -305,8 +543,7 @@ def procurement_solicitacao_crud_api(purchase_request_id: int):
         return (
             jsonify(
                 {
-                    "error": "purchase_request_not_found",
-                    "message": "Solicitacao nao encontrada.",
+                    "error": "purchase_request_not_found", "message": _err("purchase_request_not_found"),
                     "purchase_request_id": purchase_request_id,
                 }
             ),
@@ -319,14 +556,20 @@ def procurement_solicitacao_crud_api(purchase_request_id: int):
         return (
             jsonify(
                 {
-                    "error": "erp_managed_request_readonly",
-                    "message": "Solicitacao com origem ERP e somente leitura na plataforma.",
+                    "error": "erp_managed_request_readonly", "message": _err("erp_managed_request_readonly"),
                 }
             ),
             409,
         )
 
     if request.method == "DELETE":
+        if not flow_action_allowed("solicitacao", previous_status, "cancel_request"):
+            return _forbidden_action("solicitacao", previous_status, "cancel_request")
+        _require_critical_confirmation(
+            "cancel_request",
+            entity="purchase_request",
+            entity_id=purchase_request_id,
+        )
         if previous_status == "cancelled":
             return jsonify({"status": "cancelled", "purchase_request_id": purchase_request_id}), 200
         db.execute(
@@ -346,6 +589,9 @@ def procurement_solicitacao_crud_api(purchase_request_id: int):
         )
         db.commit()
         return jsonify({"status": "cancelled", "purchase_request_id": purchase_request_id}), 200
+
+    if not flow_action_allowed("solicitacao", previous_status, "edit_request"):
+        return _forbidden_action("solicitacao", previous_status, "edit_request")
 
     payload = request.get_json(silent=True) or {}
     updates: List[str] = []
@@ -370,21 +616,30 @@ def procurement_solicitacao_crud_api(purchase_request_id: int):
     if "priority" in payload:
         priority = str(payload.get("priority") or "").strip()
         if priority and priority not in ALLOWED_PRIORITIES:
-            return jsonify({"error": "priority_invalid", "message": "Prioridade invalida."}), 400
+            return jsonify({"error": "priority_invalid", "message": _err("priority_invalid")}), 400
         updates.append("priority = ?")
         params.append(priority or "medium")
 
     next_status = previous_status
     if "status" in payload:
+        if not flow_action_allowed("solicitacao", previous_status, "update_request_status"):
+            return _forbidden_action("solicitacao", previous_status, "update_request_status")
         candidate = str(payload.get("status") or "").strip()
         if candidate not in ALLOWED_PR_STATUSES:
-            return jsonify({"error": "status_invalid", "message": "Status da solicitacao invalido."}), 400
+            return jsonify({"error": "status_invalid", "message": _err("status_invalid")}), 400
+        if candidate == "cancelled" and candidate != previous_status:
+            _require_critical_confirmation(
+                "cancel_request",
+                entity="purchase_request",
+                entity_id=purchase_request_id,
+                payload=payload,
+            )
         next_status = candidate
         updates.append("status = ?")
         params.append(candidate)
 
     if not updates:
-        return jsonify({"error": "no_changes", "message": "Nenhum campo enviado para atualizacao."}), 400
+        return jsonify({"error": "no_changes", "message": _err("no_changes")}), 400
 
     params.extend([purchase_request_id, tenant_id])
     db.execute(
@@ -423,24 +678,25 @@ def procurement_solicitacao_item_create_api(purchase_request_id: int):
         (purchase_request_id, tenant_id),
     ).fetchone()
     if not request_row:
-        return jsonify({"error": "purchase_request_not_found", "message": "Solicitacao nao encontrada."}), 404
+        return jsonify({"error": "purchase_request_not_found", "message": _err("purchase_request_not_found")}), 404
     if request_row["external_id"] or request_row["erp_num_cot"] or request_row["erp_num_pct"]:
         return (
             jsonify(
                 {
-                    "error": "erp_managed_request_readonly",
-                    "message": "Solicitacao com origem ERP e somente leitura na plataforma.",
+                    "error": "erp_managed_request_readonly", "message": _err("erp_managed_request_readonly"),
                 }
             ),
             409,
         )
+    if not flow_action_allowed("solicitacao", request_row["status"], "add_request_item"):
+        return _forbidden_action("solicitacao", request_row["status"], "add_request_item")
     if request_row["status"] != "pending_rfq":
-        return jsonify({"error": "request_locked", "message": "Somente solicitacoes pendentes aceitam novos itens."}), 400
+        return jsonify({"error": "request_locked", "message": _err("request_locked")}), 400
 
     payload = request.get_json(silent=True) or {}
     description = (payload.get("description") or "").strip()
     if not description:
-        return jsonify({"error": "description_required", "message": "Descricao do item e obrigatoria."}), 400
+        return jsonify({"error": "description_required", "message": _err("description_required")}), 400
     quantity = _parse_optional_float(payload.get("quantity"))
     if quantity is None or quantity <= 0:
         quantity = 1
@@ -485,19 +741,21 @@ def procurement_solicitacao_item_crud_api(purchase_request_id: int, item_id: int
         (purchase_request_id, tenant_id),
     ).fetchone()
     if not request_row:
-        return jsonify({"error": "purchase_request_not_found", "message": "Solicitacao nao encontrada."}), 404
+        return jsonify({"error": "purchase_request_not_found", "message": _err("purchase_request_not_found")}), 404
     if request_row["external_id"] or request_row["erp_num_cot"] or request_row["erp_num_pct"]:
         return (
             jsonify(
                 {
-                    "error": "erp_managed_request_readonly",
-                    "message": "Solicitacao com origem ERP e somente leitura na plataforma.",
+                    "error": "erp_managed_request_readonly", "message": _err("erp_managed_request_readonly"),
                 }
             ),
             409,
         )
+    requested_action = "delete_request_item" if request.method == "DELETE" else "edit_request_item"
+    if not flow_action_allowed("solicitacao", request_row["status"], requested_action):
+        return _forbidden_action("solicitacao", request_row["status"], requested_action)
     if request_row["status"] != "pending_rfq":
-        return jsonify({"error": "request_locked", "message": "Somente solicitacoes pendentes aceitam alteracao de itens."}), 400
+        return jsonify({"error": "request_locked", "message": _err("request_locked")}), 400
 
     item_row = db.execute(
         """
@@ -509,7 +767,7 @@ def procurement_solicitacao_item_crud_api(purchase_request_id: int, item_id: int
         (item_id, purchase_request_id, tenant_id),
     ).fetchone()
     if not item_row:
-        return jsonify({"error": "item_not_found", "message": "Item da solicitacao nao encontrado."}), 404
+        return jsonify({"error": "item_not_found", "message": _err("item_not_found")}), 404
 
     if request.method == "DELETE":
         db.execute(
@@ -525,13 +783,13 @@ def procurement_solicitacao_item_crud_api(purchase_request_id: int, item_id: int
     if "description" in payload:
         description = (payload.get("description") or "").strip()
         if not description:
-            return jsonify({"error": "description_required", "message": "Descricao nao pode ser vazia."}), 400
+            return jsonify({"error": "description_required", "message": _err("description_required")}), 400
         updates.append("description = ?")
         params.append(description)
     if "quantity" in payload:
         quantity = _parse_optional_float(payload.get("quantity"))
         if quantity is None or quantity <= 0:
-            return jsonify({"error": "quantity_invalid", "message": "Quantidade invalida."}), 400
+            return jsonify({"error": "quantity_invalid", "message": _err("quantity_invalid")}), 400
         updates.append("quantity = ?")
         params.append(quantity)
     if "uom" in payload:
@@ -540,7 +798,7 @@ def procurement_solicitacao_item_crud_api(purchase_request_id: int, item_id: int
     if "line_no" in payload:
         line_no = _parse_optional_int(payload.get("line_no"))
         if line_no is None or line_no <= 0:
-            return jsonify({"error": "line_no_invalid", "message": "Linha do item invalida."}), 400
+            return jsonify({"error": "line_no_invalid", "message": _err("line_no_invalid")}), 400
         updates.append("line_no = ?")
         params.append(line_no)
     if "category" in payload:
@@ -548,7 +806,7 @@ def procurement_solicitacao_item_crud_api(purchase_request_id: int, item_id: int
         params.append((payload.get("category") or "").strip() or None)
 
     if not updates:
-        return jsonify({"error": "no_changes", "message": "Nenhuma alteracao informada."}), 400
+        return jsonify({"error": "no_changes", "message": _err("no_changes")}), 400
 
     params.extend([item_id, purchase_request_id, tenant_id])
     db.execute(
@@ -617,7 +875,7 @@ def cotacao_detail_api(rfq_id: int):
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
         return (
-            jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}),
+            jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}),
             404,
         )
 
@@ -633,21 +891,78 @@ def cotacao_detail_api(rfq_id: int):
     if award:
         award_events = _load_status_events(db, tenant_id, entity="award", entity_id=int(award["id"]), limit=40)
 
+    rfq_status = rfq["status"]
+    rfq_flow = flow_meta("cotacao", rfq_status)
+    award_flow = flow_meta("decisao", award["status"] if award else None)
+    po_flow = flow_meta("ordem_compra", purchase_order["status"] if purchase_order else None)
+
+    process_stage = stage_for_rfq_status(rfq_status)
+    if award:
+        process_stage = stage_for_award_status(award.get("status"))
+    if purchase_order:
+        process_stage = stage_for_purchase_order_status(purchase_order["status"])
+
+    invite_items: List[dict] = []
+    for invite in convites:
+        invite_status = invite.get("status")
+        invite_meta = flow_meta("fornecedor", invite_status)
+        allowed_invite_actions: List[str] = []
+        for action in ("reopen_invite", "extend_invite", "cancel_invite"):
+            if flow_action_allowed("fornecedor", invite_status, action) and flow_action_allowed("cotacao", rfq_status, action):
+                allowed_invite_actions.append(action)
+        if invite.get("access_url") and flow_action_allowed("fornecedor", invite_status, "open_invite_portal"):
+            allowed_invite_actions.append("open_invite_portal")
+        primary_invite_action = invite_meta.get("primary_action")
+        if primary_invite_action not in allowed_invite_actions:
+            primary_invite_action = allowed_invite_actions[0] if allowed_invite_actions else None
+        invite_items.append(
+            {
+                **invite,
+                "allowed_actions": allowed_invite_actions,
+                "primary_action": primary_invite_action,
+            }
+        )
+
+    decisao_payload = None
+    if award:
+        decisao_payload = {
+            **award,
+            "allowed_actions": award_flow["allowed_actions"],
+            "primary_action": award_flow["primary_action"],
+            "process_stage": stage_for_award_status(award.get("status")),
+        }
+
+    ordem_compra_payload = None
+    if purchase_order:
+        ordem_compra_payload = {
+            **_serialize_purchase_order(purchase_order),
+            "allowed_actions": po_flow["allowed_actions"],
+            "primary_action": po_flow["primary_action"],
+            "process_stage": stage_for_purchase_order_status(purchase_order["status"]),
+        }
+
     return jsonify(
         {
             "cotacao": {
                 "id": rfq["id"],
                 "titulo": rfq["title"],
-                "status": rfq["status"],
+                "status": rfq_status,
                 "criada_em": rfq["created_at"],
                 "atualizada_em": rfq["updated_at"],
+                "allowed_actions": rfq_flow["allowed_actions"],
+                "primary_action": rfq_flow["primary_action"],
+                "process_stage": stage_for_rfq_status(rfq_status),
             },
             "itens": itens,
-            "convites": convites,
-            "decisao": award,
-            "ordem_compra": _serialize_purchase_order(purchase_order) if purchase_order else None,
+            "convites": invite_items,
+            "decisao": decisao_payload,
+            "ordem_compra": ordem_compra_payload,
             "eventos_cotacao": events,
             "eventos_decisao": award_events,
+            "flow": {
+                "process_stage": process_stage,
+                "process_steps": build_process_steps(process_stage),
+            },
         }
     )
 
@@ -659,15 +974,16 @@ def cotacao_item_fornecedores_api(rfq_id: int, rfq_item_id: int):
 
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}), 404
+        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
+    if not flow_action_allowed("cotacao", rfq["status"], "manage_item_supplier"):
+        return _forbidden_action("cotacao", rfq["status"], "manage_item_supplier")
 
     rfq_item = _load_rfq_item(db, tenant_id, rfq_item_id)
     if not rfq_item or int(rfq_item["rfq_id"]) != rfq_id:
         return (
             jsonify(
                 {
-                    "error": "rfq_item_not_found",
-                    "message": "Item da cotacao nao encontrado.",
+                    "error": "rfq_item_not_found", "message": _err("rfq_item_not_found"),
                     "rfq_item_id": rfq_item_id,
                 }
             ),
@@ -676,7 +992,7 @@ def cotacao_item_fornecedores_api(rfq_id: int, rfq_item_id: int):
 
     supplier_ids = payload.get("supplier_ids") or []
     if not isinstance(supplier_ids, list) or not supplier_ids:
-        return jsonify({"error": "supplier_ids_required", "message": "Informe supplier_ids."}), 400
+        return jsonify({"error": "supplier_ids_required", "message": _err("supplier_ids_required")}), 400
 
     valid_supplier_ids = {s["id"] for s in _load_suppliers(db, tenant_id)}
 
@@ -709,24 +1025,26 @@ def cotacao_propostas_api(rfq_id: int):
 
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}), 404
+        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
+    if not flow_action_allowed("cotacao", rfq["status"], "save_supplier_quote"):
+        return _forbidden_action("cotacao", rfq["status"], "save_supplier_quote")
 
     supplier_id = payload.get("supplier_id")
     items = payload.get("items") or []
 
     if not supplier_id:
-        return jsonify({"error": "supplier_id_required", "message": "Informe supplier_id."}), 400
+        return jsonify({"error": "supplier_id_required", "message": _err("supplier_id_required")}), 400
     if not isinstance(items, list) or not items:
-        return jsonify({"error": "items_required", "message": "Informe items."}), 400
+        return jsonify({"error": "items_required", "message": _err("items_required")}), 400
 
     try:
         supplier_id = int(supplier_id)
     except (TypeError, ValueError):
-        return jsonify({"error": "supplier_id_invalid", "message": "supplier_id invalido."}), 400
+        return jsonify({"error": "supplier_id_invalid", "message": _err("supplier_id_invalid")}), 400
 
     valid_supplier_ids = {s["id"] for s in _load_suppliers(db, tenant_id)}
     if supplier_id not in valid_supplier_ids:
-        return jsonify({"error": "supplier_not_found", "message": "Fornecedor nao encontrado."}), 404
+        return jsonify({"error": "supplier_not_found", "message": _err("supplier_not_found")}), 404
 
     normalized_items_by_id: Dict[int, dict] = {}
     for item in items:
@@ -766,8 +1084,7 @@ def cotacao_propostas_api(rfq_id: int):
         return (
             jsonify(
                 {
-                    "error": "valid_items_required",
-                    "message": "Informe ao menos um item valido com preco unitario.",
+                    "error": "valid_items_required", "message": _err("valid_items_required"),
                 }
             ),
             400,
@@ -790,8 +1107,7 @@ def cotacao_propostas_api(rfq_id: int):
         return (
             jsonify(
                 {
-                    "error": "rfq_items_not_found",
-                    "message": "Um ou mais itens da cotacao nao foram encontrados.",
+                    "error": "rfq_items_not_found", "message": _err("rfq_items_not_found"),
                     "rfq_item_ids": invalid_item_ids,
                 }
             ),
@@ -812,8 +1128,7 @@ def cotacao_propostas_api(rfq_id: int):
         return (
             jsonify(
                 {
-                    "error": "supplier_not_invited_for_items",
-                    "message": "Fornecedor nao convidado para um ou mais itens desta cotacao.",
+                    "error": "supplier_not_invited_for_items", "message": _err("supplier_not_invited_for_items"),
                     "rfq_item_ids": uninvited_item_ids,
                     "supplier_id": supplier_id,
                 }
@@ -848,14 +1163,14 @@ def cotacao_supplier_proposta_api(rfq_id: int, supplier_id: int):
 
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}), 404
+        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
 
     supplier = db.execute(
         "SELECT id, name FROM suppliers WHERE id = ? AND tenant_id = ? LIMIT 1",
         (supplier_id, tenant_id),
     ).fetchone()
     if not supplier:
-        return jsonify({"error": "supplier_not_found", "message": "Fornecedor nao encontrado."}), 404
+        return jsonify({"error": "supplier_not_found", "message": _err("supplier_not_found")}), 404
 
     quote = db.execute(
         """
@@ -912,7 +1227,13 @@ def cotacao_supplier_proposta_api(rfq_id: int, supplier_id: int):
         )
 
     if not quote:
-        return jsonify({"error": "quote_not_found", "message": "Proposta nao encontrada para este fornecedor."}), 404
+        return jsonify({"error": "quote_not_found", "message": _err("quote_not_found")}), 404
+
+    _require_critical_confirmation(
+        "delete_supplier_proposal",
+        entity="quote",
+        entity_id=int(quote["id"]),
+    )
 
     quote_id = int(quote["id"])
     db.execute("DELETE FROM quote_items WHERE quote_id = ? AND tenant_id = ?", (quote_id, tenant_id))
@@ -936,7 +1257,7 @@ def supplier_invite_detail_api(token: str):
     db = get_db()
     invite = _load_supplier_invite_by_token(db, token)
     if not invite:
-        return jsonify({"error": "invite_not_found", "message": "Convite nao encontrado."}), 404
+        return jsonify({"error": "invite_not_found", "message": _err("invite_not_found")}), 404
 
     if _invite_is_expired(invite):
         db.execute(
@@ -944,7 +1265,7 @@ def supplier_invite_detail_api(token: str):
             (invite["id"],),
         )
         db.commit()
-        return jsonify({"error": "invite_expired", "message": "Convite expirado."}), 410
+        return jsonify({"error": "invite_expired", "message": _err("invite_expired")}), 410
 
     if invite["status"] == "pending":
         db.execute(
@@ -966,32 +1287,35 @@ def supplier_invite_submit_api(token: str):
     db = get_db()
     invite = _load_supplier_invite_by_token(db, token)
     if not invite:
-        return jsonify({"error": "invite_not_found", "message": "Convite nao encontrado."}), 404
+        return jsonify({"error": "invite_not_found", "message": _err("invite_not_found")}), 404
     if _invite_is_expired(invite):
         db.execute(
             "UPDATE rfq_supplier_invites SET status = 'expired', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (invite["id"],),
         )
         db.commit()
-        return jsonify({"error": "invite_expired", "message": "Convite expirado."}), 410
+        return jsonify({"error": "invite_expired", "message": _err("invite_expired")}), 410
 
     payload = request.get_json(silent=True) or {}
     items = payload.get("items") or []
     if not isinstance(items, list) or not items:
-        return jsonify({"error": "items_required", "message": "Informe itens com preco e prazo."}), 400
+        return jsonify({"error": "items_required", "message": _err("items_required")}), 400
 
     rfq_id = int(invite["rfq_id"])
     supplier_id = int(invite["supplier_id"])
     tenant_id = str(invite["tenant_id"])
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada."}), 404
+        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found")}), 404
+    if not flow_action_allowed("fornecedor", invite["status"], "submit_quote"):
+        return _forbidden_action("fornecedor", invite["status"], "submit_quote")
+    if not flow_action_allowed("cotacao", rfq["status"], "save_supplier_quote"):
+        return _forbidden_action("cotacao", rfq["status"], "save_supplier_quote")
     if rfq["status"] not in {"open", "collecting_quotes"}:
         return (
             jsonify(
                 {
-                    "error": "rfq_closed_for_quotes",
-                    "message": "Cotacao nao aceita novas propostas neste status.",
+                    "error": "rfq_closed_for_quotes", "message": _err("rfq_closed_for_quotes"),
                 }
             ),
             400,
@@ -1008,7 +1332,7 @@ def supplier_invite_submit_api(token: str):
     ).fetchall()
     all_rfq_item_ids = {int(row["id"]) for row in rfq_item_rows}
     if not all_rfq_item_ids:
-        return jsonify({"error": "rfq_items_not_found", "message": "Cotacao sem itens disponiveis."}), 400
+        return jsonify({"error": "rfq_items_not_found", "message": _err("rfq_items_not_found")}), 400
 
     invited_rows = db.execute(
         """
@@ -1023,8 +1347,7 @@ def supplier_invite_submit_api(token: str):
         return (
             jsonify(
                 {
-                    "error": "supplier_not_invited",
-                    "message": "Fornecedor nao esta convidado para itens desta cotacao.",
+                    "error": "supplier_not_invited", "message": _err("supplier_not_invited"),
                 }
             ),
             400,
@@ -1053,7 +1376,7 @@ def supplier_invite_submit_api(token: str):
 
     normalized_items = list(normalized_by_id.values())
     if not normalized_items:
-        return jsonify({"error": "valid_items_required", "message": "Nenhum item valido para envio."}), 400
+        return jsonify({"error": "valid_items_required", "message": _err("valid_items_required")}), 400
 
     quote_id = _get_or_create_quote(db, rfq_id, supplier_id, tenant_id)
     for item in normalized_items:
@@ -1144,11 +1467,11 @@ def purchase_orders_api():
         number = (payload.get("number") or "").strip() or None
         supplier_name = (payload.get("supplier_name") or payload.get("fornecedor") or "").strip() or None
         if not supplier_name:
-            return jsonify({"error": "supplier_name_required", "message": "Informe o fornecedor."}), 400
+            return jsonify({"error": "supplier_name_required", "message": _err("supplier_name_required")}), 400
 
         status = str(payload.get("status") or "draft").strip()
         if status not in ALLOWED_PO_STATUSES:
-            return jsonify({"error": "status_invalid", "message": "Status da ordem de compra invalido."}), 400
+            return jsonify({"error": "status_invalid", "message": _err("status_invalid")}), 400
 
         currency = (payload.get("currency") or "BRL").strip() or "BRL"
         total_amount = _parse_optional_float(payload.get("total_amount"))
@@ -1204,8 +1527,7 @@ def purchase_order_detail_api(purchase_order_id: int):
         return (
             jsonify(
                 {
-                    "error": "purchase_order_not_found",
-                    "message": "Ordem de compra nao encontrada.",
+                    "error": "purchase_order_not_found", "message": _err("purchase_order_not_found"),
                     "purchase_order_id": purchase_order_id,
                 }
             ),
@@ -1213,16 +1535,22 @@ def purchase_order_detail_api(purchase_order_id: int):
         )
 
     if request.method == "DELETE":
+        if not flow_action_allowed("ordem_compra", po["status"], "cancel_order"):
+            return _forbidden_action("ordem_compra", po["status"], "cancel_order")
         if po["external_id"]:
             return (
                 jsonify(
                     {
-                        "error": "erp_managed_purchase_order_readonly",
-                        "message": "Ordem de compra com origem ERP e somente leitura na plataforma.",
+                        "error": "erp_managed_purchase_order_readonly", "message": _err("erp_managed_purchase_order_readonly"),
                     }
                 ),
                 409,
             )
+        _require_critical_confirmation(
+            "cancel_order",
+            entity="purchase_order",
+            entity_id=purchase_order_id,
+        )
         previous_status = po["status"]
         if previous_status != "cancelled":
             db.execute(
@@ -1244,12 +1572,13 @@ def purchase_order_detail_api(purchase_order_id: int):
         return jsonify({"purchase_order_id": purchase_order_id, "status": "cancelled"}), 200
 
     if request.method == "PATCH":
+        if not flow_action_allowed("ordem_compra", po["status"], "edit_order"):
+            return _forbidden_action("ordem_compra", po["status"], "edit_order")
         if po["external_id"]:
             return (
                 jsonify(
                     {
-                        "error": "erp_managed_purchase_order_readonly",
-                        "message": "Ordem de compra com origem ERP e somente leitura na plataforma.",
+                        "error": "erp_managed_purchase_order_readonly", "message": _err("erp_managed_purchase_order_readonly"),
                     }
                 ),
                 409,
@@ -1275,7 +1604,7 @@ def purchase_order_detail_api(purchase_order_id: int):
         if "total_amount" in payload:
             total_amount = _parse_optional_float(payload.get("total_amount"))
             if total_amount is None:
-                return jsonify({"error": "total_amount_invalid", "message": "Valor total invalido."}), 400
+                return jsonify({"error": "total_amount_invalid", "message": _err("total_amount_invalid")}), 400
             updates.append("total_amount = ?")
             params.append(total_amount)
 
@@ -1283,13 +1612,25 @@ def purchase_order_detail_api(purchase_order_id: int):
         if "status" in payload:
             status = str(payload.get("status") or "").strip()
             if status not in ALLOWED_PO_STATUSES:
-                return jsonify({"error": "status_invalid", "message": "Status da ordem de compra invalido."}), 400
+                return jsonify({"error": "status_invalid", "message": _err("status_invalid")}), 400
+            if status in {"sent_to_erp", "erp_accepted", "erp_error", "partially_received", "received"} and status != po["status"]:
+                return _forbidden_action("ordem_compra", po["status"], "push_to_erp", http_status=400)
+            required_action = "cancel_order" if status == "cancelled" else "edit_order"
+            if not flow_action_allowed("ordem_compra", po["status"], required_action):
+                return _forbidden_action("ordem_compra", po["status"], required_action)
+            if status == "cancelled" and status != po["status"]:
+                _require_critical_confirmation(
+                    "cancel_order",
+                    entity="purchase_order",
+                    entity_id=purchase_order_id,
+                    payload=payload,
+                )
             next_status = status
             updates.append("status = ?")
             params.append(status)
 
         if not updates:
-            return jsonify({"error": "no_changes", "message": "Nenhum campo enviado para atualizacao."}), 400
+            return jsonify({"error": "no_changes", "message": _err("no_changes")}), 400
 
         params.extend([purchase_order_id, tenant_id])
         db.execute(
@@ -1313,8 +1654,31 @@ def purchase_order_detail_api(purchase_order_id: int):
         db.commit()
         return jsonify({"purchase_order_id": purchase_order_id, "status": next_status}), 200
 
-    events = _load_status_events(db, tenant_id, entity="purchase_order", entity_id=purchase_order_id)
-    sync_runs = _load_sync_runs(db, tenant_id, scope="purchase_order", limit=20)
+    include_history_raw = (request.args.get("include_history") or "").strip().lower()
+    include_history = include_history_raw not in {"0", "false", "no", "off"}
+
+    events: List[dict] = []
+    erp_timeline: List[dict] = []
+    sync_runs: List[dict] = []
+    if include_history:
+        events = _load_status_events(db, tenant_id, entity="purchase_order", entity_id=purchase_order_id)
+        erp_timeline = _build_erp_timeline(events)
+        sync_runs = _load_sync_runs(db, tenant_id, scope="purchase_order", limit=20)
+    po_flow = flow_meta("ordem_compra", po["status"])
+    process_stage = stage_for_purchase_order_status(po["status"])
+    last_erp_update = (erp_timeline[0]["occurred_at"] if erp_timeline else None) or po["updated_at"]
+    erp_status = erp_status_payload(
+        po["status"],
+        erp_last_error=po["erp_last_error"],
+        last_updated_at=last_erp_update,
+    )
+    next_action_key = _erp_next_action_key(
+        po["status"],
+        list(po_flow.get("allowed_actions") or []),
+        po_flow.get("primary_action"),
+        str(erp_status.get("key") or ""),
+    )
+    next_action_label = _erp_action_label(next_action_key, str(erp_status.get("key") or ""))
 
     return jsonify(
         {
@@ -1330,9 +1694,22 @@ def purchase_order_detail_api(purchase_order_id: int):
                 "erp_last_error": po["erp_last_error"],
                 "created_at": po["created_at"],
                 "updated_at": po["updated_at"],
+                "allowed_actions": po_flow["allowed_actions"],
+                "primary_action": po_flow["primary_action"],
+                "process_stage": process_stage,
+                "erp_status": erp_status,
+                "erp_last_attempt_at": last_erp_update,
+                "erp_next_action": next_action_key,
+                "erp_next_action_label": next_action_label,
             },
+            "erp_timeline": erp_timeline,
             "events": events,
             "sync_runs": sync_runs,
+            "history_loaded": include_history,
+            "flow": {
+                "process_stage": process_stage,
+                "process_steps": build_process_steps(process_stage),
+            },
         }
     )
 
@@ -1357,6 +1734,90 @@ def integration_logs_api():
     )
 
 
+@procurement_bp.route("/api/procurement/integrations/erp/orders", methods=["GET"])
+def erp_followup_api():
+    _require_roles("admin", "manager")
+    db = get_read_db()
+    tenant_id = current_tenant_id()
+
+    limit = _parse_int(request.args.get("limit"), default=120, min_value=1, max_value=300)
+    status_filter_values = {
+        str(value).strip()
+        for value in _parse_csv_values(request.args.get("erp_status"))
+        if str(value).strip()
+    }
+
+    items = _load_purchase_orders_panel(
+        db,
+        tenant_id=tenant_id,
+        limit=limit,
+        status_values=[],
+        supplier_search=(request.args.get("supplier") or "").strip(),
+        erp_only=False,
+    )
+
+    rows: List[dict] = []
+    for item in items:
+        erp_status = item.get("erp_status") or erp_status_payload(
+            item.get("status"),
+            erp_last_error=item.get("erp_last_error"),
+            last_updated_at=item.get("erp_last_attempt_at") or item.get("updated_at"),
+        )
+        erp_key = str(erp_status.get("key") or "")
+        if status_filter_values and erp_key not in status_filter_values:
+            continue
+
+        allowed_actions = list(item.get("allowed_actions") or [])
+        next_action_key = _erp_next_action_key(
+            item.get("status"),
+            allowed_actions,
+            item.get("primary_action"),
+            erp_key,
+        )
+        can_resend = "push_to_erp" in set(allowed_actions) and erp_key in {"rejeitado", "reenvio_necessario"}
+        next_action_label = _erp_action_label(next_action_key, erp_key)
+        if next_action_key == "refresh_order":
+            next_action_label = get_ui_text("erp.next_action.await_response", "Aguardar retorno do ERP.")
+        elif can_resend:
+            next_action_label = get_ui_text("erp.next_action.resend", "Reenviar ao ERP")
+        elif erp_key == "rejeitado":
+            next_action_label = get_ui_text("erp.next_action.review_data", "Revisar dados da ordem e reenviar ao ERP.")
+
+        rows.append(
+            {
+                "purchase_order_id": item.get("id"),
+                "number": item.get("number"),
+                "supplier_name": item.get("supplier_name"),
+                "technical_status": item.get("status"),
+                "erp_status": erp_status,
+                "last_attempt_at": item.get("erp_last_attempt_at") or erp_status.get("last_updated_at") or item.get("updated_at"),
+                "next_action": next_action_key,
+                "next_action_label": next_action_label,
+                "can_resend": can_resend,
+                "allowed_actions": allowed_actions,
+                "detail_url": f"/procurement/purchase-orders/{item.get('id')}",
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            str(row.get("last_attempt_at") or ""),
+            int(row.get("purchase_order_id") or 0),
+        ),
+        reverse=True,
+    )
+
+    return jsonify(
+        {
+            "items": rows,
+            "filters": {
+                "limit": limit,
+                "erp_status": sorted(status_filter_values),
+            },
+        }
+    )
+
+
 @procurement_bp.route("/api/procurement/integrations/sync", methods=["POST"])
 def integration_sync_api():
     db = get_db()
@@ -1365,15 +1826,14 @@ def integration_sync_api():
 
     scope_value = (payload.get("scope") or request.args.get("scope") or "").strip()
     if not scope_value:
-        return jsonify({"error": "scope_required", "message": "Informe scope."}), 400
+        return jsonify({"error": "scope_required", "message": _err("scope_required")}), 400
 
     canonical_scope = SCOPE_ALIASES.get(scope_value, (scope_value,))[0]
     if canonical_scope not in SYNC_SUPPORTED_SCOPES:
         return (
             jsonify(
                 {
-                    "error": "scope_not_supported",
-                    "message": "Scope nao suportado neste MVP.",
+                    "error": "scope_not_supported", "message": _err("scope_not_supported"),
                     "scope": canonical_scope,
                 }
             ),
@@ -1414,9 +1874,13 @@ def integration_sync_api():
             (str(exc)[:200], sync_run_id, tenant_id),
         )
         db.commit()
-        return (
-            jsonify({"error": "sync_failed", "message": "Falha ao sincronizar.", "details": str(exc)[:200]}),
-            500,
+        raise IntegrationError(
+            code="sync_failed",
+            message_key="sync_failed",
+            http_status=500,
+            critical=False,
+            details=str(exc),
+            payload={"scope": canonical_scope},
         )
 
     return jsonify(
@@ -1641,17 +2105,24 @@ def list_rfqs():
         tuple(params),
     ).fetchall()
 
-    items = [
-        {
-            "id": row["id"],
-            "title": row["title"],
-            "status": row["status"],
-            "updated_at": row["updated_at"],
-            "item_count": int(row["item_count"] or 0),
-            "supplier_count": int(row["supplier_count"] or 0),
-        }
-        for row in rows
-    ]
+    items = []
+    for row in rows:
+        status = row["status"]
+        stage = stage_for_rfq_status(status)
+        meta = flow_meta("cotacao", status)
+        items.append(
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "status": status,
+                "updated_at": row["updated_at"],
+                "item_count": int(row["item_count"] or 0),
+                "supplier_count": int(row["supplier_count"] or 0),
+                "process_stage": stage,
+                "allowed_actions": meta["allowed_actions"],
+                "primary_action": meta["primary_action"],
+            }
+        )
     return jsonify({"items": items})
 
 
@@ -1676,10 +2147,17 @@ def rfq_crud_api(rfq_id: int):
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}), 404
+        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
 
     previous_status = rfq["status"]
     if request.method == "DELETE":
+        if not flow_action_allowed("cotacao", previous_status, "cancel_rfq"):
+            return _forbidden_action("cotacao", previous_status, "cancel_rfq")
+        _require_critical_confirmation(
+            "cancel_rfq",
+            entity="rfq",
+            entity_id=rfq_id,
+        )
         if previous_status == "cancelled":
             return jsonify({"rfq_id": rfq_id, "status": "cancelled"}), 200
         db.execute(
@@ -1706,13 +2184,29 @@ def rfq_crud_api(rfq_id: int):
     next_status = previous_status
 
     if "title" in payload:
+        if not flow_action_allowed("cotacao", previous_status, "edit_rfq"):
+            return _forbidden_action("cotacao", previous_status, "edit_rfq")
         updates.append("title = ?")
         params.append((payload.get("title") or "").strip() or None)
 
     if "status" in payload:
         status = str(payload.get("status") or "").strip()
         if status not in ALLOWED_RFQ_STATUSES:
-            return jsonify({"error": "status_invalid", "message": "Status da cotacao invalido."}), 400
+            return jsonify({"error": "status_invalid", "message": _err("status_invalid")}), 400
+        required_action = "cancel_rfq" if status == "cancelled" else "update_rfq_status"
+        if status == "awarded":
+            required_action = "award_rfq"
+        if not flow_action_allowed("cotacao", previous_status, required_action):
+            return _forbidden_action("cotacao", previous_status, required_action)
+        if status == "awarded":
+            return _forbidden_action("cotacao", previous_status, "award_rfq", http_status=400)
+        if status == "cancelled" and status != previous_status:
+            _require_critical_confirmation(
+                "cancel_rfq",
+                entity="rfq",
+                entity_id=rfq_id,
+                payload=payload,
+            )
         next_status = status
         updates.append("status = ?")
         params.append(status)
@@ -1725,7 +2219,7 @@ def rfq_crud_api(rfq_id: int):
         params.append((payload.get("cancel_reason") or "").strip() or None)
 
     if not updates:
-        return jsonify({"error": "no_changes", "message": "Nenhum campo enviado para atualizacao."}), 400
+        return jsonify({"error": "no_changes", "message": _err("no_changes")}), 400
 
     params.extend([rfq_id, tenant_id])
     db.execute(
@@ -1763,15 +2257,14 @@ def open_rfq_with_suppliers():
         return (
             jsonify(
                 {
-                    "error": "supplier_ids_required",
-                    "message": "Selecione ao menos um fornecedor para convite.",
+                    "error": "supplier_ids_required", "message": _err("supplier_ids_required"),
                 }
             ),
             400,
         )
     valid_supplier_ids = {int(item["id"]) for item in _load_suppliers(db, tenant_id)}
     if not any(supplier_id in valid_supplier_ids for supplier_id in supplier_ids):
-        return jsonify({"error": "suppliers_not_found", "message": "Nenhum fornecedor valido para convite."}), 400
+        return jsonify({"error": "suppliers_not_found", "message": _err("suppliers_not_found")}), 400
 
     created, error_payload, status_code = _create_rfq_core(db, tenant_id, title, item_ids)
     if error_payload:
@@ -1798,14 +2291,16 @@ def create_rfq_invites(rfq_id: int):
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
         return (
-            jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}),
+            jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}),
             404,
         )
+    if not flow_action_allowed("cotacao", rfq["status"], "invite_supplier"):
+        return _forbidden_action("cotacao", rfq["status"], "invite_supplier")
 
     supplier_ids = _normalize_int_list(payload.get("supplier_ids"))
     if not supplier_ids:
         return (
-            jsonify({"error": "supplier_ids_required", "message": "Informe supplier_ids para convite."}),
+            jsonify({"error": "supplier_ids_required", "message": _err("supplier_ids_required")}),
             400,
         )
 
@@ -1816,7 +2311,7 @@ def create_rfq_invites(rfq_id: int):
     else:
         items = all_items
     if not items:
-        return jsonify({"error": "rfq_items_required", "message": "Nenhum item valido para convite."}), 400
+        return jsonify({"error": "rfq_items_required", "message": _err("rfq_items_required")}), 400
 
     invite_result = _create_rfq_supplier_invites(
         db=db,
@@ -1836,7 +2331,7 @@ def create_rfq_invites(rfq_id: int):
         valid_days=_parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30),
     )
     if invite_result["supplier_count"] == 0:
-        return jsonify({"error": "suppliers_not_found", "message": "Nenhum fornecedor valido para convite."}), 400
+        return jsonify({"error": "suppliers_not_found", "message": _err("suppliers_not_found")}), 400
     db.commit()
     return jsonify({"rfq_id": rfq_id, "invites": invite_result}), 200
 
@@ -1847,7 +2342,7 @@ def list_rfq_invites(rfq_id: int):
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}), 404
+        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
     invites = _load_rfq_supplier_invites(db, tenant_id, rfq_id)
     return jsonify({"rfq_id": rfq_id, "items": invites})
 
@@ -1861,13 +2356,22 @@ def rfq_invite_crud_api(rfq_id: int, invite_id: int):
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}), 404
+        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
 
     invite = _load_rfq_supplier_invite_by_id(db, tenant_id, rfq_id, invite_id)
     if not invite:
-        return jsonify({"error": "invite_not_found", "message": "Convite nao encontrado."}), 404
+        return jsonify({"error": "invite_not_found", "message": _err("invite_not_found")}), 404
 
     if request.method == "DELETE":
+        if not flow_action_allowed("cotacao", rfq["status"], "cancel_invite"):
+            return _forbidden_action("cotacao", rfq["status"], "cancel_invite")
+        if not flow_action_allowed("fornecedor", invite["status"], "cancel_invite"):
+            return _forbidden_action("fornecedor", invite["status"], "cancel_invite")
+        _require_critical_confirmation(
+            "cancel_invite",
+            entity="rfq_supplier_invite",
+            entity_id=invite_id,
+        )
         _remove_supplier_from_rfq(db, tenant_id, rfq_id, int(invite["supplier_id"]))
         db.execute(
             """
@@ -1885,6 +2389,28 @@ def rfq_invite_crud_api(rfq_id: int, invite_id: int):
     action = str(payload.get("action") or "").strip().lower()
     valid_days = _parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30)
     expires_at = (datetime.now(timezone.utc) + timedelta(days=valid_days)).replace(microsecond=0).isoformat()
+    action_map = {"reopen": "reopen_invite", "extend": "extend_invite", "cancel": "cancel_invite"}
+    requested_action = action_map.get(action)
+    if not requested_action:
+        return (
+            jsonify(
+                {
+                    "error": "action_invalid", "message": _err("action_invalid"),
+                }
+            ),
+            400,
+        )
+    if not flow_action_allowed("cotacao", rfq["status"], requested_action):
+        return _forbidden_action("cotacao", rfq["status"], requested_action)
+    if not flow_action_allowed("fornecedor", invite["status"], requested_action):
+        return _forbidden_action("fornecedor", invite["status"], requested_action)
+    if action == "cancel":
+        _require_critical_confirmation(
+            "cancel_invite",
+            entity="rfq_supplier_invite",
+            entity_id=invite_id,
+            payload=payload,
+        )
 
     if action == "reopen":
         new_token = secrets.token_urlsafe(24)
@@ -1919,21 +2445,11 @@ def rfq_invite_crud_api(rfq_id: int, invite_id: int):
             """,
             (invite_id, tenant_id),
         )
-    else:
-        return (
-            jsonify(
-                {
-                    "error": "action_invalid",
-                    "message": "Acao invalida, use reopen, extend ou cancel.",
-                }
-            ),
-            400,
-        )
 
     db.commit()
     updated = _load_rfq_supplier_invite_by_id(db, tenant_id, rfq_id, invite_id)
     if not updated:
-        return jsonify({"error": "invite_not_found", "message": "Convite nao encontrado apos atualizacao."}), 404
+        return jsonify({"error": "invite_not_found", "message": _err("invite_not_found")}), 404
     return jsonify({"invite": _serialize_rfq_invite_row(updated)}), 200
 
 
@@ -1945,7 +2461,7 @@ def rfq_comparison(rfq_id: int):
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
         return (
-            jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}),
+            jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}),
             404,
         )
 
@@ -1972,15 +2488,23 @@ def rfq_award(rfq_id: int):
     rfq = _load_rfq(db, tenant_id, rfq_id)
     if not rfq:
         return (
-            jsonify({"error": "rfq_not_found", "message": "Cotacao nao encontrada.", "rfq_id": rfq_id}),
+            jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}),
             404,
         )
+    if not flow_action_allowed("cotacao", rfq["status"], "award_rfq"):
+        return _forbidden_action("cotacao", rfq["status"], "award_rfq")
 
     reason = (payload.get("reason") or "").strip()
     if not reason:
-        return jsonify({"error": "reason_required", "message": "Motivo da decisao e obrigatorio."}), 400
+        return jsonify({"error": "reason_required", "message": _err("reason_required")}), 400
 
     supplier_name = (payload.get("supplier_name") or "Fornecedor selecionado").strip()
+    _require_critical_confirmation(
+        "award_rfq",
+        entity="rfq",
+        entity_id=rfq_id,
+        payload=payload,
+    )
 
     cursor = db.execute(
         """
@@ -2020,22 +2544,30 @@ def rfq_award(rfq_id: int):
 def create_purchase_order_from_award(award_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    payload = request.get_json(silent=True) or {}
 
     award = _load_award(db, tenant_id, award_id)
     if not award:
-        return jsonify({"error": "award_not_found", "message": "Decisao nao encontrada.", "award_id": award_id}), 404
+        return jsonify({"error": "award_not_found", "message": _err("award_not_found"), "award_id": award_id}), 404
+    if not flow_action_allowed("decisao", award["status"], "create_purchase_order"):
+        return _forbidden_action("decisao", award["status"], "create_purchase_order")
 
     if award["purchase_order_id"]:
         return (
             jsonify(
                 {
-                    "error": "purchase_order_already_exists",
-                    "message": "Esta decisao ja possui uma ordem de compra.",
+                    "error": "purchase_order_already_exists", "message": _err("purchase_order_already_exists"),
                     "purchase_order_id": award["purchase_order_id"],
                 }
             ),
             409,
         )
+    _require_critical_confirmation(
+        "create_purchase_order",
+        entity="award",
+        entity_id=award_id,
+        payload=payload,
+    )
 
     po_number = f"OC-{award_id:04d}"
     supplier_name = award["supplier_name"] or "Fornecedor selecionado"
@@ -2079,14 +2611,14 @@ def create_purchase_order_from_award(award_id: int):
 def push_purchase_order_to_erp(purchase_order_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    payload = request.get_json(silent=True) or {}
 
     po = _load_purchase_order(db, tenant_id, purchase_order_id)
     if not po:
         return (
             jsonify(
                 {
-                    "error": "purchase_order_not_found",
-                    "message": "Ordem de compra nao encontrada.",
+                    "error": "purchase_order_not_found", "message": _err("purchase_order_not_found"),
                     "purchase_order_id": purchase_order_id,
                 }
             ),
@@ -2098,11 +2630,20 @@ def push_purchase_order_to_erp(purchase_order_id: int):
             {
                 "status": "erp_accepted",
                 "external_id": po["external_id"],
-                "message": "Ordem ja aceita no ERP.",
+                "message": _ok("order_already_accepted"),
             }
         )
+    if not flow_action_allowed("ordem_compra", po["status"], "push_to_erp"):
+        return _forbidden_action("ordem_compra", po["status"], "push_to_erp")
+    _require_critical_confirmation(
+        "push_to_erp",
+        entity="purchase_order",
+        entity_id=purchase_order_id,
+        payload=payload,
+    )
 
     sync_run_id = _start_sync_run(db, tenant_id, scope="purchase_order")
+    push_start_reason = "po_push_retry_started" if po["status"] == "erp_error" else "po_push_started"
 
     db.execute(
         "UPDATE purchase_orders SET status = 'sent_to_erp' WHERE id = ? AND tenant_id = ?",
@@ -2111,35 +2652,41 @@ def push_purchase_order_to_erp(purchase_order_id: int):
     db.execute(
         """
         INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-        VALUES ('purchase_order', ?, ?, 'sent_to_erp', 'po_push_started', ?)
+        VALUES ('purchase_order', ?, ?, 'sent_to_erp', ?, ?)
         """,
-        (purchase_order_id, po["status"], tenant_id),
+        (purchase_order_id, po["status"], push_start_reason, tenant_id),
     )
 
     try:
         result = push_purchase_order(dict(po))
     except ErpError as exc:
-        error_message = str(exc)[:200]
+        error_details = str(exc)[:200]
+        error_code, message_key, http_status = classify_erp_failure(error_details)
+        failure_reason = "po_push_rejected" if error_code == "erp_order_rejected" else "po_push_failed"
         db.execute(
             """
             UPDATE purchase_orders
             SET status = 'erp_error', erp_last_error = ?
             WHERE id = ? AND tenant_id = ?
             """,
-            (error_message, purchase_order_id, tenant_id),
+            (error_details, purchase_order_id, tenant_id),
         )
         db.execute(
             """
             INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-            VALUES ('purchase_order', ?, 'sent_to_erp', 'erp_error', 'po_push_failed', ?)
+            VALUES ('purchase_order', ?, 'sent_to_erp', 'erp_error', ?, ?)
             """,
-            (purchase_order_id, tenant_id),
+            (purchase_order_id, failure_reason, tenant_id),
         )
         _finish_sync_run(db, tenant_id, sync_run_id, status="failed", records_in=0, records_upserted=0)
         db.commit()
-        return (
-            jsonify({"error": "erp_push_failed", "message": "Falha ao enviar ao ERP.", "details": error_message}),
-            500,
+        raise IntegrationError(
+            code=error_code,
+            message_key=message_key,
+            http_status=http_status,
+            critical=False,
+            details=error_details,
+            payload={"purchase_order_id": purchase_order_id, "status": "erp_error"},
         )
 
     external_id = result.get("external_id")
@@ -2172,13 +2719,16 @@ def push_purchase_order_to_erp(purchase_order_id: int):
     )
 
     db.commit()
+    friendly_message = _ok("erp_accepted") if resolved_status == "erp_accepted" else _ok("order_sent_to_erp")
+    if resolved_status == "erp_error":
+        friendly_message = _err("erp_unavailable", _err("erp_temporarily_unavailable"))
     return jsonify(
         {
             "purchase_order_id": purchase_order_id,
             "status": resolved_status,
             "external_id": external_id,
             "sync_run_id": sync_run_id,
-            "message": result.get("message") or "Ordem enviada ao ERP.",
+            "message": friendly_message,
         }
     )
 
@@ -2311,11 +2861,29 @@ def _load_purchase_requests_panel(
 
     result = []
     for row in rows:
+        status = row["status"]
+        source = "erp" if row["external_id"] or row["erp_num_cot"] or row["erp_num_pct"] else "local"
+        stage = stage_for_purchase_request_status(status)
+        meta = flow_meta("solicitacao", status)
+        if source == "erp":
+            meta.update(
+                _filter_actions(
+                    meta,
+                    {
+                        "edit_request",
+                        "update_request_status",
+                        "add_request_item",
+                        "edit_request_item",
+                        "delete_request_item",
+                        "cancel_request",
+                    },
+                )
+            )
         result.append(
             {
                 "id": row["id"],
                 "number": row["number"],
-                "status": row["status"],
+                "status": status,
                 "priority": row["priority"],
                 "requested_by": row["requested_by"],
                 "department": row["department"],
@@ -2327,7 +2895,10 @@ def _load_purchase_requests_panel(
                 "external_id": row["external_id"],
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
-                "source": "erp" if row["external_id"] or row["erp_num_cot"] or row["erp_num_pct"] else "local",
+                "source": source,
+                "process_stage": stage,
+                "allowed_actions": meta["allowed_actions"],
+                "primary_action": meta["primary_action"],
             }
         )
     return result
@@ -2371,6 +2942,24 @@ def _load_purchase_orders_panel(
             po.total_amount,
             po.external_id,
             po.erp_last_error,
+            (
+                SELECT MAX(se.occurred_at)
+                FROM status_events se
+                WHERE se.entity = 'purchase_order'
+                  AND se.entity_id = po.id
+                  AND se.tenant_id = po.tenant_id
+                  AND se.reason LIKE 'po_push_%'
+            ) AS erp_last_attempt_at,
+            (
+                SELECT se.reason
+                FROM status_events se
+                WHERE se.entity = 'purchase_order'
+                  AND se.entity_id = po.id
+                  AND se.tenant_id = po.tenant_id
+                  AND se.reason LIKE 'po_push_%'
+                ORDER BY se.occurred_at DESC, se.id DESC
+                LIMIT 1
+            ) AS erp_last_event_reason,
             po.created_at,
             po.updated_at
         FROM purchase_orders po
@@ -2383,19 +2972,36 @@ def _load_purchase_orders_panel(
 
     result: List[dict] = []
     for row in rows:
+        status = row["status"]
+        source = "erp" if row["external_id"] else "local"
+        stage = stage_for_purchase_order_status(status)
+        meta = flow_meta("ordem_compra", status)
+        if source == "erp":
+            meta.update(_filter_actions(meta, {"edit_order", "cancel_order"}))
+        erp_status = erp_status_payload(
+            status,
+            erp_last_error=row["erp_last_error"],
+            last_updated_at=row["erp_last_attempt_at"] or row["updated_at"],
+        )
         result.append(
             {
                 "id": row["id"],
                 "number": row["number"],
                 "supplier_name": row["supplier_name"],
-                "status": row["status"],
+                "status": status,
                 "currency": row["currency"],
                 "total_amount": row["total_amount"],
                 "external_id": row["external_id"],
                 "erp_last_error": row["erp_last_error"],
+                "erp_last_attempt_at": row["erp_last_attempt_at"],
+                "erp_last_event_reason": row["erp_last_event_reason"],
+                "erp_status": erp_status,
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
-                "source": "erp" if row["external_id"] else "local",
+                "source": source,
+                "process_stage": stage,
+                "allowed_actions": meta["allowed_actions"],
+                "primary_action": meta["primary_action"],
             }
         )
     return result
@@ -2458,8 +3064,7 @@ def _create_rfq_core(
         return (
             None,
             {
-                "error": "purchase_request_item_ids_required",
-                "message": "Selecione ao menos um item de solicitacao.",
+                "error": "purchase_request_item_ids_required", "message": _err("purchase_request_item_ids_required"),
             },
             400,
         )
@@ -2469,8 +3074,7 @@ def _create_rfq_core(
         return (
             None,
             {
-                "error": "purchase_request_items_not_found",
-                "message": "Itens de solicitacao nao encontrados ou ja em cotacao.",
+                "error": "purchase_request_items_not_found", "message": _err("purchase_request_items_not_found"),
             },
             400,
         )
@@ -3669,12 +4273,26 @@ def _load_inbox_items(
 
     items: List[dict] = []
     for row in rows:
+        item_type = row["type"]
+        item_status = row["status"]
+        stage = "solicitacao"
+        meta = {"allowed_actions": [], "primary_action": None}
+        if item_type == "purchase_request":
+            stage = stage_for_purchase_request_status(item_status)
+            meta = flow_meta("solicitacao", item_status)
+        elif item_type == "rfq":
+            stage = stage_for_rfq_status(item_status)
+            meta = flow_meta("cotacao", item_status)
+        elif item_type == "purchase_order":
+            stage = stage_for_purchase_order_status(item_status)
+            meta = flow_meta("ordem_compra", item_status)
+
         items.append(
             {
-                "type": row["type"],
+                "type": item_type,
                 "id": row["id"],
                 "ref": row["ref"],
-                "status": row["status"],
+                "status": item_status,
                 "priority": row["priority"],
                 "needed_at": row["needed_at"],
                 "age_days": row["age_days"],
@@ -3682,6 +4300,9 @@ def _load_inbox_items(
                 "award_id": row["award_id"],
                 "award_status": row["award_status"],
                 "award_purchase_order_id": row["award_purchase_order_id"],
+                "process_stage": stage,
+                "allowed_actions": meta["allowed_actions"],
+                "primary_action": meta["primary_action"],
             }
         )
     return items

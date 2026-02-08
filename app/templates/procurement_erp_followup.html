@@ -1,0 +1,219 @@
+{% extends "_layout.html" %}
+{% set active_nav = "integration" %}
+{% block title %}{{ ui_text("title.erp_followup") }}{% endblock %}
+{% block page_title %}{{ ui_text("page.erp_followup") }}{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb current">Acompanhamento ERP</span>
+{% endblock %}
+{% block page_actions %}
+  <a class="btn btn-ghost" href="/procurement/integrations/logs?workspace_id={{ workspace_id }}">Voltar para logs</a>
+  <button class="btn" id="refreshBtn">Atualizar</button>
+{% endblock %}
+
+{% block content %}
+  <section class="card compact">
+    <div class="card-header">
+      <h2 class="card-title">Filtros</h2>
+      <span class="meta">Acompanhe status ERP e proxima acao operacional</span>
+    </div>
+    <div class="grid grid-4">
+      <select class="select" id="erpStatusFilter">
+        <option value="">Todos os status ERP</option>
+        {% for status in ui_erp_statuses %}
+          <option value="{{ status.key }}" title="{{ status.description }}">{{ status.label }}</option>
+        {% endfor %}
+      </select>
+      <input class="input" id="supplierFilter" placeholder="Fornecedor" />
+      <button class="btn btn-ghost" id="applyBtn">Aplicar filtros</button>
+      <button class="btn btn-ghost" id="clearBtn">Limpar</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Painel de integracao ERP</h2>
+      <span class="meta" id="summary">Carregando ordens</span>
+    </div>
+    <div class="table-wrap">
+      <table class="table-mobile-cards table-compact">
+        <thead>
+          <tr>
+            <th>Ordem de compra</th>
+            <th>Fornecedor</th>
+            <th>{{ ui_text("label.erp_status") }}</th>
+            <th>{{ ui_text("label.last_attempt") }}</th>
+            <th>{{ ui_text("label.next_action") }}</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody id="erpFollowupBody"></tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block page_scripts %}
+  <script>
+    const workspaceId = "{{ workspace_id }}";
+    const Platform = window.PlatformUI || {};
+
+    const erpFollowupBody = document.getElementById("erpFollowupBody");
+    const summary = document.getElementById("summary");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const applyBtn = document.getElementById("applyBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const erpStatusFilter = document.getElementById("erpStatusFilter");
+    const supplierFilter = document.getElementById("supplierFilter");
+
+    const withWorkspace = (path) =>
+      Platform.withWorkspace
+        ? Platform.withWorkspace(path, workspaceId)
+        : `${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`;
+
+    const escapeHtml = Platform.escapeHtml
+      ? Platform.escapeHtml
+      : (value) =>
+          String(value ?? "Nao informado")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+
+    function statusTone(erpStatusKey) {
+      const normalized = String(erpStatusKey || "").toLowerCase();
+      if (normalized === "aceito") return "success";
+      if (normalized === "enviado") return "warning";
+      if (normalized === "rejeitado") return "danger";
+      if (normalized === "reenvio_necessario") return "warning";
+      return "info";
+    }
+
+    function renderStatusPill(erpStatus) {
+      const tone = statusTone(erpStatus?.key);
+      const label = erpStatus?.label || "Nao informado";
+      return `<span class="pill ${tone}">${escapeHtml(label)}</span>`;
+    }
+
+    function renderEmpty(message) {
+      erpFollowupBody.innerHTML = `
+        <tr>
+          <td colspan="6" class="empty-row">
+            <div class="empty-state-inline">
+              <div class="empty-state-title">${escapeHtml(message)}</div>
+              <div class="meta">Ajuste filtros ou atualize o painel.</div>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    async function resendToErp(orderId) {
+      const criticalUi = window.CriticalActionUI;
+      const confirmed = criticalUi ? await criticalUi.confirm("push_to_erp") : true;
+      if (!confirmed) return;
+      const endpoint = criticalUi
+        ? criticalUi.appendConfirmQuery(withWorkspace(`/api/procurement/purchase-orders/${orderId}/push-to-erp`), "push_to_erp")
+        : withWorkspace(`/api/procurement/purchase-orders/${orderId}/push-to-erp?confirm=true`);
+      const response = await fetch(endpoint, { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        window.showToast?.("danger", payload.message || payload.error || "Nao foi possivel reenviar ao ERP");
+        return;
+      }
+      window.showToast?.("success", payload.message || "Reenvio realizado");
+      await loadRows();
+    }
+
+    function bindActions() {
+      erpFollowupBody.querySelectorAll("[data-resend-order]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const orderId = Number(button.getAttribute("data-resend-order"));
+          if (!orderId) return;
+          await resendToErp(orderId);
+        });
+      });
+    }
+
+    function renderRows(items) {
+      if (!items.length) {
+        summary.textContent = "Sem ordens para os filtros atuais";
+        renderEmpty("Nenhuma ordem de compra encontrada");
+        return;
+      }
+
+      summary.textContent = `${items.length} ordens monitoradas`;
+      erpFollowupBody.innerHTML = items
+        .map((item) => {
+          const status = item.erp_status || {};
+          const actions = [
+            `<a class="btn btn-small btn-ghost" href="${withWorkspace(`/procurement/purchase-orders/${item.purchase_order_id}`)}">Abrir OC</a>`,
+          ];
+          if (item.can_resend) {
+            actions.push(
+              `<button class="btn btn-small btn-primary" type="button" data-resend-order="${item.purchase_order_id}">Reenviar ao ERP</button>`
+            );
+          }
+          return `
+            <tr>
+              <td data-label="Ordem de compra"><strong>${escapeHtml(item.number || `OC-${item.purchase_order_id}`)}</strong></td>
+              <td data-label="Fornecedor">${escapeHtml(item.supplier_name || "-")}</td>
+              <td data-label="{{ ui_text('label.erp_status') }}">
+                ${renderStatusPill(status)}
+                <div class="meta">${escapeHtml(status.message || "-")}</div>
+              </td>
+              <td data-label="{{ ui_text('label.last_attempt') }}">${escapeHtml(item.last_attempt_at || "-")}</td>
+              <td data-label="{{ ui_text('label.next_action') }}">
+                <div>${escapeHtml(item.next_action_label || "-")}</div>
+                <div class="meta">${escapeHtml(status.description || "-")}</div>
+              </td>
+              <td class="cell-actions" data-label="Acoes">
+                <div class="actions-cell">${actions.join("")}</div>
+              </td>
+            </tr>
+          `;
+        })
+        .join("");
+      bindActions();
+    }
+
+    async function loadRows() {
+      summary.textContent = "Atualizando painel";
+      const params = new URLSearchParams();
+      params.set("limit", "200");
+      if (erpStatusFilter.value) params.set("erp_status", erpStatusFilter.value);
+      if (supplierFilter.value.trim()) params.set("supplier", supplierFilter.value.trim());
+
+      try {
+        const response = await fetch(withWorkspace(`/api/procurement/integrations/erp/orders?${params.toString()}`));
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.message || payload.error || "Nao foi possivel carregar acompanhamento ERP");
+        }
+        renderRows(payload.items || []);
+      } catch (error) {
+        summary.textContent = "Falha ao carregar painel";
+        renderEmpty("Falha ao carregar acompanhamento ERP");
+        window.showToast?.("danger", error.message || "Erro inesperado");
+      }
+    }
+
+    function clearFilters() {
+      erpStatusFilter.value = "";
+      supplierFilter.value = "";
+      loadRows();
+    }
+
+    refreshBtn.addEventListener("click", loadRows);
+    applyBtn.addEventListener("click", loadRows);
+    clearBtn.addEventListener("click", clearFilters);
+    supplierFilter.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        loadRows();
+      }
+    });
+
+    loadRows();
+  </script>
+{% endblock %}
