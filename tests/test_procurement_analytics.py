@@ -1,10 +1,12 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from app import create_app
 from app.config import Config
 from app.db import close_db, get_db
+from app.routes import procurement_routes
 
 
 class ProcurementAnalyticsTest(unittest.TestCase):
@@ -26,11 +28,13 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         self.client = self.app.test_client()
         self.tenant_id = "tenant-analytics"
         self.headers = {"X-Tenant-Id": self.tenant_id}
+        procurement_routes._clear_analytics_cache_for_tests()
         self._seed_fixture()
 
     def tearDown(self) -> None:
         with self.app.app_context():
             close_db()
+        procurement_routes._clear_analytics_cache_for_tests()
         self._tmpdir.cleanup()
 
     def _set_role(self, role: str, display_name: str, *, team_members=None) -> None:
@@ -206,6 +210,28 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         self.assertTrue(rows)
         self.assertEqual(rows[0].get("fornecedor"), "Fornecedor A")
 
+        multi_select = self.client.get(
+            "/api/procurement/analytics/overview?status=ordered,pending_rfq&purchase_type=regular,emergencial",
+            headers=self.headers,
+        )
+        self.assertEqual(multi_select.status_code, 200)
+        multi_payload = multi_select.get_json() or {}
+        self.assertEqual(multi_payload.get("meta", {}).get("records_count"), 3)
+
+        default_quality = self.client.get(
+            "/api/procurement/analytics/quality_erp?start_date=2026-01-02&end_date=2026-01-02",
+            headers=self.headers,
+        )
+        self.assertEqual(default_quality.status_code, 200)
+        self.assertEqual((default_quality.get_json() or {}).get("meta", {}).get("records_count"), 0)
+
+        toggle_quality = self.client.get(
+            "/api/procurement/analytics/quality_erp?start_date=2026-01-02&end_date=2026-01-02&period_basis=po_updated_at",
+            headers=self.headers,
+        )
+        self.assertEqual(toggle_quality.status_code, 200)
+        self.assertEqual((toggle_quality.get_json() or {}).get("meta", {}).get("records_count"), 1)
+
     def test_analytics_efficiency_and_compliance(self) -> None:
         self._set_role("admin", "Admin Ops")
 
@@ -216,6 +242,13 @@ class ProcurementAnalyticsTest(unittest.TestCase):
 
         self.assertAlmostEqual(float(eff_kpis["avg_sr_to_oc"]["value"]), 28.0, places=2)
         self.assertGreaterEqual(int(eff_kpis["late_processes"]["value"]), 1)
+        self.assertTrue((eff_kpis["avg_stage_time"]["tooltip"] or "").strip())
+
+        eff_charts = {item.get("key"): item for item in eff_payload.get("charts", [])}
+        self.assertIn("stage_breakdown_bar", eff_charts)
+        stage_breakdown = eff_charts["stage_breakdown_bar"]
+        labels = [item.get("label") for item in stage_breakdown.get("items", [])]
+        self.assertEqual(labels, ["SR", "Cotacao", "Decisao", "OC", "ERP"])
 
         compliance = self.client.get("/api/procurement/analytics/compliance", headers=self.headers)
         self.assertEqual(compliance.status_code, 200)
@@ -225,6 +258,7 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         self.assertGreaterEqual(int(comp_kpis["no_competition"]["value"]), 1)
         self.assertGreaterEqual(int(comp_kpis["approved_exceptions"]["value"]), 1)
         self.assertGreaterEqual(int(comp_kpis["critical_actions"]["value"]), 1)
+        self.assertIn("ate 1 convite", (comp_kpis["no_competition"].get("tooltip") or ""))
 
     def test_analytics_access_control_by_role(self) -> None:
         self._set_role("buyer", "Buyer One")
@@ -246,6 +280,28 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         self._set_role("admin", "Admin Ops")
         admin_payload = self.client.get("/api/procurement/analytics/overview", headers=self.headers).get_json() or {}
         self.assertEqual(admin_payload.get("meta", {}).get("records_count"), 3)
+
+    def test_analytics_cache_keeps_same_payload_without_recompute(self) -> None:
+        self._set_role("admin", "Admin Ops")
+        procurement_routes._clear_analytics_cache_for_tests()
+
+        with patch(
+            "app.routes.procurement_routes.build_analytics_payload",
+            wraps=procurement_routes.build_analytics_payload,
+        ) as wrapped_builder:
+            first = self.client.get(
+                "/api/procurement/analytics/costs?start_date=2026-01-01&end_date=2026-01-31&status=ordered",
+                headers=self.headers,
+            )
+            second = self.client.get(
+                "/api/procurement/analytics/costs?start_date=2026-01-01&end_date=2026-01-31&status=ordered",
+                headers=self.headers,
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(wrapped_builder.call_count, 1)
+        self.assertEqual(first.get_json(), second.get_json())
 
 
 if __name__ == "__main__":

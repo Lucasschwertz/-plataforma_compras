@@ -1,8 +1,11 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import secrets
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
 from urllib.parse import quote
@@ -55,6 +58,78 @@ ALLOWED_PO_STATUSES = set(status_keys_for_group("ordem_compra"))
 ALLOWED_RECEIPT_STATUSES = {"pending", "partially_received", "received"}
 ALLOWED_RFQ_STATUSES = set(status_keys_for_group("cotacao"))
 ALLOWED_INBOX_STATUSES = ALLOWED_PR_STATUSES | ALLOWED_PO_STATUSES | ALLOWED_RFQ_STATUSES
+
+_ANALYTICS_CACHE_TTL_SECONDS = 60
+_ANALYTICS_PAYLOAD_CACHE: Dict[tuple, dict] = {}
+_ANALYTICS_CACHE_LOCK = threading.Lock()
+
+
+def _normalize_csv_filter_value(raw_value: str | None) -> str:
+    values = [part.strip() for part in str(raw_value or "").split(",") if part.strip()]
+    if not values:
+        return ""
+    return ",".join(sorted(dict.fromkeys(values)))
+
+
+def _analytics_cache_key(
+    tenant_id: str,
+    section_key: str,
+    visibility: Dict[str, object],
+    filters: Dict[str, object],
+) -> tuple:
+    raw_filters = filters.get("raw") if isinstance(filters.get("raw"), dict) else {}
+    raw_filters = raw_filters or {}
+    actors = tuple(
+        sorted(
+            {
+                str(value).strip().lower()
+                for value in (visibility.get("actors") or [])
+                if str(value).strip()
+            }
+        )
+    )
+    normalized_filter_block = (
+        str(raw_filters.get("start_date") or "").strip(),
+        str(raw_filters.get("end_date") or "").strip(),
+        str(raw_filters.get("supplier") or "").strip().lower(),
+        str(raw_filters.get("buyer") or "").strip().lower(),
+        _normalize_csv_filter_value(str(raw_filters.get("status") or "")),
+        _normalize_csv_filter_value(str(raw_filters.get("purchase_type") or "")),
+        str(raw_filters.get("period_basis") or "pr_created_at").strip().lower(),
+        str(raw_filters.get("workspace_id") or tenant_id).strip().lower(),
+    )
+    return (
+        str(tenant_id).strip().lower(),
+        str(visibility.get("scope") or "").strip().lower(),
+        str(section_key).strip().lower(),
+        actors,
+        normalized_filter_block,
+    )
+
+
+def _analytics_cache_get(cache_key: tuple) -> dict | None:
+    now = time.time()
+    with _ANALYTICS_CACHE_LOCK:
+        entry = _ANALYTICS_PAYLOAD_CACHE.get(cache_key)
+        if not entry:
+            return None
+        if float(entry.get("expires_at") or 0) <= now:
+            _ANALYTICS_PAYLOAD_CACHE.pop(cache_key, None)
+            return None
+        return copy.deepcopy(entry.get("payload") or {})
+
+
+def _analytics_cache_set(cache_key: tuple, payload: dict) -> None:
+    with _ANALYTICS_CACHE_LOCK:
+        _ANALYTICS_PAYLOAD_CACHE[cache_key] = {
+            "expires_at": time.time() + _ANALYTICS_CACHE_TTL_SECONDS,
+            "payload": copy.deepcopy(payload),
+        }
+
+
+def _clear_analytics_cache_for_tests() -> None:
+    with _ANALYTICS_CACHE_LOCK:
+        _ANALYTICS_PAYLOAD_CACHE.clear()
 
 
 def _err(key: str, fallback: str | None = None) -> str:
@@ -458,7 +533,13 @@ def analytics_dashboard_api(section: str = "overview"):
         session.get("team_members"),
     )
     filters = parse_analytics_filters(request.args, tenant_id)
+    cache_key = _analytics_cache_key(tenant_id, section_key, visibility, filters)
+    cached_payload = _analytics_cache_get(cache_key)
+    if cached_payload is not None:
+        return jsonify(cached_payload)
+
     payload = build_analytics_payload(db, tenant_id, section_key, filters, visibility)
+    _analytics_cache_set(cache_key, payload)
     return jsonify(payload)
 
 

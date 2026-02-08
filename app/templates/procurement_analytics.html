@@ -60,15 +60,20 @@
       </div>
       <div>
         <label class="meta" for="statusFilterSelect">Status</label>
-        <select class="select" id="statusFilterSelect">
-          <option value="">Todos</option>
+        <select class="select analytics-multiselect" id="statusFilterSelect" multiple size="5">
         </select>
       </div>
       <div>
         <label class="meta" for="typeFilterSelect">Tipo de compra</label>
-        <select class="select" id="typeFilterSelect">
-          <option value="">Todos</option>
+        <select class="select analytics-multiselect" id="typeFilterSelect" multiple size="3">
         </select>
+      </div>
+      <div id="qualityPeriodToggleWrap" hidden>
+        <label class="meta" for="qualityPeriodToggle">Base temporal Qualidade/ERP</label>
+        <label class="meta" for="qualityPeriodToggle" style="display:block; margin-top:6px;">
+          <input type="checkbox" id="qualityPeriodToggle" />
+          Usar ultima atualizacao da OC (po_updated_at)
+        </label>
       </div>
       <div>
         <label class="meta" for="workspaceReadOnly">Workspace</label>
@@ -108,6 +113,8 @@
       const buyerFilterSelect = document.getElementById("buyerFilterSelect");
       const statusFilterSelect = document.getElementById("statusFilterSelect");
       const typeFilterSelect = document.getElementById("typeFilterSelect");
+      const qualityPeriodToggleWrap = document.getElementById("qualityPeriodToggleWrap");
+      const qualityPeriodToggle = document.getElementById("qualityPeriodToggle");
       const applyFiltersBtn = document.getElementById("applyFiltersBtn");
       const clearFiltersBtn = document.getElementById("clearFiltersBtn");
       const analyticsKpis = document.getElementById("analyticsKpis");
@@ -116,6 +123,7 @@
       const analyticsSummary = document.getElementById("analyticsSummary");
       const drilldownHead = document.getElementById("drilldownHead");
       const drilldownBody = document.getElementById("drilldownBody");
+      const isQualitySection = sectionKey === "quality_erp";
 
       const withWorkspace = (path) =>
         Platform.withWorkspace
@@ -141,13 +149,22 @@
           buyer: params.get("buyer") || "",
           status: params.get("status") || "",
           purchase_type: params.get("purchase_type") || "",
+          period_basis: params.get("period_basis") || (isQualitySection ? "pr_created_at" : ""),
         };
       }
 
       function writeSearchFilters(filters) {
         const nextUrl = new URL(window.location.href);
-        ["start_date", "end_date", "supplier", "buyer", "status", "purchase_type"].forEach((key) => {
+        ["start_date", "end_date", "supplier", "buyer", "status", "purchase_type", "period_basis"].forEach((key) => {
+          if (key === "period_basis" && !isQualitySection) {
+            nextUrl.searchParams.delete("period_basis");
+            return;
+          }
           const value = String(filters[key] || "").trim();
+          if (key === "period_basis" && value === "pr_created_at") {
+            nextUrl.searchParams.delete(key);
+            return;
+          }
           if (value) {
             nextUrl.searchParams.set(key, value);
           } else {
@@ -158,14 +175,34 @@
         window.history.replaceState({}, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
       }
 
+      function csvFromMultiSelect(selectEl) {
+        return Array.from(selectEl.selectedOptions || [])
+          .map((option) => String(option.value || "").trim())
+          .filter((value) => value)
+          .join(",");
+      }
+
+      function applyCsvToMultiSelect(selectEl, csvValue) {
+        const selected = new Set(
+          String(csvValue || "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter((value) => value)
+        );
+        Array.from(selectEl.options || []).forEach((option) => {
+          option.selected = selected.has(String(option.value || ""));
+        });
+      }
+
       function currentFiltersFromForm() {
         return {
           start_date: startDateInput.value || "",
           end_date: endDateInput.value || "",
           supplier: supplierFilterSelect.value || "",
           buyer: buyerFilterSelect.value || "",
-          status: statusFilterSelect.value || "",
-          purchase_type: typeFilterSelect.value || "",
+          status: csvFromMultiSelect(statusFilterSelect),
+          purchase_type: csvFromMultiSelect(typeFilterSelect),
+          period_basis: isQualitySection ? (qualityPeriodToggle?.checked ? "po_updated_at" : "pr_created_at") : "",
         };
       }
 
@@ -174,15 +211,23 @@
         endDateInput.value = filters.end_date || "";
         supplierFilterSelect.value = filters.supplier || "";
         buyerFilterSelect.value = filters.buyer || "";
-        statusFilterSelect.value = filters.status || "";
-        typeFilterSelect.value = filters.purchase_type || "";
+        applyCsvToMultiSelect(statusFilterSelect, filters.status || "");
+        applyCsvToMultiSelect(typeFilterSelect, filters.purchase_type || "");
+        if (qualityPeriodToggle) {
+          qualityPeriodToggle.checked = String(filters.period_basis || "pr_created_at") === "po_updated_at";
+        }
       }
 
-      function fillSelectOptions(selectEl, options, selectedValue) {
-        const baseOption = '<option value="">Todos</option>';
+      function fillSelectOptions(selectEl, options, selectedValue, isMulti = false) {
         const dynamic = (options || [])
           .map((item) => `<option value="${escapeHtml(item.key || "")}">${escapeHtml(item.label || item.key || "")}</option>`)
           .join("");
+        if (isMulti) {
+          selectEl.innerHTML = dynamic;
+          applyCsvToMultiSelect(selectEl, selectedValue || "");
+          return;
+        }
+        const baseOption = '<option value="">Todos</option>';
         selectEl.innerHTML = baseOption + dynamic;
         selectEl.value = selectedValue || "";
       }
@@ -334,13 +379,16 @@
       async function bootstrap() {
         const searchFilters = readSearchFilters();
         applyFiltersToForm(searchFilters);
+        if (qualityPeriodToggleWrap) {
+          qualityPeriodToggleWrap.hidden = !isQualitySection;
+        }
         analyticsSummary.textContent = "Carregando filtros...";
         try {
           const optionsPayload = await fetchFilterOptions(searchFilters);
           fillSelectOptions(supplierFilterSelect, optionsPayload.suppliers || [], searchFilters.supplier);
           fillSelectOptions(buyerFilterSelect, optionsPayload.buyers || [], searchFilters.buyer);
-          fillSelectOptions(statusFilterSelect, optionsPayload.statuses || [], searchFilters.status);
-          fillSelectOptions(typeFilterSelect, optionsPayload.purchase_types || [], searchFilters.purchase_type);
+          fillSelectOptions(statusFilterSelect, optionsPayload.statuses || [], searchFilters.status, true);
+          fillSelectOptions(typeFilterSelect, optionsPayload.purchase_types || [], searchFilters.purchase_type, true);
         } catch (error) {
           window.showToast?.("danger", "Falha ao carregar filtros de analytics.");
         }
@@ -359,6 +407,7 @@
           buyer: "",
           status: "",
           purchase_type: "",
+          period_basis: "pr_created_at",
         });
         refreshDashboard();
       });

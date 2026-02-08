@@ -121,12 +121,15 @@ def parse_analytics_filters(args: Any, workspace_id: str | None) -> Dict[str, An
         for value in _parse_csv_values(args.get("purchase_type"))
         if value in {"regular", "emergencial"}
     ]
+    period_basis = str(args.get("period_basis") or "pr_created_at").strip().lower()
+    if period_basis not in {"pr_created_at", "po_updated_at"}:
+        period_basis = "pr_created_at"
 
     supplier = str(args.get("supplier") or "").strip()
     buyer = str(args.get("buyer") or "").strip()
     workspace_filter = str(args.get("workspace_id") or workspace_id or DEFAULT_TENANT_ID).strip() or DEFAULT_TENANT_ID
-    status_values = list(dict.fromkeys(statuses))
-    purchase_type_values = list(dict.fromkeys(purchase_types))
+    status_values = sorted(dict.fromkeys(statuses))
+    purchase_type_values = sorted(dict.fromkeys(purchase_types))
 
     return {
         "start_date": start_date,
@@ -135,6 +138,7 @@ def parse_analytics_filters(args: Any, workspace_id: str | None) -> Dict[str, An
         "buyer": buyer,
         "status": status_values,
         "purchase_type": purchase_type_values,
+        "period_basis": period_basis,
         "workspace_id": workspace_filter,
         "raw": {
             "start_date": start_date.isoformat() if start_date else "",
@@ -143,6 +147,7 @@ def parse_analytics_filters(args: Any, workspace_id: str | None) -> Dict[str, An
             "buyer": buyer,
             "status": ",".join(status_values),
             "purchase_type": ",".join(purchase_type_values),
+            "period_basis": period_basis,
             "workspace_id": workspace_filter,
         },
     }
@@ -240,11 +245,24 @@ def build_analytics_payload(
     resolved_section = normalize_section_key(section_key)
     section_info = section_meta(resolved_section)
     dataset = _load_dataset(db, tenant_id, visibility)
+    period_date_key = "pr_created_at"
+    if resolved_section == "quality_erp" and str(filters.get("period_basis") or "") == "po_updated_at":
+        period_date_key = "po_updated_at"
 
     filtered_no_period = _apply_filters(dataset["records"], filters, include_period=False)
-    current_records = _apply_period(filtered_no_period, filters.get("start_date"), filters.get("end_date"))
+    current_records = _apply_period(
+        filtered_no_period,
+        filters.get("start_date"),
+        filters.get("end_date"),
+        date_field=period_date_key,
+    )
     previous_start, previous_end = _previous_period_window(filters.get("start_date"), filters.get("end_date"))
-    comparison_records = _apply_period(filtered_no_period, previous_start, previous_end)
+    comparison_records = _apply_period(
+        filtered_no_period,
+        previous_start,
+        previous_end,
+        date_field=period_date_key,
+    )
 
     section_builder = _SECTION_BUILDERS.get(resolved_section, _build_overview_section)
     section_payload = section_builder(current_records, comparison_records, dataset, filters)
@@ -393,6 +411,7 @@ def _build_efficiency_section(
     stage_b = [float(row["stage_rfq_to_award_hours"]) for row in records if row.get("stage_rfq_to_award_hours") is not None]
     stage_c = [float(row["stage_award_to_po_hours"]) for row in records if row.get("stage_award_to_po_hours") is not None]
     stage_d = [float(row["stage_po_to_erp_hours"]) for row in records if row.get("stage_po_to_erp_hours") is not None]
+    stage_e = [float(row["stage_erp_resolution_hours"]) for row in records if row.get("stage_erp_resolution_hours") is not None]
 
     stage_values = [*stage_a, *stage_b, *stage_c, *stage_d]
     avg_stage_hours = _avg(stage_values)
@@ -429,7 +448,10 @@ def _build_efficiency_section(
             "Tempo medio por etapa",
             avg_stage_hours,
             _fmt_duration(avg_stage_hours),
-            "Media consolidada dos tempos de transicao entre etapas principais.",
+            (
+                "Media das duracoes entre SR->Cotacao, Cotacao->Decisao, Decisao->OC e OC->ERP. "
+                "Quanto menor o valor, mais fluido o processo."
+            ),
             _trend(avg_stage_hours, avg_stage_prev, lower_is_better=True),
         ),
         _kpi(
@@ -451,6 +473,21 @@ def _build_efficiency_section(
     ]
 
     charts = [
+        {
+            "key": "stage_breakdown_bar",
+            "type": "bar",
+            "title": "Breakdown por etapa do processo",
+            "items": _chart_items_from_mapping(
+                {
+                    "SR": _avg(stage_a),
+                    "Cotacao": _avg(stage_b),
+                    "Decisao": _avg(stage_c),
+                    "OC": _avg(stage_d),
+                    "ERP": _avg(stage_e),
+                },
+                value_formatter=_fmt_duration,
+            ),
+        },
         {
             "key": "stage_time_bar",
             "type": "bar",
@@ -548,7 +585,10 @@ def _build_costs_section(
             "Preco vencedor vs media",
             winner_vs_avg,
             _fmt_percent(winner_vs_avg),
-            "Percentual do preco vencedor sobre a media das propostas (quanto menor, melhor).",
+            (
+                "Razao media (preco vencedor / media das propostas) x 100. "
+                "Abaixo de 100% indica fechamento abaixo da media; quanto menor, melhor."
+            ),
             _trend(winner_vs_avg, winner_vs_avg_prev, lower_is_better=True),
         ),
         _kpi(
@@ -887,7 +927,7 @@ def _build_compliance_section(
             "Compras sem concorrencia",
             no_competition,
             _fmt_int(no_competition),
-            "Processos com 0 ou 1 fornecedor respondente.",
+            "Contagem de processos com ate 1 convite, resposta ou proposta valida. Serve como alerta de baixa concorrencia.",
             _trend(no_competition, no_competition_prev, lower_is_better=True),
         ),
         _kpi(
@@ -1257,6 +1297,7 @@ def _load_dataset(db, tenant_id: str | None, visibility: Dict[str, Any]) -> Dict
         record["stage_rfq_to_award_hours"] = _hours_between(record.get("rfq_created_at"), record.get("award_created_at"))
         record["stage_award_to_po_hours"] = _hours_between(record.get("award_created_at"), record.get("po_created_at"))
         record["stage_po_to_erp_hours"] = _hours_between(record.get("po_created_at"), po_event.get("first_push_at"))
+        record["stage_erp_resolution_hours"] = _hours_between(po_event.get("first_push_at"), record.get("po_updated_at"))
         record["is_delayed"] = _is_delayed(record)
 
         records.append(record)
@@ -1291,10 +1332,15 @@ def _apply_filters(records: List[dict], filters: Dict[str, Any], include_period:
     return result
 
 
-def _apply_period(records: List[dict], start: date | None, end: date | None) -> List[dict]:
+def _apply_period(
+    records: List[dict],
+    start: date | None,
+    end: date | None,
+    date_field: str = "pr_created_at",
+) -> List[dict]:
     if not start and not end:
         return list(records)
-    return [row for row in records if _in_period(row.get("pr_created_at"), start, end)]
+    return [row for row in records if _in_period(row.get(date_field), start, end)]
 
 
 def _previous_period_window(start: date | None, end: date | None) -> Tuple[date | None, date | None]:

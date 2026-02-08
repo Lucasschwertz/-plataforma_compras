@@ -1157,6 +1157,10 @@ tr.best-overall td {
   gap: 10px;
 }
 
+.analytics-multiselect {
+  min-height: 110px;
+}
+
 .analytics-kpi-card .analytics-trend {
   margin-top: 8px;
   font-size: 12px;
