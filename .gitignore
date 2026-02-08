@@ -13,3 +13,6 @@ app/templates/*.new.html
 pc_test_*/
 COLE_A_*
 SUA_STRING_*
+*.db-journal
+.tmp_import.db
+.tmp_import.db-journal
