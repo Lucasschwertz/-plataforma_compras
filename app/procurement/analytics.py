@@ -10,6 +10,7 @@ from app.procurement.analytics_actions import (
     build_supplier_primary_action,
     enrich_kpi_actions,
 )
+from app.procurement.analytics_automation import build_analytics_alerts
 from app.tenant import DEFAULT_TENANT_ID
 from app.ui_strings import STATUS_LABELS, get_ui_text
 
@@ -285,6 +286,11 @@ def build_analytics_payload(
             resolved_section,
             filters.get("raw", {}),
         )
+    alerts = build_analytics_alerts(
+        current_records,
+        section_payload.get("kpis", []),
+        filters.get("raw", {}),
+    )
 
     return {
         "section": section_info,
@@ -297,6 +303,11 @@ def build_analytics_payload(
             "records_count": len(current_records),
             "comparison_records_count": len(comparison_records),
             "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        },
+        "alerts": alerts,
+        "alerts_meta": {
+            "active_count": len(alerts),
+            "has_active": bool(alerts),
         },
         **section_payload,
     }

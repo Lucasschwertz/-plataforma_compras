@@ -36,7 +36,10 @@
   <section class="card">
     <div class="card-header">
       <h2 class="card-title">Filtros globais</h2>
-      <span class="meta">Os filtros valem para todos os KPIs e graficos.</span>
+      <div class="analytics-filter-header-meta">
+        <span class="meta">Os filtros valem para todos os KPIs e graficos.</span>
+        <span class="badge danger" id="analyticsAlertBadge" hidden>0</span>
+      </div>
     </div>
     <div class="grid grid-4 analytics-filter-grid">
       <div>
@@ -83,6 +86,14 @@
     </div>
   </section>
 
+  <section class="card" id="analyticsAlertsSection" hidden>
+    <div class="card-header">
+      <h2 class="card-title">{{ ui_text('analytics.alerts.title') }}</h2>
+      <span class="meta">{{ ui_text('analytics.alerts.subtitle') }}</span>
+    </div>
+    <div class="stack" id="analyticsAlertsList"></div>
+  </section>
+
   <section class="grid grid-4" id="analyticsKpis"></section>
 
   <section class="grid grid-2" id="analyticsChartsSection">
@@ -122,6 +133,9 @@
       const applyFiltersBtn = document.getElementById("applyFiltersBtn");
       const clearFiltersBtn = document.getElementById("clearFiltersBtn");
       const analyticsKpis = document.getElementById("analyticsKpis");
+      const analyticsAlertBadge = document.getElementById("analyticsAlertBadge");
+      const analyticsAlertsSection = document.getElementById("analyticsAlertsSection");
+      const analyticsAlertsList = document.getElementById("analyticsAlertsList");
       const analyticsChartsSection = document.getElementById("analyticsChartsSection");
       const analyticsCharts = document.getElementById("analyticsCharts");
       const analyticsDrilldownSection = document.getElementById("analyticsDrilldownSection");
@@ -134,6 +148,14 @@
       const TEXT_ACTION_DONE = "{{ ui_text('analytics.action.executed', 'Acao executada com sucesso.') }}";
       const TEXT_ACTION_HINT = "{{ ui_text('analytics.action.view_actions_hint') }}";
       const TEXT_ACTION_BLOCKED = "{{ ui_messages['error']['action_not_allowed_for_status'] }}";
+      const TEXT_ALERTS_NONE = "{{ ui_text('analytics.alerts.none') }}";
+      const TEXT_ALERT_BADGE = "{{ ui_text('analytics.alerts.active_badge') }}";
+      const TEXT_ALERT_ACTION = "{{ ui_text('analytics.alert.suggested_action') }}";
+      const TEXT_ALERT_SEVERITY = {
+        high: "{{ ui_text('analytics.alert.severity.high') }}",
+        medium: "{{ ui_text('analytics.alert.severity.medium') }}",
+        low: "{{ ui_text('analytics.alert.severity.low') }}"
+      };
       let lastPayload = null;
 
       const withWorkspace = (path) =>
@@ -285,6 +307,74 @@
                 <div class="kpi-value">${escapeHtml(item.display_value || "0")}</div>
                 <div class="${trendClass}">${trendText}</div>
                 ${actionButton}
+              </article>
+            `;
+          })
+          .join("");
+      }
+
+      function severityClass(value) {
+        const key = String(value || "").toLowerCase();
+        if (key === "high") return "danger";
+        if (key === "medium") return "warning";
+        return "info";
+      }
+
+      function severityLabel(value) {
+        const key = String(value || "").toLowerCase();
+        return TEXT_ALERT_SEVERITY[key] || key || "-";
+      }
+
+      function renderAlerts(alerts) {
+        const items = Array.isArray(alerts) ? alerts : [];
+        const count = items.length;
+        if (analyticsAlertBadge) {
+          if (count > 0) {
+            analyticsAlertBadge.hidden = false;
+            analyticsAlertBadge.textContent = `${TEXT_ALERT_BADGE}: ${count}`;
+          } else {
+            analyticsAlertBadge.hidden = true;
+            analyticsAlertBadge.textContent = "0";
+          }
+        }
+
+        if (!analyticsAlertsSection || !analyticsAlertsList) {
+          return;
+        }
+
+        if (!count) {
+          analyticsAlertsSection.hidden = false;
+          analyticsAlertsList.innerHTML = `<div class="meta">${escapeHtml(TEXT_ALERTS_NONE)}</div>`;
+          return;
+        }
+
+        analyticsAlertsSection.hidden = false;
+        analyticsAlertsList.innerHTML = items
+          .map((alert) => {
+            const severity = String(alert?.severity || "medium").toLowerCase();
+            const severityBadgeClass = severityClass(severity);
+            const action = alert?.suggested_action || {};
+            const actionLabel = String(action.label || TEXT_ALERT_ACTION);
+            const actionUrl = String(action.url || "");
+            const actionHref = actionUrl ? withWorkspace(actionUrl) : "";
+            const entity = alert?.entity || {};
+            const entityLabel = String(entity.label || entity.kind || "");
+            const entityCount = Number(entity.count || 0);
+            const entityText = entityCount > 0 ? `${entityLabel}: ${entityCount}` : entityLabel;
+            return `
+              <article class="analytics-alert-item">
+                <div class="analytics-alert-head">
+                  <strong>${escapeHtml(String(alert?.title || "-"))}</strong>
+                  <span class="badge ${severityBadgeClass}">${escapeHtml(severityLabel(severity))}</span>
+                </div>
+                <div class="meta">${escapeHtml(String(alert?.description || ""))}</div>
+                <div class="analytics-alert-footer">
+                  <span class="meta">${escapeHtml(entityText)}</span>
+                  ${actionHref
+                    ? `<a class="btn btn-small btn-primary" href="${escapeHtml(actionHref)}">${escapeHtml(actionLabel)}</a>`
+                    : `<span class="meta">${escapeHtml(actionLabel)}</span>`
+                  }
+                </div>
               </article>
             `;
           })
@@ -599,6 +689,7 @@
         try {
           const payload = await fetchSectionData(filters);
           lastPayload = payload || {};
+          renderAlerts(payload.alerts || []);
           renderKpis(payload.kpis || []);
           renderCharts(payload.charts || []);
           renderDrilldown(payload.drilldown || {});

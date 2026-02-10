@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from app import create_app
 from app.config import Config
-from app.db import close_db, get_db
+from app.db import close_db, get_db, get_read_db
 from app.procurement.analytics_actions import KPI_ACTION_RULES
 from app.routes import procurement_routes
 from app.ui_strings import error_message
@@ -472,6 +472,82 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         self.assertEqual(payload.get("charts"), [])
         drilldown = payload.get("drilldown")
         self.assertIn(drilldown, ({}, None))
+
+    def test_analytics_automation_alerts_trigger_and_non_trigger(self) -> None:
+        self._set_role("admin", "Admin Ops")
+
+        response = self.client.get("/api/procurement/analytics/overview", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json() or {}
+
+        alerts = list(payload.get("alerts") or [])
+        self.assertTrue(alerts)
+        types = {str(item.get("type") or "") for item in alerts}
+        self.assertIn("late_processes", types)
+        self.assertIn("compliance_outlier", types)
+        self.assertNotIn("supplier_response_low", types)
+        self.assertNotIn("erp_waiting", types)
+
+        for item in alerts:
+            self.assertTrue(bool(str(item.get("type") or "").strip()))
+            self.assertTrue(bool(str(item.get("severity") or "").strip()))
+            self.assertIsInstance(item.get("entity"), dict)
+            action = item.get("suggested_action") or {}
+            self.assertTrue(bool(str(action.get("action_key") or "").strip()))
+            self.assertTrue(bool(str(action.get("label") or "").strip()))
+            self.assertTrue(bool(str(action.get("url") or "").strip()))
+            self.assertEqual(action.get("action_type"), "open_list")
+
+        alerts_meta = payload.get("alerts_meta") or {}
+        self.assertEqual(int(alerts_meta.get("active_count") or 0), len(alerts))
+        self.assertEqual(bool(alerts_meta.get("has_active")), len(alerts) > 0)
+
+    def test_analytics_automation_alerts_supplier_and_erp(self) -> None:
+        self._set_role("admin", "Admin Ops")
+        with self.app.app_context():
+            db = get_db()
+            db.execute(
+                """
+                UPDATE rfq_supplier_invites
+                SET status = 'opened', submitted_at = NULL
+                WHERE id = ? AND tenant_id = ?
+                """,
+                (9403, self.tenant_id),
+            )
+            db.execute(
+                """
+                UPDATE purchase_orders
+                SET status = 'sent_to_erp', updated_at = '2020-01-06 14:00:00'
+                WHERE id = ? AND tenant_id = ?
+                """,
+                (9802, self.tenant_id),
+            )
+            db.commit()
+            get_read_db().execute("SELECT 1").fetchone()
+            close_db()
+        procurement_routes._clear_analytics_cache_for_tests()
+
+        with patch("app.procurement.analytics_automation.ERP_AWAITING_HOURS_THRESHOLD", 0.0):
+            response = self.client.get("/api/procurement/analytics/quality_erp", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json() or {}
+        kpis = {item["key"]: item for item in payload.get("kpis", [])}
+        self.assertGreater(int((kpis.get("awaiting_erp") or {}).get("value") or 0), 0)
+        types = {str(item.get("type") or "") for item in list(payload.get("alerts") or [])}
+
+        self.assertIn("supplier_response_low", types)
+        self.assertIn("erp_waiting", types)
+
+    def test_analytics_automation_access_by_profile(self) -> None:
+        self._set_role("supplier", "Supplier User")
+        denied = self.client.get("/api/procurement/analytics/overview", headers=self.headers)
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual((denied.get_json() or {}).get("error"), "permission_denied")
+
+        self._set_role("buyer", "Buyer One")
+        allowed = self.client.get("/api/procurement/analytics/overview", headers=self.headers)
+        self.assertEqual(allowed.status_code, 200)
+        self.assertIsInstance((allowed.get_json() or {}).get("alerts"), list)
 
 
 if __name__ == "__main__":

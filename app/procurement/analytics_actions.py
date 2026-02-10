@@ -224,6 +224,16 @@ def enrich_kpi_actions(
     return enriched
 
 
+def kpi_primary_actions(kpi_key: str) -> List[Dict[str, str]]:
+    key = str(kpi_key or "").strip()
+    if not key:
+        return []
+    rule = KPI_ACTION_RULES.get(key)
+    if not rule:
+        return []
+    return [{"key": action_key, "label": _action_label(action_key)} for action_key in _rule_primary_actions(rule)]
+
+
 def _fallback_detail_url(record: Dict[str, Any]) -> str | None:
     if record.get("po_id"):
         return f"/procurement/purchase-orders/{int(record['po_id'])}"
