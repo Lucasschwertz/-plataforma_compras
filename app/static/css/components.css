@@ -511,6 +511,35 @@ a.btn {
   background: transparent;
 }
 
+.theme-toggle {
+  width: 44px;
+  min-width: 44px;
+  height: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-toggle-icon {
+  display: none;
+  width: 18px;
+  height: 18px;
+  line-height: 0;
+}
+
+.theme-toggle svg {
+  display: block;
+}
+
+.theme-toggle[data-theme-current="light"] [data-theme-icon="moon"] {
+  display: inline-flex;
+}
+
+.theme-toggle[data-theme-current="dark"] [data-theme-icon="sun"] {
+  display: inline-flex;
+}
+
 .btn-small {
   padding: 6px 10px;
   font-size: 12px;
