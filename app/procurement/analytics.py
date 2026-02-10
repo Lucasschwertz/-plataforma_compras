@@ -16,6 +16,12 @@ from app.ui_strings import STATUS_LABELS, get_ui_text
 
 ANALYTICS_SECTIONS: List[Dict[str, str]] = [
     {
+        "key": "executive",
+        "slug": "executivo",
+        "label": "Executivo",
+        "description": "Visao C-Level com foco em impacto financeiro, risco e prazo.",
+    },
+    {
         "key": "overview",
         "slug": "visao-geral",
         "label": "Visao Geral",
@@ -57,6 +63,8 @@ ANALYTICS_SECTIONS: List[Dict[str, str]] = [
 _SECTION_BY_KEY = {item["key"]: item for item in ANALYTICS_SECTIONS}
 _SECTION_BY_SLUG = {item["slug"]: item for item in ANALYTICS_SECTIONS}
 _SECTION_ALIASES = {
+    "executivo": "executive",
+    "executive": "executive",
     "visao_geral": "overview",
     "overview": "overview",
     "eficiencia": "efficiency",
@@ -271,11 +279,12 @@ def build_analytics_payload(
 
     section_builder = _SECTION_BUILDERS.get(resolved_section, _build_overview_section)
     section_payload = section_builder(current_records, comparison_records, dataset, filters)
-    section_payload["kpis"] = enrich_kpi_actions(
-        section_payload.get("kpis", []),
-        resolved_section,
-        filters.get("raw", {}),
-    )
+    if resolved_section != "executive":
+        section_payload["kpis"] = enrich_kpi_actions(
+            section_payload.get("kpis", []),
+            resolved_section,
+            filters.get("raw", {}),
+        )
 
     return {
         "section": section_info,
@@ -1076,7 +1085,91 @@ def _build_compliance_section(
     }
 
 
+def _build_executive_section(
+    records: List[dict],
+    comparison: List[dict],
+    _dataset: Dict[str, Any],
+    _filters: Dict[str, Any],
+) -> Dict[str, Any]:
+    economy_abs = sum(float(row.get("rfq_savings_abs") or 0.0) for row in records)
+    economy_prev = sum(float(row.get("rfq_savings_abs") or 0.0) for row in comparison)
+
+    sr_to_oc_values = [float(row["sr_to_oc_hours"]) for row in records if row.get("sr_to_oc_hours") is not None]
+    sr_to_oc_prev = [float(row["sr_to_oc_hours"]) for row in comparison if row.get("sr_to_oc_hours") is not None]
+    avg_sr_to_oc = _avg(sr_to_oc_values)
+    avg_sr_to_oc_prev = _avg(sr_to_oc_prev)
+
+    late_processes = sum(1 for row in records if row.get("is_delayed"))
+    late_processes_prev = sum(1 for row in comparison if row.get("is_delayed"))
+
+    erp_rejections = sum(1 for row in records if row.get("erp_rejected"))
+    erp_rejections_prev = sum(1 for row in comparison if row.get("erp_rejected"))
+    awaiting_erp = sum(1 for row in records if str(row.get("erp_ui_status") or "") == "enviado")
+    awaiting_erp_prev = sum(1 for row in comparison if str(row.get("erp_ui_status") or "") == "enviado")
+    erp_pending = erp_rejections + awaiting_erp
+    erp_pending_prev = erp_rejections_prev + awaiting_erp_prev
+
+    no_competition = sum(1 for row in records if _no_competition_flag(row))
+    no_competition_prev = sum(1 for row in comparison if _no_competition_flag(row))
+    emergency_without_competition = sum(
+        1 for row in records if row.get("purchase_type") == "emergencial" and _no_competition_flag(row)
+    )
+    emergency_without_competition_prev = sum(
+        1 for row in comparison if row.get("purchase_type") == "emergencial" and _no_competition_flag(row)
+    )
+    out_of_standard = no_competition + emergency_without_competition
+    out_of_standard_prev = no_competition_prev + emergency_without_competition_prev
+
+    return {
+        "kpis": [
+            _kpi(
+                "economy_abs",
+                "Economia acumulada",
+                economy_abs,
+                _fmt_currency(economy_abs),
+                "Economia financeira acumulada no periodo frente ao preco medio cotado.",
+                _trend(economy_abs, economy_prev),
+            ),
+            _kpi(
+                "avg_sr_to_oc",
+                "Tempo medio SR para OC",
+                avg_sr_to_oc,
+                _fmt_duration(avg_sr_to_oc),
+                "Velocidade media do ciclo de compra, da solicitacao ate a ordem emitida.",
+                _trend(avg_sr_to_oc, avg_sr_to_oc_prev, lower_is_better=True),
+            ),
+            _kpi(
+                "late_processes",
+                "Compras em atraso",
+                late_processes,
+                _fmt_int(late_processes),
+                "Volume de processos que perderam a data de necessidade e exigem prioridade executiva.",
+                _trend(late_processes, late_processes_prev, lower_is_better=True),
+            ),
+            _kpi(
+                "erp_pending",
+                "Pendencias ERP",
+                erp_pending,
+                _fmt_int(erp_pending),
+                "Soma de rejeicoes e ordens aguardando retorno do ERP, com impacto direto no atendimento.",
+                _trend(erp_pending, erp_pending_prev, lower_is_better=True),
+            ),
+            _kpi(
+                "out_of_standard",
+                "Compras fora do padrao",
+                out_of_standard,
+                _fmt_int(out_of_standard),
+                "Soma de compras sem concorrencia e emergenciais sem concorrencia, sinalizando risco de compliance.",
+                _trend(out_of_standard, out_of_standard_prev, lower_is_better=True),
+            ),
+        ],
+        "charts": [],
+        "drilldown": {},
+    }
+
+
 _SECTION_BUILDERS = {
+    "executive": _build_executive_section,
     "overview": _build_overview_section,
     "efficiency": _build_efficiency_section,
     "costs": _build_costs_section,

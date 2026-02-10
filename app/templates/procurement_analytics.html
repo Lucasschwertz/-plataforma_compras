@@ -1,5 +1,6 @@
 {% extends "_layout.html" %}
 {% set section_map = {
+  "executive": "Executivo",
   "overview": "Visao Geral",
   "efficiency": "Eficiencia do Processo",
   "costs": "Custos e Economia",
@@ -84,9 +85,11 @@
 
   <section class="grid grid-4" id="analyticsKpis"></section>
 
-  <section class="grid grid-2" id="analyticsCharts"></section>
+  <section class="grid grid-2" id="analyticsChartsSection">
+    <div id="analyticsCharts" class="grid grid-2"></div>
+  </section>
 
-  <section class="card">
+  <section class="card" id="analyticsDrilldownSection">
     <div class="card-header">
       <h2 class="card-title" id="drilldownTitle">Lista detalhada</h2>
       <span class="meta" id="analyticsSummary">Carregando analytics...</span>
@@ -106,6 +109,7 @@
       const Platform = window.PlatformUI || {};
       const workspaceId = "{{ workspace_id }}";
       const sectionKey = "{{ analytics_section_key }}";
+      const isExecutiveSection = sectionKey === "executive";
 
       const startDateInput = document.getElementById("startDateInput");
       const endDateInput = document.getElementById("endDateInput");
@@ -118,7 +122,9 @@
       const applyFiltersBtn = document.getElementById("applyFiltersBtn");
       const clearFiltersBtn = document.getElementById("clearFiltersBtn");
       const analyticsKpis = document.getElementById("analyticsKpis");
+      const analyticsChartsSection = document.getElementById("analyticsChartsSection");
       const analyticsCharts = document.getElementById("analyticsCharts");
+      const analyticsDrilldownSection = document.getElementById("analyticsDrilldownSection");
       const drilldownTitle = document.getElementById("drilldownTitle");
       const analyticsSummary = document.getElementById("analyticsSummary");
       const drilldownHead = document.getElementById("drilldownHead");
@@ -238,6 +244,11 @@
       }
 
       function renderKpis(kpis) {
+        if (isExecutiveSection) {
+          analyticsKpis.classList.add("analytics-kpi-grid-executive");
+        } else {
+          analyticsKpis.classList.remove("analytics-kpi-grid-executive");
+        }
         if (!Array.isArray(kpis) || !kpis.length) {
           analyticsKpis.innerHTML = `
             <article class="card">
@@ -251,7 +262,7 @@
             const trend = item.trend || {};
             const trendClass = trend.direction ? `analytics-trend ${escapeHtml(trend.direction)}` : "analytics-trend";
             const trendText = trend.display ? `${escapeHtml(trend.display)} ${escapeHtml(trend.label || "")}` : "Sem comparacao";
-            const actionButton = item.actionable
+            const actionButton = !isExecutiveSection && item.actionable
               ? `
                 <div class="analytics-kpi-actions">
                   <button
@@ -265,8 +276,11 @@
                 </div>
               `
               : "";
+            const cardClass = isExecutiveSection
+              ? "kpi-card analytics-kpi-card analytics-kpi-card-executive"
+              : "kpi-card analytics-kpi-card";
             return `
-              <article class="kpi-card analytics-kpi-card" title="${escapeHtml(item.tooltip || "")}">
+              <article class="${cardClass}" title="${escapeHtml(item.tooltip || "")}">
                 <div class="kpi-label">${escapeHtml(item.label || "")}</div>
                 <div class="kpi-value">${escapeHtml(item.display_value || "0")}</div>
                 <div class="${trendClass}">${trendText}</div>
@@ -304,6 +318,10 @@
       }
 
       function renderCharts(charts) {
+        if (isExecutiveSection) {
+          analyticsCharts.innerHTML = "";
+          return;
+        }
         if (!Array.isArray(charts) || !charts.length) {
           analyticsCharts.innerHTML = `
             <article class="card"><div class="meta">Sem graficos para o filtro aplicado.</div></article>
@@ -512,6 +530,11 @@
       }
 
       function renderDrilldown(drilldown) {
+        if (isExecutiveSection) {
+          drilldownHead.innerHTML = "";
+          drilldownBody.innerHTML = "";
+          return;
+        }
         const title = drilldown?.title || "Lista detalhada";
         const columns = Array.isArray(drilldown?.columns) ? drilldown.columns : [];
         const rows = Array.isArray(drilldown?.rows) ? drilldown.rows : [];
@@ -581,7 +604,9 @@
           renderDrilldown(payload.drilldown || {});
           const currentCount = payload?.meta?.records_count ?? 0;
           const previousCount = payload?.meta?.comparison_records_count ?? 0;
-          analyticsSummary.textContent = `${currentCount} processos no periodo (comparacao ${previousCount})`;
+          analyticsSummary.textContent = isExecutiveSection
+            ? `${currentCount} processos considerados (comparacao ${previousCount})`
+            : `${currentCount} processos no periodo (comparacao ${previousCount})`;
         } catch (error) {
           analyticsSummary.textContent = "Nao foi possivel carregar analytics agora.";
           window.showToast?.("danger", "Falha ao carregar dashboard de analytics.");
@@ -593,6 +618,12 @@
         applyFiltersToForm(searchFilters);
         if (qualityPeriodToggleWrap) {
           qualityPeriodToggleWrap.hidden = !isQualitySection;
+        }
+        if (analyticsChartsSection) {
+          analyticsChartsSection.hidden = isExecutiveSection;
+        }
+        if (analyticsDrilldownSection) {
+          analyticsDrilldownSection.hidden = isExecutiveSection;
         }
         analyticsSummary.textContent = "Carregando filtros...";
         try {
@@ -625,6 +656,7 @@
       });
 
       analyticsKpis.addEventListener("click", (event) => {
+        if (isExecutiveSection) return;
         const trigger = event.target.closest("[data-kpi-action]");
         if (!trigger) return;
         const kpiKey = trigger.dataset.kpiKey || "";
@@ -632,6 +664,7 @@
       });
 
       drilldownBody.addEventListener("click", (event) => {
+        if (isExecutiveSection) return;
         const trigger = event.target.closest("[data-analytics-action]");
         if (!trigger) return;
         executeDrilldownAction(trigger);

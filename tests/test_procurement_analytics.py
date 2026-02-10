@@ -428,6 +428,51 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         self.assertEqual(wrapped_builder.call_count, 1)
         self.assertEqual(first.get_json(), second.get_json())
 
+    def test_executive_access_is_restricted_by_role(self) -> None:
+        self._set_role("buyer", "Buyer One")
+        buyer_api = self.client.get("/api/procurement/analytics/executive", headers=self.headers)
+        self.assertEqual(buyer_api.status_code, 403)
+        self.assertEqual((buyer_api.get_json() or {}).get("error"), "permission_denied")
+
+        buyer_page = self.client.get("/procurement/analises/executivo", headers=self.headers)
+        self.assertEqual(buyer_page.status_code, 403)
+
+        self._set_role("manager", "Manager Ops", team_members="Buyer One,Buyer Two")
+        manager_api = self.client.get("/api/procurement/analytics/executive", headers=self.headers)
+        self.assertEqual(manager_api.status_code, 200)
+        manager_page = self.client.get("/procurement/analises/executivo", headers=self.headers)
+        self.assertEqual(manager_page.status_code, 200)
+
+        self._set_role("admin", "Admin Ops")
+        admin_api = self.client.get("/api/procurement/analytics/executive", headers=self.headers)
+        self.assertEqual(admin_api.status_code, 200)
+
+    def test_executive_kpis_are_correct_without_actions_or_drilldown(self) -> None:
+        self._set_role("admin", "Admin Ops")
+
+        response = self.client.get("/api/procurement/analytics/executive", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json() or {}
+        kpis = {item["key"]: item for item in payload.get("kpis", [])}
+
+        expected_keys = {"economy_abs", "avg_sr_to_oc", "late_processes", "erp_pending", "out_of_standard"}
+        self.assertEqual(set(kpis.keys()), expected_keys)
+
+        self.assertAlmostEqual(float(kpis["economy_abs"]["value"]), 10.0, places=2)
+        self.assertAlmostEqual(float(kpis["avg_sr_to_oc"]["value"]), 28.0, places=2)
+        self.assertEqual(int(kpis["late_processes"]["value"]), 3)
+        self.assertEqual(int(kpis["erp_pending"]["value"]), 1)
+        self.assertEqual(int(kpis["out_of_standard"]["value"]), 1)
+
+        for item in kpis.values():
+            self.assertTrue(bool(str(item.get("tooltip") or "").strip()))
+            self.assertIsNotNone(item.get("trend"))
+            self.assertFalse(bool(item.get("actionable")))
+
+        self.assertEqual(payload.get("charts"), [])
+        drilldown = payload.get("drilldown")
+        self.assertIn(drilldown, ({}, None))
+
 
 if __name__ == "__main__":
     unittest.main()

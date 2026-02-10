@@ -1239,11 +1239,36 @@ tr.best-overall td {
   min-height: 110px;
 }
 
+.analytics-kpi-grid-executive {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .analytics-kpi-card .analytics-trend {
   margin-top: 8px;
   font-size: 12px;
   font-weight: 700;
   color: var(--muted);
+}
+
+.analytics-kpi-card-executive {
+  min-height: 164px;
+  padding: var(--space-5);
+  box-shadow: var(--shadow-2);
+}
+
+.analytics-kpi-card-executive .kpi-label {
+  font-size: 12px;
+  letter-spacing: 0.55px;
+}
+
+.analytics-kpi-card-executive .kpi-value {
+  font-size: 42px;
+  line-height: 1.05;
+}
+
+.analytics-kpi-card-executive .analytics-trend {
+  font-size: 13px;
 }
 
 .analytics-kpi-card .analytics-trend.up {
@@ -1356,6 +1381,10 @@ tr.best-overall td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .analytics-kpi-grid-executive {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .process-track {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1425,6 +1454,14 @@ tr.best-overall td {
 
   .analytics-section-tabs {
     grid-template-columns: 1fr;
+  }
+
+  .analytics-kpi-grid-executive {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-kpi-card-executive .kpi-value {
+    font-size: 34px;
   }
 
   .card {

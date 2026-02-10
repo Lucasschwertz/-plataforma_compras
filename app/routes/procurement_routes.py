@@ -457,14 +457,21 @@ def approvals_page():
 @procurement_bp.route("/procurement/analises", methods=["GET"])
 @procurement_bp.route("/procurement/analises/<string:section>", methods=["GET"])
 def analytics_dashboard_page(section: str = "overview"):
-    _require_roles("buyer", "manager", "admin", "approver")
-    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    role = _current_role()
     section_key = normalize_section_key(section)
+    if section_key == "executive":
+        _require_roles("manager", "admin")
+    else:
+        _require_roles("buyer", "manager", "admin", "approver")
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    sections = analytics_sections()
+    if role not in {"manager", "admin"}:
+        sections = [item for item in sections if item.get("key") != "executive"]
     return render_template(
         "procurement_analytics.html",
         tenant_id=tenant_id,
         analytics_section_key=section_key,
-        analytics_sections=analytics_sections(),
+        analytics_sections=sections,
         active_nav=f"analytics_{section_key}",
     )
 
@@ -515,17 +522,22 @@ def analytics_filters_api():
     )
     filters = parse_analytics_filters(request.args, tenant_id)
     payload = build_analytics_filter_options(db, tenant_id, visibility, filters)
+    if role not in {"manager", "admin"}:
+        payload["sections"] = [item for item in list(payload.get("sections") or []) if item.get("key") != "executive"]
     return jsonify(payload)
 
 
 @procurement_bp.route("/api/procurement/analytics", methods=["GET"])
 @procurement_bp.route("/api/procurement/analytics/<string:section>", methods=["GET"])
 def analytics_dashboard_api(section: str = "overview"):
-    _require_roles("buyer", "manager", "admin", "approver")
     db = get_read_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     role = _current_role()
     section_key = normalize_section_key(request.args.get("section") or section)
+    if section_key == "executive":
+        _require_roles("manager", "admin")
+    else:
+        _require_roles("buyer", "manager", "admin", "approver")
     visibility = resolve_analytics_visibility(
         role,
         session.get("user_email"),

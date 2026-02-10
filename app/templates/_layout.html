@@ -23,6 +23,7 @@
       else "Cotacoes" if active_nav == "sourcing"
       else "Aprovacoes" if active_nav == "approvals"
       else "Visao Geral" if active_nav == "analytics_overview"
+      else "Executivo" if active_nav == "analytics_executive"
       else "Eficiencia do Processo" if active_nav == "analytics_efficiency"
       else "Custos e Economia" if active_nav == "analytics_costs"
       else "Fornecedores" if active_nav == "analytics_suppliers"
@@ -46,6 +47,7 @@
   {% endif %}
   {% set panel_nav_keys = ["dashboard", "requests", "sourcing", "orders", "procurement", "open_quote", "approvals"] %}
   {% set analytics_nav_keys = [
+    "analytics_executive",
     "analytics_overview",
     "analytics_efficiency",
     "analytics_costs",
@@ -99,6 +101,9 @@
               <span class="nav-group-chevron" aria-hidden="true">&#9662;</span>
             </button>
             <div class="nav-group-links" data-nav-group-links="analytics">
+              {% if ui_role == "manager" or ui_role == "admin" %}
+                <a class="{% if active_nav == 'analytics_executive' %}active{% endif %}" href="/procurement/analises/executivo?workspace_id={{ workspace_id }}">Executivo</a>
+              {% endif %}
               <a class="{% if active_nav == 'analytics_overview' %}active{% endif %}" href="/procurement/analises/visao-geral?workspace_id={{ workspace_id }}">Visao Geral</a>
               <a class="{% if active_nav == 'analytics_efficiency' %}active{% endif %}" href="/procurement/analises/eficiencia-processo?workspace_id={{ workspace_id }}">Eficiencia do Processo</a>
               <a class="{% if active_nav == 'analytics_costs' %}active{% endif %}" href="/procurement/analises/custos-economia?workspace_id={{ workspace_id }}">Custos e Economia</a>
@@ -243,7 +248,7 @@
       <a class="quick-link {% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Cotacoes</a>
       <a class="quick-link {% if active_nav == 'orders' %}active{% endif %}" href="/procurement/ordens-compra?workspace_id={{ workspace_id }}">Ordens</a>
       <a class="quick-link {% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
-      <a class="quick-link {% if active_nav == 'analytics_overview' or active_nav == 'analytics_efficiency' or active_nav == 'analytics_costs' or active_nav == 'analytics_suppliers' or active_nav == 'analytics_quality_erp' or active_nav == 'analytics_compliance' %}active{% endif %}" href="/procurement/analises/visao-geral?workspace_id={{ workspace_id }}">Analises</a>
+      <a class="quick-link {% if active_nav == 'analytics_executive' or active_nav == 'analytics_overview' or active_nav == 'analytics_efficiency' or active_nav == 'analytics_costs' or active_nav == 'analytics_suppliers' or active_nav == 'analytics_quality_erp' or active_nav == 'analytics_compliance' %}active{% endif %}" href="/procurement/analises/visao-geral?workspace_id={{ workspace_id }}">Analises</a>
       {% if ui_role == "approver" or ui_role == "manager" %}
         <a class="quick-link {% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovar</a>
       {% elif ui_role == "admin" %}
