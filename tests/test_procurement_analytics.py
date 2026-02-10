@@ -6,6 +6,7 @@ from unittest.mock import patch
 from app import create_app
 from app.config import Config
 from app.db import close_db, get_db
+from app.procurement.analytics_actions import KPI_ACTION_RULES
 from app.routes import procurement_routes
 from app.ui_strings import error_message
 
@@ -284,6 +285,18 @@ class ProcurementAnalyticsTest(unittest.TestCase):
 
     def test_analytics_actionable_kpi_mapping_and_contextual_actions(self) -> None:
         self._set_role("admin", "Admin Ops")
+        required_actionable_kpis = {
+            "late_processes",
+            "backlog_open",
+            "supplier_response_rate",
+            "supplier_avg_response_time",
+            "erp_rejections",
+            "awaiting_erp",
+            "erp_retries",
+            "no_competition",
+            "emergency_without_competition",
+        }
+        self.assertTrue(required_actionable_kpis.issubset(set(KPI_ACTION_RULES.keys())))
 
         efficiency_payload = self.client.get("/api/procurement/analytics/efficiency", headers=self.headers).get_json() or {}
         eff_kpis = {item["key"]: item for item in efficiency_payload.get("kpis", [])}
@@ -292,17 +305,32 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         self.assertEqual(late.get("action_type"), "open_list")
         self.assertTrue((late.get("action_label") or "").strip())
         self.assertEqual((late.get("action_context") or {}).get("kpi_key"), "late_processes")
+        self.assertTrue(bool(late.get("primary_actions")))
+
+        backlog_open = eff_kpis.get("backlog_open") or {}
+        self.assertTrue(backlog_open.get("actionable"))
+        self.assertIn("open_rfq", list(backlog_open.get("primary_actions") or []))
+
+        avg_stage = eff_kpis.get("avg_stage_time") or {}
+        self.assertFalse(bool(avg_stage.get("actionable")))
 
         suppliers_payload = self.client.get("/api/procurement/analytics/suppliers", headers=self.headers).get_json() or {}
         supplier_kpis = {item["key"]: item for item in suppliers_payload.get("kpis", [])}
         supplier_rate = supplier_kpis.get("supplier_response_rate") or {}
         self.assertFalse(bool(supplier_rate.get("actionable")))
+        self.assertEqual((supplier_rate.get("action_context") or {}).get("kpi_key"), "supplier_response_rate")
+        self.assertTrue(bool(supplier_rate.get("primary_actions")))
 
         quality_payload = self.client.get("/api/procurement/analytics/quality_erp", headers=self.headers).get_json() or {}
         quality_kpis = {item["key"]: item for item in quality_payload.get("kpis", [])}
         erp_rejections = quality_kpis.get("erp_rejections") or {}
         self.assertTrue(erp_rejections.get("actionable"))
         self.assertEqual(erp_rejections.get("action_type"), "open_list")
+        self.assertTrue(bool(erp_rejections.get("primary_actions")))
+        self.assertTrue(bool((quality_kpis.get("erp_retries") or {}).get("actionable")))
+        awaiting_erp = quality_kpis.get("awaiting_erp") or {}
+        self.assertEqual((awaiting_erp.get("action_context") or {}).get("kpi_key"), "awaiting_erp")
+        self.assertTrue(bool(awaiting_erp.get("primary_actions")))
 
         quality_rows = (quality_payload.get("drilldown") or {}).get("rows", [])
         self.assertTrue(quality_rows)
@@ -317,6 +345,47 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         self.assertIsNotNone(accepted_row)
         accepted_action = (accepted_row or {}).get("_action") or {}
         self.assertNotEqual(accepted_action.get("action_key"), "push_to_erp")
+
+        compliance_payload = self.client.get("/api/procurement/analytics/compliance", headers=self.headers).get_json() or {}
+        compliance_kpis = {item["key"]: item for item in compliance_payload.get("kpis", [])}
+        self.assertTrue(bool((compliance_kpis.get("no_competition") or {}).get("actionable")))
+        emergency_without_competition = compliance_kpis.get("emergency_without_competition") or {}
+        self.assertEqual(
+            (emergency_without_competition.get("action_context") or {}).get("kpi_key"),
+            "emergency_without_competition",
+        )
+        self.assertTrue(bool(emergency_without_competition.get("primary_actions")))
+
+    def test_analytics_direct_action_requires_confirmation_and_executes(self) -> None:
+        self._set_role("admin", "Admin Ops")
+        quality_payload = self.client.get("/api/procurement/analytics/quality_erp", headers=self.headers).get_json() or {}
+        rows = (quality_payload.get("drilldown") or {}).get("rows", [])
+        target_row = next(
+            (
+                row
+                for row in rows
+                if (row.get("_action") or {}).get("action_key") == "push_to_erp"
+                and (row.get("_action") or {}).get("action_type") == "direct_action"
+            ),
+            None,
+        )
+        self.assertIsNotNone(target_row)
+        action = (target_row or {}).get("_action") or {}
+        self.assertTrue(bool(action.get("requires_confirmation")))
+
+        api_url = str(action.get("api_url") or "")
+        self.assertTrue(api_url.startswith("/api/procurement/purchase-orders/"))
+
+        missing_confirmation = self.client.post(api_url, headers=self.headers)
+        self.assertEqual(missing_confirmation.status_code, 400)
+        missing_payload = missing_confirmation.get_json() or {}
+        self.assertEqual(missing_payload.get("error"), "confirmation_required")
+        self.assertEqual(missing_payload.get("message"), error_message("confirmation_required"))
+
+        confirmed = self.client.post(f"{api_url}?confirm=true", headers=self.headers)
+        self.assertEqual(confirmed.status_code, 200)
+        confirmed_payload = confirmed.get_json() or {}
+        self.assertEqual(confirmed_payload.get("status"), "erp_accepted")
 
     def test_blocked_action_returns_friendly_message(self) -> None:
         self._set_role("admin", "Admin Ops")

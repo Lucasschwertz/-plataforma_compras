@@ -432,16 +432,81 @@
         }
       }
 
-      function handleKpiAction(kpiKey) {
+      function kpiActionsHint(target) {
+        const context = target?.action_context || {};
+        const actions = Array.isArray(context.primary_actions) && context.primary_actions.length
+          ? context.primary_actions
+          : Array.isArray(context.recommended_actions)
+            ? context.recommended_actions
+            : [];
+        const labels = actions
+          .map((item) => (typeof item === "string" ? item : String(item?.label || item?.key || "").trim()))
+          .filter((value) => value)
+          .slice(0, 3);
+        if (!labels.length) {
+          return TEXT_ACTION_HINT;
+        }
+        return `${TEXT_ACTION_HINT} ${labels.join(" | ")}`;
+      }
+
+      async function executeKpiDirectAction(target) {
+        const context = target?.action_context || {};
+        const apiUrl = String(context.api_url || "");
+        if (!apiUrl) {
+          return false;
+        }
+        const method = String(context.method || "POST").toUpperCase();
+        const actionKey = String(context.action_key || "");
+        const confirmRequired = Boolean(context.requires_confirmation);
+        const confirmKey = String(context.confirm_action_key || actionKey || "");
+        const criticalUi = window.CriticalActionUI;
+        if (confirmRequired) {
+          const confirmed = criticalUi ? await criticalUi.confirm(confirmKey) : window.confirm("Confirmar acao?");
+          if (!confirmed) {
+            return true;
+          }
+        }
+
+        let endpoint = apiUrl;
+        if (confirmRequired) {
+          endpoint = criticalUi ? criticalUi.appendConfirmQuery(endpoint, confirmKey) : ensureConfirmQuery(endpoint, confirmKey);
+        }
+
+        try {
+          const response = await fetch(withWorkspace(endpoint), {
+            method,
+            headers: { "Content-Type": "application/json" },
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            window.showToast?.("danger", payload.message || TEXT_ACTION_BLOCKED);
+            return true;
+          }
+          window.showToast?.("success", payload.message || TEXT_ACTION_DONE);
+          await refreshDashboard();
+          return true;
+        } catch (error) {
+          window.showToast?.("danger", TEXT_ACTION_BLOCKED);
+          return true;
+        }
+      }
+
+      async function handleKpiAction(kpiKey) {
         const kpiItems = Array.isArray(lastPayload?.kpis) ? lastPayload.kpis : [];
         const target = kpiItems.find((item) => String(item?.key || "") === String(kpiKey || ""));
         if (!target || !target.actionable) {
           return;
         }
+        if (target.action_type === "direct_action") {
+          const executed = await executeKpiDirectAction(target);
+          if (executed) {
+            return;
+          }
+        }
         if (target.action_type === "open_list") {
           const drilldownCard = document.getElementById("drilldownTable");
           drilldownCard?.scrollIntoView({ behavior: "smooth", block: "start" });
-          window.showToast?.("success", TEXT_ACTION_HINT);
+          window.showToast?.("success", kpiActionsHint(target));
           return;
         }
       }

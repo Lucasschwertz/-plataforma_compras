@@ -14,32 +14,85 @@ from app.ui_strings import get_ui_text
 
 KPI_ACTION_RULES: Dict[str, Dict[str, Any]] = {
     "late_processes": {
+        "actionable": True,
         "threshold_operator": "gt",
         "threshold_value": 0.0,
         "action_type": "open_list",
-        "context_hint": "late_processes",
-        "recommended_actions": ["open_rfq", "award_rfq", "create_purchase_order", "push_to_erp"],
+        "action_label_key": "analytics.action.view_actions",
+        "action_context": {"hint": "late_processes"},
+        "primary_actions": ["open_rfq", "award_rfq", "create_purchase_order", "push_to_erp"],
+    },
+    "backlog_open": {
+        "actionable": True,
+        "threshold_operator": "gt",
+        "threshold_value": 0.0,
+        "action_type": "open_list",
+        "action_label_key": "analytics.action.view_actions",
+        "action_context": {"hint": "backlog_open"},
+        "primary_actions": ["open_rfq", "view_quotes", "create_purchase_order"],
     },
     "supplier_response_rate": {
+        "actionable": True,
         "threshold_operator": "lt",
         "threshold_value": 70.0,
         "action_type": "open_list",
-        "context_hint": "supplier_low_response",
-        "recommended_actions": ["invite_supplier", "manage_item_supplier"],
+        "action_label_key": "analytics.action.view_actions",
+        "action_context": {"hint": "supplier_low_response"},
+        "primary_actions": ["invite_supplier", "manage_item_supplier", "view_quotes"],
+    },
+    "supplier_avg_response_time": {
+        "actionable": True,
+        "threshold_operator": "gt",
+        "threshold_value": 48.0,
+        "action_type": "open_list",
+        "action_label_key": "analytics.action.view_actions",
+        "action_context": {"hint": "supplier_slow_response"},
+        "primary_actions": ["invite_supplier", "manage_item_supplier", "view_quotes"],
     },
     "erp_rejections": {
+        "actionable": True,
         "threshold_operator": "gt",
         "threshold_value": 0.0,
         "action_type": "open_list",
-        "context_hint": "erp_rejections",
-        "recommended_actions": ["view_order", "push_to_erp"],
+        "action_label_key": "analytics.action.view_actions",
+        "action_context": {"hint": "erp_rejections"},
+        "primary_actions": ["view_order", "push_to_erp"],
+    },
+    "awaiting_erp": {
+        "actionable": True,
+        "threshold_operator": "gt",
+        "threshold_value": 0.0,
+        "action_type": "open_list",
+        "action_label_key": "analytics.action.view_actions",
+        "action_context": {"hint": "awaiting_erp"},
+        "primary_actions": ["refresh_order", "view_order"],
+    },
+    "erp_retries": {
+        "actionable": True,
+        "threshold_operator": "gt",
+        "threshold_value": 0.0,
+        "action_type": "open_list",
+        "action_label_key": "analytics.action.view_actions",
+        "action_context": {"hint": "erp_retries"},
+        "primary_actions": ["view_order", "push_to_erp", "refresh_order"],
     },
     "no_competition": {
+        "actionable": True,
         "threshold_operator": "gt",
         "threshold_value": 0.0,
         "action_type": "open_list",
-        "context_hint": "no_competition",
-        "recommended_actions": ["review_decision", "view_quotes", "create_purchase_order"],
+        "action_label_key": "analytics.action.view_actions",
+        "action_context": {"hint": "no_competition"},
+        "primary_actions": ["review_decision", "view_quotes", "invite_supplier"],
+    },
+    "emergency_without_competition": {
+        "actionable": True,
+        "threshold_operator": "gt",
+        "threshold_value": 0.0,
+        "action_type": "open_list",
+        "action_label_key": "analytics.action.view_actions",
+        "action_context": {"hint": "emergency_without_competition"},
+        "primary_actions": ["review_decision", "invite_supplier", "open_rfq"],
     },
 }
 
@@ -68,6 +121,8 @@ def _to_float(value: Any) -> float:
 
 
 def _triggered(rule: Dict[str, Any], value: float) -> bool:
+    if not bool(rule.get("actionable", True)):
+        return False
     operator = str(rule.get("threshold_operator") or "gt").strip().lower()
     threshold = _to_float(rule.get("threshold_value"))
     if operator == "lt":
@@ -75,6 +130,19 @@ def _triggered(rule: Dict[str, Any], value: float) -> bool:
     if operator == "eq":
         return value == threshold
     return value > threshold
+
+
+def _rule_primary_actions(rule: Dict[str, Any]) -> List[str]:
+    raw_actions = list(rule.get("primary_actions") or rule.get("recommended_actions") or [])
+    normalized: List[str] = []
+    seen = set()
+    for value in raw_actions:
+        key = str(value or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(key)
+    return normalized
 
 
 def _action_label(action_key: str) -> str:
@@ -103,33 +171,51 @@ def enrich_kpi_actions(
         kpi_key = str(current.get("key") or "").strip()
         rule = KPI_ACTION_RULES.get(kpi_key)
 
-        if not rule or not _triggered(rule, _to_float(current.get("value"))):
+        if not rule:
             current.update(
                 {
                     "actionable": False,
                     "action_label": "",
                     "action_type": "",
+                    "primary_actions": [],
                     "action_context": {},
                 }
             )
             enriched.append(current)
             continue
 
-        recommended_actions = [
+        primary_action_keys = _rule_primary_actions(rule)
+        primary_actions = [
             {"key": action_key, "label": _action_label(action_key)}
-            for action_key in list(rule.get("recommended_actions") or [])
+            for action_key in primary_action_keys
         ]
+        context_template = dict(rule.get("action_context") or {})
+        hint = str(context_template.get("hint") or rule.get("context_hint") or "")
+        action_type = str(rule.get("action_type") or "open_list")
+        actionable = _triggered(rule, _to_float(current.get("value")))
+
+        action_label = ""
+        if actionable:
+            action_label_key = str(rule.get("action_label_key") or "analytics.action.view_actions")
+            action_label = get_ui_text(
+                action_label_key,
+                get_ui_text("analytics.action.view_actions", "Ver acoes"),
+            )
+
         current.update(
             {
-                "actionable": True,
-                "action_label": get_ui_text("analytics.action.view_actions", "Ver acoes"),
-                "action_type": str(rule.get("action_type") or "open_list"),
+                "actionable": actionable,
+                "action_label": action_label,
+                "action_type": action_type,
+                "primary_actions": primary_action_keys,
                 "action_context": {
                     "section": section_key,
                     "kpi_key": kpi_key,
-                    "hint": str(rule.get("context_hint") or ""),
+                    "hint": hint,
                     "filters": filters,
-                    "recommended_actions": recommended_actions,
+                    "primary_actions": primary_actions,
+                    # Backward compatibility for the first actionable-analytics rollout.
+                    "recommended_actions": primary_actions,
                 },
             }
         )
