@@ -24,20 +24,27 @@ python database\create_postgres_db.py
 $env:DATABASE_URL="postgresql://postgres:SUA_SENHA@localhost:5432/portal_compras"
 ```
 
-3. Inicializar o schema:
+3. Aplicar migrations (schema previsivel):
 
 ```powershell
-python database\init_db.py
+$env:FLASK_APP="run.py"
+flask db upgrade
 ```
 
-4. Criar o espelho completo de tabelas ERP:
+4. (Opcional) rollback de migration:
+
+```powershell
+flask db downgrade -1
+```
+
+5. Criar o espelho completo de tabelas ERP:
 
 ```powershell
 $env:PYTHONPATH='.'
 python database\import_erp_csv.py --schema tabelas.csv --mirror-schema-only
 ```
 
-5. Importar dados ERP (espelho + dominio):
+6. Importar dados ERP (espelho + dominio):
 
 ```powershell
 $env:PYTHONPATH='.'
@@ -87,6 +94,19 @@ Operacao:
 ## UX
 - Estilo visual: minimalista (aplicado nas telas de Inbox, Cotacao e Decisao/OC).
 
+## Startup de Banco
+
+- Por padrao o app **nao** cria schema em runtime.
+- Em desenvolvimento, se quiser auto-init explicito:
+
+```powershell
+$env:FLASK_ENV="development"
+$env:DB_AUTO_INIT="1"
+python run.py
+```
+
+- Em testes (`TESTING=True`) o auto-init continua habilitado para manter isolamento dos testes temporarios.
+
 ## Qualidade e CI
 
 Workflow: `.github/workflows/ci.yml`
@@ -95,6 +115,7 @@ Como a CI funciona:
 - Dispara em `push` e `pull_request` para `main`.
 - Usa Python `3.11` (mesma base do `Dockerfile`).
 - Instala dependencias com `requirements.txt`.
+- Valida migrations com `flask db upgrade` e `flask db downgrade base`.
 - Executa toda a suite com `unittest`:
   `python -m unittest discover -s tests -p "test_*.py" -v`
 - Falha o pipeline se qualquer teste falhar.

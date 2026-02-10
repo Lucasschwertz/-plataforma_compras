@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from typing import Iterable
@@ -164,6 +165,10 @@ def _should_start_scheduler(app: Flask) -> bool:
         return False
     if app.config.get("TESTING"):
         return False
+    if os.environ.get("FLASK_RUN_FROM_CLI", "").strip().lower() == "true":
+        cli_args = [str(arg).strip().lower() for arg in sys.argv[1:] if str(arg).strip()]
+        if cli_args[:1] == ["db"]:
+            return False
     if app.debug:
         run_main = os.environ.get("WERKZEUG_RUN_MAIN")
         if run_main and run_main.lower() != "true":

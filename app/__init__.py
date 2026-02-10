@@ -1,3 +1,4 @@
+import os
 import uuid
 
 from flask import Flask, g, jsonify, request, session
@@ -5,6 +6,7 @@ from werkzeug.exceptions import HTTPException
 
 from app.config import Config
 from app.db import close_db, init_db
+from app.db_migrations import register_db_cli
 from app.procurement.critical_actions import CRITICAL_ACTIONS
 from app.procurement.flow_policy import build_process_steps
 from app.ui_strings import confirm_message, get_ui_text, template_bundle
@@ -21,9 +23,8 @@ def create_app(config_class=Config):
     _register_template_context(app)
     _register_blueprints(app)
     _register_health(app)
-
-    with app.app_context():
-        init_db()
+    register_db_cli(app)
+    _maybe_init_schema(app)
 
     _register_scheduler(app)
     app.teardown_appcontext(close_db)
@@ -36,6 +37,23 @@ def _ensure_database_dir(app: Flask) -> None:
         import os
 
         os.makedirs(database_dir, exist_ok=True)
+
+
+def _maybe_init_schema(app: Flask) -> None:
+    auto_init = bool(app.config.get("DB_AUTO_INIT", False))
+    if app.testing:
+        # Testes continuam isolados e autodidata sem depender de migration externa.
+        auto_init = True
+    if not auto_init:
+        return
+
+    flask_env = (os.environ.get("FLASK_ENV", "development") or "development").strip().lower()
+    if not app.testing and flask_env != "development":
+        app.logger.warning("DB_AUTO_INIT ignorado fora de development.")
+        return
+
+    with app.app_context():
+        init_db()
 
 
 def _register_blueprints(app: Flask) -> None:

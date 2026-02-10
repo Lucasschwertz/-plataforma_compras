@@ -24,6 +24,7 @@ class Config:
     DATABASE_READ_URL = os.environ.get("DATABASE_READ_URL")
     DATABASE_DIR = None if DATABASE_URL else os.path.join(BASE_DIR, "database")
     DB_PATH = DATABASE_URL or os.path.join(DATABASE_DIR, "plataforma_compras.db")
+    DB_AUTO_INIT = _bool_env("DB_AUTO_INIT", False)
 
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-plataforma-compras")
     AUTH_ENABLED = _bool_env("AUTH_ENABLED", True)
