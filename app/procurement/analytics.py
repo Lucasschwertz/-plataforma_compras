@@ -5,8 +5,13 @@ from datetime import date, datetime, timedelta, timezone
 from statistics import mean
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
+from app.procurement.analytics_actions import (
+    build_record_primary_action,
+    build_supplier_primary_action,
+    enrich_kpi_actions,
+)
 from app.tenant import DEFAULT_TENANT_ID
-from app.ui_strings import STATUS_LABELS
+from app.ui_strings import STATUS_LABELS, get_ui_text
 
 
 ANALYTICS_SECTIONS: List[Dict[str, str]] = [
@@ -266,6 +271,11 @@ def build_analytics_payload(
 
     section_builder = _SECTION_BUILDERS.get(resolved_section, _build_overview_section)
     section_payload = section_builder(current_records, comparison_records, dataset, filters)
+    section_payload["kpis"] = enrich_kpi_actions(
+        section_payload.get("kpis", []),
+        resolved_section,
+        filters.get("raw", {}),
+    )
 
     return {
         "section": section_info,
@@ -281,6 +291,33 @@ def build_analytics_payload(
         },
         **section_payload,
     }
+
+
+def _action_column_label() -> str:
+    return get_ui_text("analytics.drilldown.next_action", "Proxima acao")
+
+
+def _no_action_label() -> str:
+    return get_ui_text("analytics.drilldown.no_action", "Sem acao disponivel")
+
+
+def _enrich_record_drilldown_row(base_row: Dict[str, Any], record: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(base_row)
+    fallback_link = str(row.get("link") or _record_link(record) or "").strip() or None
+    action = build_record_primary_action(record, fallback_url=fallback_link)
+    row["acao"] = (action or {}).get("label") or _no_action_label()
+    row["_action"] = action
+    return row
+
+
+def _enrich_supplier_drilldown_row(base_row: Dict[str, Any], supplier_name: str | None) -> Dict[str, Any]:
+    row = dict(base_row)
+    action = build_supplier_primary_action(supplier_name)
+    if action and not row.get("link"):
+        row["link"] = action.get("url")
+    row["acao"] = (action or {}).get("label") or _no_action_label()
+    row["_action"] = action
+    return row
 
 
 def _build_overview_section(
@@ -377,14 +414,17 @@ def _build_overview_section(
     drilldown_rows = []
     for row in sorted(records, key=lambda item: item.get("pr_created_at") or "", reverse=True)[:20]:
         drilldown_rows.append(
-            {
-                "solicitacao": row.get("pr_number") or f"SR-{row.get('pr_id')}",
-                "comprador": row.get("requested_by") or "Nao informado",
-                "fornecedor": row.get("supplier_name") or "Nao informado",
-                "status": STATUS_LABELS.get(str(row.get("pr_status") or ""), row.get("pr_status") or "Nao informado"),
-                "ordem": row.get("po_number") or "-",
-                "link": _record_link(row),
-            }
+            _enrich_record_drilldown_row(
+                {
+                    "solicitacao": row.get("pr_number") or f"SR-{row.get('pr_id')}",
+                    "comprador": row.get("requested_by") or "Nao informado",
+                    "fornecedor": row.get("supplier_name") or "Nao informado",
+                    "status": STATUS_LABELS.get(str(row.get("pr_status") or ""), row.get("pr_status") or "Nao informado"),
+                    "ordem": row.get("po_number") or "-",
+                    "link": _record_link(row),
+                },
+                row,
+            )
         )
 
     return {
@@ -392,7 +432,8 @@ def _build_overview_section(
         "charts": charts,
         "drilldown": {
             "title": "Itens recentes do fluxo",
-            "columns": ["Solicitacao", "Comprador", "Fornecedor", "Status", "Ordem"],
+            "columns": ["Solicitacao", "Comprador", "Fornecedor", "Status", "Ordem", _action_column_label()],
+            "column_keys": ["solicitacao", "comprador", "fornecedor", "status", "ordem", "acao"],
             "rows": drilldown_rows,
         },
     }
@@ -513,26 +554,31 @@ def _build_efficiency_section(
         },
     ]
 
-    drilldown = [
-        {
-            "solicitacao": row.get("pr_number") or f"SR-{row.get('pr_id')}",
-            "comprador": row.get("requested_by") or "Nao informado",
-            "necessidade": row.get("needed_at") or "Nao informado",
-            "tempo_sr_oc": _fmt_duration(row.get("sr_to_oc_hours")),
-            "link": _record_link(row),
-        }
-        for row in sorted(
-            [item for item in records if item.get("is_delayed")],
-            key=lambda item: item.get("needed_at") or "",
-        )[:20]
-    ]
+    drilldown = []
+    for row in sorted(
+        [item for item in records if item.get("is_delayed")],
+        key=lambda item: item.get("needed_at") or "",
+    )[:20]:
+        drilldown.append(
+            _enrich_record_drilldown_row(
+                {
+                    "solicitacao": row.get("pr_number") or f"SR-{row.get('pr_id')}",
+                    "comprador": row.get("requested_by") or "Nao informado",
+                    "necessidade": row.get("needed_at") or "Nao informado",
+                    "tempo_sr_oc": _fmt_duration(row.get("sr_to_oc_hours")),
+                    "link": _record_link(row),
+                },
+                row,
+            )
+        )
 
     return {
         "kpis": kpis,
         "charts": charts,
         "drilldown": {
             "title": "Processos em atraso",
-            "columns": ["Solicitacao", "Comprador", "Necessidade", "Tempo SR para OC"],
+            "columns": ["Solicitacao", "Comprador", "Necessidade", "Tempo SR para OC", _action_column_label()],
+            "column_keys": ["solicitacao", "comprador", "necessidade", "tempo_sr_oc", "acao"],
             "rows": drilldown,
         },
     }
@@ -636,13 +682,16 @@ def _build_costs_section(
     drilldown = []
     for row in sorted(records, key=lambda item: float(item.get("rfq_savings_abs") or 0.0), reverse=True)[:20]:
         drilldown.append(
-            {
-                "solicitacao": row.get("pr_number") or f"SR-{row.get('pr_id')}",
-                "fornecedor": row.get("winner_supplier_name") or row.get("supplier_name") or "Nao informado",
-                "economia": _fmt_currency(float(row.get("rfq_savings_abs") or 0.0)),
-                "tipo": "Emergencial" if row.get("purchase_type") == "emergencial" else "Regular",
-                "link": _record_link(row),
-            }
+            _enrich_record_drilldown_row(
+                {
+                    "solicitacao": row.get("pr_number") or f"SR-{row.get('pr_id')}",
+                    "fornecedor": row.get("winner_supplier_name") or row.get("supplier_name") or "Nao informado",
+                    "economia": _fmt_currency(float(row.get("rfq_savings_abs") or 0.0)),
+                    "tipo": "Emergencial" if row.get("purchase_type") == "emergencial" else "Regular",
+                    "link": _record_link(row),
+                },
+                row,
+            )
         )
 
     return {
@@ -650,7 +699,8 @@ def _build_costs_section(
         "charts": charts,
         "drilldown": {
             "title": "Itens com impacto financeiro",
-            "columns": ["Solicitacao", "Fornecedor", "Economia", "Tipo de compra"],
+            "columns": ["Solicitacao", "Fornecedor", "Economia", "Tipo de compra", _action_column_label()],
+            "column_keys": ["solicitacao", "fornecedor", "economia", "tipo", "acao"],
             "rows": drilldown,
         },
     }
@@ -757,12 +807,15 @@ def _build_suppliers_section(
         responses = counters.get("responses", 0.0)
         rate = (responses / invites * 100.0) if invites > 0 else 0.0
         drilldown_rows.append(
-            {
-                "fornecedor": supplier_name,
-                "resposta": _fmt_percent(rate),
-                "economia": _fmt_currency(supplier_economy.get(supplier_name, 0.0)),
-                "atraso": _fmt_number(supplier_delay.get(supplier_name, 0.0)),
-            }
+            _enrich_supplier_drilldown_row(
+                {
+                    "fornecedor": supplier_name,
+                    "resposta": _fmt_percent(rate),
+                    "economia": _fmt_currency(supplier_economy.get(supplier_name, 0.0)),
+                    "atraso": _fmt_number(supplier_delay.get(supplier_name, 0.0)),
+                },
+                supplier_name,
+            )
         )
 
     return {
@@ -770,7 +823,8 @@ def _build_suppliers_section(
         "charts": charts,
         "drilldown": {
             "title": "Desempenho da base fornecedora",
-            "columns": ["Fornecedor", "Taxa de resposta", "Economia", "Indice de atraso"],
+            "columns": ["Fornecedor", "Taxa de resposta", "Economia", "Indice de atraso", _action_column_label()],
+            "column_keys": ["fornecedor", "resposta", "economia", "atraso", "acao"],
             "rows": drilldown_rows,
         },
     }
@@ -871,19 +925,22 @@ def _build_quality_erp_section(
         reverse=True,
     )[:20]:
         drilldown_rows.append(
-            {
-                "ordem": row.get("po_number") or "-",
-                "fornecedor": row.get("supplier_name") or "Nao informado",
-                "status_erp": {
-                    "nao_enviado": "Nao enviado",
-                    "enviado": "Enviado",
-                    "aceito": "Aceito",
-                    "rejeitado": "Rejeitado",
-                    "reenvio_necessario": "Reenvio necessario",
-                }.get(str(row.get("erp_ui_status") or ""), "Nao informado"),
-                "ultima_atualizacao": row.get("po_updated_at") or row.get("pr_updated_at") or "Nao informado",
-                "link": _record_link(row),
-            }
+            _enrich_record_drilldown_row(
+                {
+                    "ordem": row.get("po_number") or "-",
+                    "fornecedor": row.get("supplier_name") or "Nao informado",
+                    "status_erp": {
+                        "nao_enviado": "Nao enviado",
+                        "enviado": "Enviado",
+                        "aceito": "Aceito",
+                        "rejeitado": "Rejeitado",
+                        "reenvio_necessario": "Reenvio necessario",
+                    }.get(str(row.get("erp_ui_status") or ""), "Nao informado"),
+                    "ultima_atualizacao": row.get("po_updated_at") or row.get("pr_updated_at") or "Nao informado",
+                    "link": _record_link(row),
+                },
+                row,
+            )
         )
 
     return {
@@ -891,7 +948,8 @@ def _build_quality_erp_section(
         "charts": charts,
         "drilldown": {
             "title": "Ocorrencias ERP para acompanhamento",
-            "columns": ["Ordem", "Fornecedor", "Status ERP", "Ultima atualizacao"],
+            "columns": ["Ordem", "Fornecedor", "Status ERP", "Ultima atualizacao", _action_column_label()],
+            "column_keys": ["ordem", "fornecedor", "status_erp", "ultima_atualizacao", "acao"],
             "rows": drilldown_rows,
         },
     }
@@ -994,13 +1052,16 @@ def _build_compliance_section(
         reverse=True,
     )[:20]:
         drilldown_rows.append(
-            {
-                "solicitacao": row.get("pr_number") or f"SR-{row.get('pr_id')}",
-                "comprador": row.get("requested_by") or "Nao informado",
-                "concorrencia": "Baixa" if _no_competition_flag(row) else "Adequada",
-                "excecao": "Sim" if _approved_exception_flag(str(row.get("award_reason") or "")) else "Nao",
-                "link": _record_link(row),
-            }
+            _enrich_record_drilldown_row(
+                {
+                    "solicitacao": row.get("pr_number") or f"SR-{row.get('pr_id')}",
+                    "comprador": row.get("requested_by") or "Nao informado",
+                    "concorrencia": "Baixa" if _no_competition_flag(row) else "Adequada",
+                    "excecao": "Sim" if _approved_exception_flag(str(row.get("award_reason") or "")) else "Nao",
+                    "link": _record_link(row),
+                },
+                row,
+            )
         )
 
     return {
@@ -1008,7 +1069,8 @@ def _build_compliance_section(
         "charts": charts,
         "drilldown": {
             "title": "Itens com ponto de atencao",
-            "columns": ["Solicitacao", "Comprador", "Concorrencia", "Excecao"],
+            "columns": ["Solicitacao", "Comprador", "Concorrencia", "Excecao", _action_column_label()],
+            "column_keys": ["solicitacao", "comprador", "concorrencia", "excecao", "acao"],
             "rows": drilldown_rows,
         },
     }

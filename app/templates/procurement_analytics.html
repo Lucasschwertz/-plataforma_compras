@@ -124,6 +124,11 @@
       const drilldownHead = document.getElementById("drilldownHead");
       const drilldownBody = document.getElementById("drilldownBody");
       const isQualitySection = sectionKey === "quality_erp";
+      const TEXT_VIEW_ACTIONS = "{{ ui_text('analytics.action.view_actions') }}";
+      const TEXT_ACTION_DONE = "{{ ui_text('analytics.action.executed', 'Acao executada com sucesso.') }}";
+      const TEXT_ACTION_HINT = "{{ ui_text('analytics.action.view_actions_hint') }}";
+      const TEXT_ACTION_BLOCKED = "{{ ui_messages['error']['action_not_allowed_for_status'] }}";
+      let lastPayload = null;
 
       const withWorkspace = (path) =>
         Platform.withWorkspace
@@ -246,11 +251,26 @@
             const trend = item.trend || {};
             const trendClass = trend.direction ? `analytics-trend ${escapeHtml(trend.direction)}` : "analytics-trend";
             const trendText = trend.display ? `${escapeHtml(trend.display)} ${escapeHtml(trend.label || "")}` : "Sem comparacao";
+            const actionButton = item.actionable
+              ? `
+                <div class="analytics-kpi-actions">
+                  <button
+                    type="button"
+                    class="btn btn-small btn-primary analytics-kpi-action-btn"
+                    data-kpi-action="1"
+                    data-kpi-key="${escapeHtml(item.key || "")}"
+                  >
+                    ${escapeHtml(item.action_label || TEXT_VIEW_ACTIONS)}
+                  </button>
+                </div>
+              `
+              : "";
             return `
               <article class="kpi-card analytics-kpi-card" title="${escapeHtml(item.tooltip || "")}">
                 <div class="kpi-label">${escapeHtml(item.label || "")}</div>
                 <div class="kpi-value">${escapeHtml(item.display_value || "0")}</div>
                 <div class="${trendClass}">${trendText}</div>
+                ${actionButton}
               </article>
             `;
           })
@@ -302,10 +322,135 @@
           .join("");
       }
 
+      function drilldownColumnKeys(drilldown, columns, firstRow) {
+        const explicit = Array.isArray(drilldown?.column_keys) ? drilldown.column_keys : [];
+        if (explicit.length === columns.length) {
+          return explicit;
+        }
+        const inferred = Object.keys(firstRow || {})
+          .filter((key) => key !== "link" && !String(key).startsWith("_"))
+          .slice(0, columns.length);
+        if (inferred.length === columns.length) {
+          return inferred;
+        }
+        return columns.map((_, idx) => inferred[idx] || "");
+      }
+
+      function renderRowActionCell(action, rowLink) {
+        if (!action || typeof action !== "object") {
+          return `<span class="meta">${escapeHtml("{{ ui_text('analytics.drilldown.no_action') }}")}</span>`;
+        }
+        const actionType = String(action.action_type || "open_item");
+        const actionLabel = String(action.label || TEXT_VIEW_ACTIONS);
+        const actionKey = String(action.action_key || "");
+        const actionUrl = String(action.url || rowLink || "");
+        const apiUrl = String(action.api_url || "");
+        const method = String(action.method || "POST").toUpperCase();
+        const confirmRequired = Boolean(action.requires_confirmation);
+        const confirmKey = String(action.confirm_action_key || actionKey || "");
+        const buttonClass = actionType === "direct_action" ? "btn btn-small btn-primary" : "btn btn-small";
+        return `
+          <button
+            type="button"
+            class="${buttonClass} analytics-row-action-btn"
+            data-analytics-action="1"
+            data-action-type="${escapeHtml(actionType)}"
+            data-action-key="${escapeHtml(actionKey)}"
+            data-action-url="${escapeHtml(actionUrl)}"
+            data-api-url="${escapeHtml(apiUrl)}"
+            data-action-method="${escapeHtml(method)}"
+            data-confirm-required="${confirmRequired ? "1" : "0"}"
+            data-confirm-key="${escapeHtml(confirmKey)}"
+          >
+            ${escapeHtml(actionLabel)}
+          </button>
+        `;
+      }
+
+      function ensureConfirmQuery(path, actionKey) {
+        const url = new URL(path, window.location.origin);
+        url.searchParams.set("confirm", "true");
+        if (actionKey) {
+          url.searchParams.set("confirm_action", actionKey);
+        }
+        return `${url.pathname}${url.search}${url.hash}`;
+      }
+
+      async function executeDrilldownAction(button) {
+        if (!button) return;
+        const actionType = String(button.dataset.actionType || "");
+        const actionKey = String(button.dataset.actionKey || "");
+        const actionUrl = String(button.dataset.actionUrl || "");
+        const apiUrl = String(button.dataset.apiUrl || "");
+        const method = String(button.dataset.actionMethod || "POST").toUpperCase();
+        const confirmRequired = button.dataset.confirmRequired === "1";
+        const confirmKey = String(button.dataset.confirmKey || actionKey || "");
+
+        if (actionType === "open_item" || actionType === "open_list") {
+          if (actionUrl) {
+            window.location.href = withWorkspace(actionUrl);
+            return;
+          }
+          document.getElementById("drilldownTable")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          return;
+        }
+
+        if (actionType !== "direct_action" || !apiUrl) {
+          return;
+        }
+
+        const criticalUi = window.CriticalActionUI;
+        if (confirmRequired) {
+          const confirmed = criticalUi ? await criticalUi.confirm(confirmKey) : window.confirm("Confirmar acao?");
+          if (!confirmed) {
+            return;
+          }
+        }
+
+        let endpoint = apiUrl;
+        if (confirmRequired) {
+          endpoint = criticalUi ? criticalUi.appendConfirmQuery(endpoint, confirmKey) : ensureConfirmQuery(endpoint, confirmKey);
+        }
+
+        button.disabled = true;
+        try {
+          const response = await fetch(withWorkspace(endpoint), {
+            method,
+            headers: { "Content-Type": "application/json" },
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            window.showToast?.("danger", payload.message || TEXT_ACTION_BLOCKED);
+            return;
+          }
+          window.showToast?.("success", payload.message || TEXT_ACTION_DONE);
+          await refreshDashboard();
+        } catch (error) {
+          window.showToast?.("danger", TEXT_ACTION_BLOCKED);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      function handleKpiAction(kpiKey) {
+        const kpiItems = Array.isArray(lastPayload?.kpis) ? lastPayload.kpis : [];
+        const target = kpiItems.find((item) => String(item?.key || "") === String(kpiKey || ""));
+        if (!target || !target.actionable) {
+          return;
+        }
+        if (target.action_type === "open_list") {
+          const drilldownCard = document.getElementById("drilldownTable");
+          drilldownCard?.scrollIntoView({ behavior: "smooth", block: "start" });
+          window.showToast?.("success", TEXT_ACTION_HINT);
+          return;
+        }
+      }
+
       function renderDrilldown(drilldown) {
         const title = drilldown?.title || "Lista detalhada";
         const columns = Array.isArray(drilldown?.columns) ? drilldown.columns : [];
         const rows = Array.isArray(drilldown?.rows) ? drilldown.rows : [];
+        const columnKeys = drilldownColumnKeys(drilldown, columns, rows[0] || {});
 
         drilldownTitle.textContent = title;
         if (!columns.length) {
@@ -322,16 +467,17 @@
 
         drilldownBody.innerHTML = rows
           .map((row) => {
-            const values = Object.values(row || {}).filter((_, idx, arr) => idx < arr.length);
             const link = row?.link ? withWorkspace(row.link) : "";
-            const cells = columns.map((_, idx) => {
-              const keyMap = Object.keys(row || {});
-              const key = keyMap[idx] || "";
+            const cells = columns.map((columnLabel, idx) => {
+              const key = columnKeys[idx] || "";
+              if (key === "acao") {
+                return `<td data-label="${escapeHtml(columnLabel)}" class="cell-actions">${renderRowActionCell(row?._action, link)}</td>`;
+              }
               const value = row[key] ?? "-";
               if (idx === 0 && link) {
-                return `<td><a class="link-inline" href="${escapeHtml(link)}">${escapeHtml(value)}</a></td>`;
+                return `<td data-label="${escapeHtml(columnLabel)}"><a class="link-inline" href="${escapeHtml(link)}">${escapeHtml(value)}</a></td>`;
               }
-              return `<td>${escapeHtml(value)}</td>`;
+              return `<td data-label="${escapeHtml(columnLabel)}">${escapeHtml(value)}</td>`;
             });
             return `<tr>${cells.join("")}</tr>`;
           })
@@ -364,6 +510,7 @@
         analyticsSummary.textContent = "Atualizando indicadores...";
         try {
           const payload = await fetchSectionData(filters);
+          lastPayload = payload || {};
           renderKpis(payload.kpis || []);
           renderCharts(payload.charts || []);
           renderDrilldown(payload.drilldown || {});
@@ -410,6 +557,19 @@
           period_basis: "pr_created_at",
         });
         refreshDashboard();
+      });
+
+      analyticsKpis.addEventListener("click", (event) => {
+        const trigger = event.target.closest("[data-kpi-action]");
+        if (!trigger) return;
+        const kpiKey = trigger.dataset.kpiKey || "";
+        handleKpiAction(kpiKey);
+      });
+
+      drilldownBody.addEventListener("click", (event) => {
+        const trigger = event.target.closest("[data-analytics-action]");
+        if (!trigger) return;
+        executeDrilldownAction(trigger);
       });
 
       bootstrap();

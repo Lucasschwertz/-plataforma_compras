@@ -7,6 +7,7 @@ from app import create_app
 from app.config import Config
 from app.db import close_db, get_db
 from app.routes import procurement_routes
+from app.ui_strings import error_message
 
 
 class ProcurementAnalyticsTest(unittest.TestCase):
@@ -280,6 +281,61 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         self._set_role("admin", "Admin Ops")
         admin_payload = self.client.get("/api/procurement/analytics/overview", headers=self.headers).get_json() or {}
         self.assertEqual(admin_payload.get("meta", {}).get("records_count"), 3)
+
+    def test_analytics_actionable_kpi_mapping_and_contextual_actions(self) -> None:
+        self._set_role("admin", "Admin Ops")
+
+        efficiency_payload = self.client.get("/api/procurement/analytics/efficiency", headers=self.headers).get_json() or {}
+        eff_kpis = {item["key"]: item for item in efficiency_payload.get("kpis", [])}
+        late = eff_kpis.get("late_processes") or {}
+        self.assertTrue(late.get("actionable"))
+        self.assertEqual(late.get("action_type"), "open_list")
+        self.assertTrue((late.get("action_label") or "").strip())
+        self.assertEqual((late.get("action_context") or {}).get("kpi_key"), "late_processes")
+
+        suppliers_payload = self.client.get("/api/procurement/analytics/suppliers", headers=self.headers).get_json() or {}
+        supplier_kpis = {item["key"]: item for item in suppliers_payload.get("kpis", [])}
+        supplier_rate = supplier_kpis.get("supplier_response_rate") or {}
+        self.assertFalse(bool(supplier_rate.get("actionable")))
+
+        quality_payload = self.client.get("/api/procurement/analytics/quality_erp", headers=self.headers).get_json() or {}
+        quality_kpis = {item["key"]: item for item in quality_payload.get("kpis", [])}
+        erp_rejections = quality_kpis.get("erp_rejections") or {}
+        self.assertTrue(erp_rejections.get("actionable"))
+        self.assertEqual(erp_rejections.get("action_type"), "open_list")
+
+        quality_rows = (quality_payload.get("drilldown") or {}).get("rows", [])
+        self.assertTrue(quality_rows)
+        quality_action = (quality_rows[0].get("_action") or {})
+        self.assertEqual(quality_action.get("action_key"), "push_to_erp")
+        self.assertEqual(quality_action.get("action_type"), "direct_action")
+        self.assertTrue(bool(quality_action.get("requires_confirmation")))
+
+        overview_payload = self.client.get("/api/procurement/analytics/overview", headers=self.headers).get_json() or {}
+        overview_rows = (overview_payload.get("drilldown") or {}).get("rows", [])
+        accepted_row = next((row for row in overview_rows if row.get("ordem") == "OC-001"), None)
+        self.assertIsNotNone(accepted_row)
+        accepted_action = (accepted_row or {}).get("_action") or {}
+        self.assertNotEqual(accepted_action.get("action_key"), "push_to_erp")
+
+    def test_blocked_action_returns_friendly_message(self) -> None:
+        self._set_role("admin", "Admin Ops")
+        with self.app.app_context():
+            db = get_db()
+            db.execute(
+                "UPDATE purchase_orders SET status = 'sent_to_erp' WHERE id = ? AND tenant_id = ?",
+                (9802, self.tenant_id),
+            )
+            db.commit()
+
+        response = self.client.post(
+            "/api/procurement/purchase-orders/9802/push-to-erp?confirm=true",
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 409)
+        payload = response.get_json() or {}
+        self.assertEqual(payload.get("error"), "action_not_allowed_for_status")
+        self.assertEqual(payload.get("message"), error_message("action_not_allowed_for_status"))
 
     def test_analytics_cache_keeps_same_payload_without_recompute(self) -> None:
         self._set_role("admin", "Admin Ops")
