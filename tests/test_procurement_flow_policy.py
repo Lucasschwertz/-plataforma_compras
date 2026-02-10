@@ -5,6 +5,7 @@ import unittest
 from app import create_app
 from app.config import Config
 from app.db import close_db
+from tests.outbox_utils import process_erp_outbox_once
 
 
 class ProcurementFlowPolicyTest(unittest.TestCase):
@@ -77,7 +78,8 @@ class ProcurementFlowPolicyTest(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(push_res.status_code, 200)
-        self.assertEqual(self._json(push_res)["status"], "erp_accepted")
+        self.assertEqual(self._json(push_res)["status"], "sent_to_erp")
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
 
         cancel_res = self.client.delete(
             f"/api/procurement/purchase-orders/{purchase_order_id}",
@@ -105,7 +107,15 @@ class ProcurementFlowPolicyTest(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(push_res.status_code, 200)
-        self.assertEqual(self._json(push_res)["status"], "erp_accepted")
+        self.assertEqual(self._json(push_res)["status"], "sent_to_erp")
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
+
+        detail_after = self.client.get(
+            f"/api/procurement/purchase-orders/{purchase_order_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(detail_after.status_code, 200)
+        self.assertEqual(self._json(detail_after)["purchase_order"]["status"], "erp_accepted")
 
     def test_happy_flow_stage_progression(self) -> None:
         rfq_id = self._create_rfq()
@@ -145,7 +155,8 @@ class ProcurementFlowPolicyTest(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(push_res.status_code, 200)
-        self.assertEqual(self._json(push_res)["status"], "erp_accepted")
+        self.assertEqual(self._json(push_res)["status"], "sent_to_erp")
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
 
         detail_erp = self.client.get(
             f"/api/procurement/purchase-orders/{purchase_order_id}",

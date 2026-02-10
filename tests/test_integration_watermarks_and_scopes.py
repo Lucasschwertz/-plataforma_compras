@@ -5,6 +5,7 @@ import unittest
 from app import create_app
 from app.config import Config
 from app.db import close_db, get_db
+from tests.outbox_utils import process_erp_outbox_once
 
 
 class IntegrationWatermarksAndScopesTest(unittest.TestCase):
@@ -132,6 +133,8 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(push_res.status_code, 200)
+        self.assertEqual((push_res.get_json() or {}).get("status"), "sent_to_erp")
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
 
         logs_singular = self.client.get(
             "/api/procurement/integrations/logs?scope=purchase_order",
@@ -209,11 +212,17 @@ class IntegrationWatermarksAndScopesTest(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(push_res.status_code, 200)
-        push_payload = push_res.get_json()
-        external_id = push_payload["external_id"]
+        self.assertEqual((push_res.get_json() or {}).get("status"), "sent_to_erp")
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
 
         with self.app.app_context():
             db = get_db()
+            po_row = db.execute(
+                "SELECT external_id FROM purchase_orders WHERE id = ? AND tenant_id = ?",
+                (purchase_order_id, self.tenant_id),
+            ).fetchone()
+            external_id = po_row["external_id"]
+            self.assertTrue(str(external_id or "").strip())
             row = db.execute(
                 """
                 SELECT *

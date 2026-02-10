@@ -1,22 +1,19 @@
 from __future__ import annotations
 
-from typing import Iterable
-
-import re
-
 from flask import Blueprint, current_app, redirect, render_template, request, session, url_for
-from werkzeug.security import check_password_hash, generate_password_hash
 
+from app.application.auth_service import AuthService
 from app.db import get_db
+from app.domain.contracts import AuthLoginInput, AuthRegisterInput
 from app.errors import PermissionError as AppPermissionError
 from app.errors import ValidationError
 from app.policies import normalize_role
 from app.security import validate_csrf_token
-from app.tenant import DEFAULT_TENANT_ID
 from app.ui_strings import error_message
 
 
 auth_bp = Blueprint("auth", __name__)
+_auth_service = AuthService()
 
 
 def _err(key: str, fallback: str | None = None) -> str:
@@ -70,13 +67,17 @@ def login():
         else:
             email = (request.form.get("email") or "").strip().lower()
             password = request.form.get("password") or ""
-
-            user = _find_user(email, password, current_app.config.get("APP_USERS"))
+            db = get_db()
+            user = _auth_service.login(
+                db,
+                AuthLoginInput(email=email, password=password),
+                current_app.config.get("APP_USERS"),
+            )
             if user:
-                session["user_email"] = user["email"]
-                session["display_name"] = user["display_name"]
-                session["tenant_id"] = user["tenant_id"]
-                session["user_role"] = normalize_role(user.get("role"), default="buyer")
+                session["user_email"] = user.email
+                session["display_name"] = user.display_name
+                session["tenant_id"] = user.tenant_id
+                session["user_role"] = normalize_role(user.role, default="buyer")
                 return redirect(_safe_next_url() or url_for("home.home"))
 
             error = _err("auth_invalid_credentials")
@@ -102,16 +103,25 @@ def register():
             if not email or not password:
                 error = _err("auth_missing_credentials")
             else:
-                tenant_id = _resolve_tenant_id(company_name)
+                db = get_db()
                 try:
-                    user = _create_user(email, password, display_name, tenant_id, company_name or None)
+                    user = _auth_service.register(
+                        db,
+                        AuthRegisterInput(
+                            email=email,
+                            password=password,
+                            display_name=display_name,
+                            company_name=company_name or None,
+                        ),
+                    )
                 except ValidationError as exc:
                     error = exc.user_message()
                 else:
-                    session["user_email"] = user["email"]
-                    session["display_name"] = user["display_name"]
-                    session["tenant_id"] = user["tenant_id"]
-                    session["user_role"] = normalize_role(user.get("role"), default="buyer")
+                    db.commit()
+                    session["user_email"] = user.email
+                    session["display_name"] = user.display_name
+                    session["tenant_id"] = user.tenant_id
+                    session["user_role"] = normalize_role(user.role, default="buyer")
                     return redirect(url_for("home.home"))
 
     return render_template("register.html", error=error)
@@ -132,135 +142,3 @@ def _safe_next_url() -> str | None:
     if not raw_next.startswith("/"):
         return None
     return raw_next
-
-
-def _find_user(email: str, password: str, raw_users: object) -> dict | None:
-    db_user = _find_user_in_db(email)
-    if db_user and check_password_hash(db_user["password_hash"], password):
-        return {
-            "email": db_user["email"],
-            "display_name": db_user["display_name"] or db_user["email"].split("@")[0],
-            "tenant_id": db_user["tenant_id"],
-            "role": "buyer",
-        }
-
-    for user in _parse_users(raw_users):
-        if user["email"] == email and user["password"] == password:
-            return user
-    return None
-
-
-def _find_user_in_db(email: str) -> dict | None:
-    db = get_db()
-    row = db.execute(
-        """
-        SELECT email, password_hash, display_name, tenant_id
-        FROM auth_users
-        WHERE email = ?
-        """,
-        (email,),
-    ).fetchone()
-    if not row:
-        return None
-    return dict(row)
-
-
-def _create_user(
-    email: str,
-    password: str,
-    display_name: str | None,
-    tenant_id: str,
-    company_name: str | None,
-) -> dict:
-    db = get_db()
-    existing = db.execute(
-        "SELECT 1 FROM auth_users WHERE email = ?",
-        (email,),
-    ).fetchone()
-    if existing:
-        raise ValidationError(
-            code="email_already_registered",
-            message_key="email_already_registered",
-            http_status=400,
-            critical=False,
-        )
-
-    _ensure_tenant(db, tenant_id, company_name or f"Tenant {tenant_id}")
-
-    password_hash = generate_password_hash(password)
-    db.execute(
-        """
-        INSERT INTO auth_users (email, password_hash, display_name, tenant_id)
-        VALUES (?, ?, ?, ?)
-        """,
-        (email, password_hash, display_name, tenant_id),
-    )
-    db.commit()
-
-    return {
-        "email": email,
-        "display_name": display_name or email.split("@")[0],
-        "tenant_id": tenant_id,
-        "role": "buyer",
-    }
-
-
-def _ensure_tenant(db, tenant_id: str, name: str) -> None:
-    db.execute(
-        """
-        INSERT INTO tenants (id, name, subdomain)
-        VALUES (?, ?, ?)
-        ON CONFLICT DO NOTHING
-        """,
-        (tenant_id, name, tenant_id),
-    )
-
-
-def _resolve_tenant_id(company_name: str) -> str:
-    if not company_name:
-        return DEFAULT_TENANT_ID
-    slug = _slugify(company_name)
-    if not slug:
-        return DEFAULT_TENANT_ID
-    return f"tenant-{slug}"
-
-
-def _slugify(value: str) -> str:
-    value = value.strip().lower()
-    value = re.sub(r"[^\w\s-]", "", value)
-    value = re.sub(r"[\s_-]+", "-", value)
-    return value.strip("-")
-
-
-def _parse_users(raw_users: object) -> Iterable[dict]:
-    if not raw_users:
-        return []
-    if isinstance(raw_users, str):
-        entries = []
-        for chunk in raw_users.replace("\n", ",").replace(";", ",").split(","):
-            entry = chunk.strip()
-            if entry:
-                entries.append(entry)
-    elif isinstance(raw_users, (list, tuple, set)):
-        entries = [str(item).strip() for item in raw_users if str(item).strip()]
-    else:
-        return []
-
-    users = []
-    for entry in entries:
-        parts = [part.strip() for part in entry.split(":")]
-        if len(parts) < 3:
-            continue
-        email, password, tenant_id = parts[0].lower(), parts[1], parts[2]
-        display_name = parts[3] if len(parts) > 3 and parts[3] else email.split("@")[0]
-        role = normalize_role(parts[4] if len(parts) > 4 else "buyer", default="buyer")
-        users.append(
-            {
-                "email": email,
-                "password": password,
-                "tenant_id": tenant_id,
-                "display_name": display_name,
-                "role": role,
-            }
-        )
-    return users

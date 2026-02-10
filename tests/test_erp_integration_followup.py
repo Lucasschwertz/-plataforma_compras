@@ -7,6 +7,7 @@ from app import create_app
 from app.config import Config
 from app.db import close_db, get_db
 from app.erp_client import ErpError
+from tests.outbox_utils import process_erp_outbox_once
 
 
 class ErpIntegrationFollowupTest(unittest.TestCase):
@@ -76,6 +77,8 @@ class ErpIntegrationFollowupTest(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(push_res.status_code, 200)
+        self.assertEqual((push_res.get_json() or {}).get("status"), "sent_to_erp")
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
 
         detail_res = self.client.get(
             f"/api/procurement/purchase-orders/{purchase_order_id}",
@@ -111,7 +114,8 @@ class ErpIntegrationFollowupTest(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(first_push.status_code, 200)
-        self.assertEqual(first_push.get_json().get("status"), "erp_accepted")
+        self.assertEqual(first_push.get_json().get("status"), "sent_to_erp")
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
 
         with self.app.app_context():
             db = get_db()
@@ -188,12 +192,14 @@ class ErpIntegrationFollowupTest(unittest.TestCase):
         self._set_role("manager")
         purchase_order_id = self._create_purchase_order()
 
-        with patch("app.routes.procurement_routes.push_purchase_order", side_effect=ErpError("ERP HTTP 422 rejected")):
-            response = self.client.post(
-                f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp?confirm=true",
-                headers=self.headers,
-            )
-        self.assertEqual(response.status_code, 422)
+        queued = self.client.post(
+            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp?confirm=true",
+            headers=self.headers,
+        )
+        self.assertEqual(queued.status_code, 200)
+        self.assertEqual((queued.get_json() or {}).get("status"), "sent_to_erp")
+        with patch("app.procurement.erp_outbox.push_purchase_order", side_effect=ErpError("ERP HTTP 422 rejected")):
+            process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
 
         monitor_res = self.client.get(
             "/api/procurement/integrations/erp/orders",
@@ -208,6 +214,79 @@ class ErpIntegrationFollowupTest(unittest.TestCase):
         self.assertNotIn("ERP HTTP", erp_status.get("message") or "")
         self.assertTrue(row.get("can_resend"))
         self.assertEqual(row.get("next_action"), "push_to_erp")
+
+    def test_outbox_retry_for_temporary_erp_error_then_success(self) -> None:
+        purchase_order_id = self._create_purchase_order()
+        queued = self.client.post(
+            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp?confirm=true",
+            headers=self.headers,
+        )
+        self.assertEqual(queued.status_code, 200)
+        self.assertEqual((queued.get_json() or {}).get("status"), "sent_to_erp")
+
+        with patch(
+            "app.procurement.erp_outbox.push_purchase_order",
+            side_effect=[ErpError("temporary timeout"), {"external_id": "ERP-ASYNC-1", "status": "accepted"}],
+        ):
+            first = process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
+            self.assertEqual(first.get("requeued"), 1)
+
+            with self.app.app_context():
+                db = get_db()
+                payload_ref = (
+                    '{"kind":"po_push","purchase_order_id":'
+                    + str(purchase_order_id)
+                    + ',"next_attempt_at":"2000-01-01T00:00:00Z"}'
+                )
+                db.execute(
+                    """
+                    UPDATE sync_runs
+                    SET payload_ref = ?
+                    WHERE tenant_id = ? AND scope = 'purchase_order'
+                    """,
+                    (payload_ref, self.tenant_id),
+                )
+                db.commit()
+
+            second = process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
+            self.assertEqual(second.get("succeeded"), 1)
+
+        detail = self.client.get(
+            f"/api/procurement/purchase-orders/{purchase_order_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual((detail.get_json() or {}).get("purchase_order", {}).get("status"), "erp_accepted")
+
+    def test_outbox_enqueue_is_idempotent_before_worker_processing(self) -> None:
+        purchase_order_id = self._create_purchase_order()
+
+        first = self.client.post(
+            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp?confirm=true",
+            headers=self.headers,
+        )
+        self.assertEqual(first.status_code, 200)
+        first_payload = first.get_json() or {}
+
+        second = self.client.post(
+            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp",
+            headers=self.headers,
+        )
+        self.assertEqual(second.status_code, 200)
+        second_payload = second.get_json() or {}
+        self.assertEqual(int(first_payload.get("sync_run_id") or 0), int(second_payload.get("sync_run_id") or 0))
+
+        with self.app.app_context():
+            db = get_db()
+            runs = db.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM sync_runs
+                WHERE tenant_id = ? AND scope = 'purchase_order'
+                """,
+                (self.tenant_id,),
+            ).fetchone()["total"]
+        self.assertEqual(runs, 1)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import unittest
 from app import create_app
 from app.config import Config
 from app.db import close_db
+from tests.outbox_utils import process_erp_outbox_once
 
 
 class ProcurementSmokeTest(unittest.TestCase):
@@ -85,7 +86,8 @@ class ProcurementSmokeTest(unittest.TestCase):
         )
         self.assertEqual(push_res.status_code, 200)
         push_payload = self._json(push_res)
-        self.assertEqual(push_payload["status"], "erp_accepted")
+        self.assertEqual(push_payload["status"], "sent_to_erp")
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
 
         detail_res = self.client.get(
             f"/api/procurement/purchase-orders/{purchase_order_id}",

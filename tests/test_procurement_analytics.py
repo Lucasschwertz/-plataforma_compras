@@ -385,7 +385,7 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         confirmed = self.client.post(f"{api_url}?confirm=true", headers=self.headers)
         self.assertEqual(confirmed.status_code, 200)
         confirmed_payload = confirmed.get_json() or {}
-        self.assertEqual(confirmed_payload.get("status"), "erp_accepted")
+        self.assertEqual(confirmed_payload.get("status"), "sent_to_erp")
 
     def test_blocked_action_returns_friendly_message(self) -> None:
         self._set_role("admin", "Admin Ops")

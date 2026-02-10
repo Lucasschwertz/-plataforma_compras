@@ -8,6 +8,7 @@ from app.config import Config
 from app.db import close_db
 from app.erp_client import ErpError
 from app.ui_strings import error_message
+from tests.outbox_utils import process_erp_outbox_once
 
 
 def _build_temp_app(tmpdir: str, **overrides):
@@ -115,7 +116,8 @@ class ErrorHandlingApiTest(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(push_res.status_code, 200)
-        self.assertEqual(push_res.get_json().get("status"), "erp_accepted")
+        self.assertEqual(push_res.get_json().get("status"), "sent_to_erp")
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
 
         cancel_res = self.client.delete(
             f"/api/procurement/purchase-orders/{purchase_order_id}",
@@ -130,23 +132,33 @@ class ErrorHandlingApiTest(unittest.TestCase):
     def test_integration_error_for_erp_rejection(self) -> None:
         purchase_order_id = self._create_purchase_order()
 
-        with patch("app.routes.procurement_routes.push_purchase_order", side_effect=ErpError("ERP HTTP 422: rejected")):
-            response = self.client.post(
-                f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp?confirm=true",
-                headers=self.headers,
-            )
+        queued = self.client.post(
+            f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp?confirm=true",
+            headers=self.headers,
+        )
+        self.assertEqual(queued.status_code, 200)
+        self.assertEqual((queued.get_json() or {}).get("status"), "sent_to_erp")
 
-        self.assertEqual(response.status_code, 422)
-        payload = response.get_json()
-        self.assertEqual(payload.get("error"), "erp_order_rejected")
-        self.assertEqual(payload.get("message"), error_message("erp_order_rejected"))
-        self.assertNotIn("details", payload)
-        self.assertNotIn("ERP HTTP", response.get_data(as_text=True))
+        with patch("app.procurement.erp_outbox.push_purchase_order", side_effect=ErpError("ERP HTTP 422: rejected")):
+            process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
+
+        detail = self.client.get(
+            f"/api/procurement/purchase-orders/{purchase_order_id}",
+            headers=self.headers,
+        )
+        self.assertEqual(detail.status_code, 200)
+        payload = detail.get_json() or {}
+        self.assertEqual((payload.get("purchase_order") or {}).get("status"), "erp_error")
+        self.assertEqual(((payload.get("purchase_order") or {}).get("erp_status") or {}).get("key"), "rejeitado")
+        self.assertEqual(
+            ((payload.get("purchase_order") or {}).get("erp_status") or {}).get("message"),
+            error_message("erp_rejected"),
+        )
 
     def test_stack_trace_not_exposed_for_unhandled_error(self) -> None:
         purchase_order_id = self._create_purchase_order()
 
-        with patch("app.routes.procurement_routes.push_purchase_order", side_effect=RuntimeError("stack_secret_token")):
+        with patch("app.routes.procurement_routes.queue_purchase_order_push", side_effect=RuntimeError("stack_secret_token")):
             response = self.client.post(
                 f"/api/procurement/purchase-orders/{purchase_order_id}/push-to-erp?confirm=true",
                 headers=self.headers,

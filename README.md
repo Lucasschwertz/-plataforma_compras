@@ -175,3 +175,17 @@ coverage html -d htmlcov
 ```
 
 Obs: coverage nao bloqueia CI neste momento; o objetivo atual e visibilidade continua de qualidade.
+
+## Arquitetura em Camadas
+
+Estrutura base introduzida para separar responsabilidades sem alterar schema/fluxo:
+- `app/domain`: contratos e estruturas de entrada/saida (`dataclasses`).
+- `app/application`: services de orquestracao de negocio:
+  - `ProcurementService`
+  - `AnalyticsService`
+  - `ErpOutboxService`
+  - `AuthService`
+- `app/infrastructure`: repositorios/adapters de acesso a dados e integracoes.
+- `app/interfaces`: adaptadores de interface (HTTP/rotas/controllers).
+
+Rotas principais de compras/analytics/auth agora chamam os services da camada `application` para regras de negocio e cache, preservando comportamento atual da UI/API.

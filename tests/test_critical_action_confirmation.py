@@ -90,7 +90,7 @@ class CriticalActionConfirmationTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
-        self.assertEqual(payload.get("status"), "erp_accepted")
+        self.assertEqual(payload.get("status"), "sent_to_erp")
 
     def test_award_without_confirmation_blocks_direct_api(self) -> None:
         rfq_id = self._create_rfq()

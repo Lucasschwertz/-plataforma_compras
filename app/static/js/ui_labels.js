@@ -20,6 +20,7 @@
     erp_error: "Erro no ERP",
     converted_to_po: "Convertida em OC",
     running: "Em execucao",
+    queued: "Na fila",
     succeeded: "Sucesso",
     failed: "Falha",
     submitted: "Proposta enviada",

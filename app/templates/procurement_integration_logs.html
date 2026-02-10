@@ -162,6 +162,7 @@
       if (
         normalized.includes("running") ||
         normalized.includes("pending") ||
+        normalized.includes("queued") ||
         normalized.includes("retry")
       ) return "warning";
       if (
