@@ -72,7 +72,13 @@ Variaveis recomendadas:
 - ERP_RETRY_BACKOFF_MS
 - RFQ_SLA_DAYS
 - LOG_LEVEL
+- LOG_JSON
 - DATABASE_READ_URL
+- RATE_LIMIT_ENABLED
+- RATE_LIMIT_WINDOW_SECONDS
+- RATE_LIMIT_MAX_REQUESTS
+- CSRF_ENABLED
+- SECURITY_HEADERS_ENABLED
 
 Integracao ERP por modo:
 - `ERP_MODE=mock`: usa dados simulados internos.
@@ -97,6 +103,13 @@ python -m app.workers.erp_outbox_worker
   - `ERP_OUTBOX_MAX_BACKOFF_SECONDS` (default: `600`)
   - `ERP_OUTBOX_WORKER_INTERVAL_SECONDS` (default: `5`)
   - `ERP_OUTBOX_WORKER_BATCH_SIZE` (default: `25`)
+
+Observabilidade e hardening:
+- Logs estruturados em JSON para web e worker (com `request_id`).
+- `/health` inclui status da fila/worker ERP e metricas HTTP basicas.
+- Headers de seguranca habilitados por padrao.
+- Rate limiting simples em memoria (configuravel por janela/limite).
+- CSRF para formularios de autenticacao (`/login` e `/register`).
 
 Deploy (Docker Compose):
 - docs/deploy/docker-compose.md

@@ -27,6 +27,13 @@ class Config:
     DB_AUTO_INIT = _bool_env("DB_AUTO_INIT", False)
 
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-plataforma-compras")
+    LOG_JSON = _bool_env("LOG_JSON", True)
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+    SECURITY_HEADERS_ENABLED = _bool_env("SECURITY_HEADERS_ENABLED", True)
+    CSRF_ENABLED = _bool_env("CSRF_ENABLED", True)
+    RATE_LIMIT_ENABLED = _bool_env("RATE_LIMIT_ENABLED", True)
+    RATE_LIMIT_WINDOW_SECONDS = _int_env("RATE_LIMIT_WINDOW_SECONDS", 60)
+    RATE_LIMIT_MAX_REQUESTS = _int_env("RATE_LIMIT_MAX_REQUESTS", 300)
     AUTH_ENABLED = _bool_env("AUTH_ENABLED", True)
     APP_USERS = os.environ.get("APP_USERS", "admin@demo.com:admin123:tenant-demo")
     SYNC_SCHEDULER_ENABLED = _bool_env("SYNC_SCHEDULER_ENABLED", True)

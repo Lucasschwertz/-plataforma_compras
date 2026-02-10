@@ -13,8 +13,10 @@ from urllib.parse import quote
 from flask import Blueprint, current_app, g, jsonify, render_template, request, session
 
 from app.db import get_db, get_read_db
-from app.erp_client import DEFAULT_RISK_FLAGS, ErpError, fetch_erp_records, push_purchase_order
-from app.errors import IntegrationError, PermissionError as AppPermissionError, ValidationError, classify_erp_failure
+from app.erp_client import DEFAULT_RISK_FLAGS, fetch_erp_records
+from app.errors import IntegrationError, ValidationError
+from app.policies import current_role as policy_current_role
+from app.policies import require_roles as policy_require_roles
 from app.procurement.analytics import (
     analytics_sections,
     build_analytics_payload,
@@ -24,6 +26,10 @@ from app.procurement.analytics import (
     resolve_visibility as resolve_analytics_visibility,
 )
 from app.procurement.critical_actions import get_critical_action, resolve_confirmation
+from app.procurement.erp_outbox import (
+    find_pending_purchase_order_push,
+    queue_purchase_order_push,
+)
 from app.procurement.flow_policy import (
     action_label as flow_action_label,
     action_allowed as flow_action_allowed,
@@ -36,7 +42,7 @@ from app.procurement.flow_policy import (
     stage_for_purchase_request_status,
     stage_for_rfq_status,
 )
-from app.tenant import DEFAULT_TENANT_ID, current_tenant_id
+from app.tenant import DEFAULT_TENANT_ID, current_tenant_id, scoped_tenant_id
 from app.ui_strings import (
     confirm_message,
     erp_status_payload,
@@ -152,24 +158,11 @@ def _process_context(stage: str) -> dict:
 
 
 def _current_role() -> str:
-    role = (session.get("user_role") or "buyer").strip().lower()
-    if role not in {"buyer", "admin", "approver", "manager", "supplier"}:
-        return "buyer"
-    return role
+    return policy_current_role()
 
 
 def _require_roles(*allowed_roles: str) -> None:
-    allowed = {str(role).strip().lower() for role in allowed_roles if str(role).strip()}
-    if not allowed:
-        return
-    if _current_role() in allowed:
-        return
-    raise AppPermissionError(
-        code="permission_denied",
-        message_key="permission_denied",
-        http_status=403,
-        critical=False,
-    )
+    policy_require_roles(*allowed_roles)
 
 
 def _forbidden_action(stage: str, status: str | None, action: str, http_status: int = 409):
@@ -201,13 +194,17 @@ def _erp_timeline_event_type(reason: str | None, from_status: str | None, to_sta
     normalized_from = str(from_status or "").strip().lower()
     normalized_to = str(to_status or "").strip().lower()
 
+    if normalized_reason == "po_push_retry_queued":
+        return "reenvio"
+    if normalized_reason == "po_push_queued":
+        return "reenvio" if normalized_from == "erp_error" else "envio"
     if normalized_reason == "po_push_retry_started":
         return "reenvio"
     if normalized_reason == "po_push_started":
         return "reenvio" if normalized_from == "erp_error" else "envio"
     if normalized_reason in {"po_push_failed"}:
         return "erro"
-    if normalized_reason in {"po_push_rejected", "po_push_succeeded", "po_push_queued"}:
+    if normalized_reason in {"po_push_rejected", "po_push_succeeded"}:
         return "resposta"
 
     if normalized_to == "sent_to_erp":
@@ -307,13 +304,15 @@ def _audit_confirmation(action_key: str, entity: str, entity_id: int, mode: str)
     request_id = (getattr(g, "request_id", None) or "").strip() or "n/a"
     user = (session.get("user_email") or session.get("display_name") or "anonymous").strip() or "anonymous"
     current_app.logger.info(
-        "confirmation_event request_id=%s user=%s action=%s entity=%s entity_id=%s mode=%s",
-        request_id,
-        user,
-        action_key,
-        entity,
-        entity_id,
-        mode,
+        "confirmation_event",
+        extra={
+            "request_id": request_id,
+            "user": user,
+            "action": action_key,
+            "entity": entity,
+            "entity_id": entity_id,
+            "mode": mode,
+        },
     )
 
 
@@ -2785,8 +2784,22 @@ def push_purchase_order_to_erp(purchase_order_id: int):
                 "message": _ok("order_already_accepted"),
             }
         )
+    pending_run = find_pending_purchase_order_push(db, tenant_id, purchase_order_id)
+    if pending_run:
+        return jsonify(
+            {
+                "purchase_order_id": purchase_order_id,
+                "status": "sent_to_erp",
+                "external_id": po["external_id"],
+                "sync_run_id": int(pending_run["id"]),
+                "queued": True,
+                "message": _ok("order_sent_to_erp"),
+            }
+        )
+
     if not flow_action_allowed("ordem_compra", po["status"], "push_to_erp"):
         return _forbidden_action("ordem_compra", po["status"], "push_to_erp")
+
     _require_critical_confirmation(
         "push_to_erp",
         entity="purchase_order",
@@ -2794,93 +2807,24 @@ def push_purchase_order_to_erp(purchase_order_id: int):
         payload=payload,
     )
 
-    sync_run_id = _start_sync_run(db, tenant_id, scope="purchase_order")
-    push_start_reason = "po_push_retry_started" if po["status"] == "erp_error" else "po_push_started"
-
-    db.execute(
-        "UPDATE purchase_orders SET status = 'sent_to_erp' WHERE id = ? AND tenant_id = ?",
-        (purchase_order_id, tenant_id),
-    )
-    db.execute(
-        """
-        INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-        VALUES ('purchase_order', ?, ?, 'sent_to_erp', ?, ?)
-        """,
-        (purchase_order_id, po["status"], push_start_reason, tenant_id),
-    )
-
-    try:
-        result = push_purchase_order(dict(po))
-    except ErpError as exc:
-        error_details = str(exc)[:200]
-        error_code, message_key, http_status = classify_erp_failure(error_details)
-        failure_reason = "po_push_rejected" if error_code == "erp_order_rejected" else "po_push_failed"
-        db.execute(
-            """
-            UPDATE purchase_orders
-            SET status = 'erp_error', erp_last_error = ?
-            WHERE id = ? AND tenant_id = ?
-            """,
-            (error_details, purchase_order_id, tenant_id),
-        )
-        db.execute(
-            """
-            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-            VALUES ('purchase_order', ?, 'sent_to_erp', 'erp_error', ?, ?)
-            """,
-            (purchase_order_id, failure_reason, tenant_id),
-        )
-        _finish_sync_run(db, tenant_id, sync_run_id, status="failed", records_in=0, records_upserted=0)
-        db.commit()
-        raise IntegrationError(
-            code=error_code,
-            message_key=message_key,
-            http_status=http_status,
-            critical=False,
-            details=error_details,
-            payload={"purchase_order_id": purchase_order_id, "status": "erp_error"},
-        )
-
-    external_id = result.get("external_id")
-    resolved_status = _normalize_po_status(result.get("status"))
-    reason = "po_push_succeeded" if resolved_status != "sent_to_erp" else "po_push_queued"
-
-    db.execute(
-        """
-        UPDATE purchase_orders
-        SET status = ?, external_id = ?, erp_last_error = NULL
-        WHERE id = ? AND tenant_id = ?
-        """,
-        (resolved_status, external_id, purchase_order_id, tenant_id),
-    )
-    db.execute(
-        """
-        INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-        VALUES ('purchase_order', ?, 'sent_to_erp', ?, ?, ?)
-        """,
-        (purchase_order_id, resolved_status, reason, tenant_id),
-    )
-
-    _finish_sync_run(db, tenant_id, sync_run_id, status="succeeded", records_in=1, records_upserted=1)
-    _upsert_integration_watermark(
+    request_id = (getattr(g, "request_id", None) or "").strip() or None
+    queue_result = queue_purchase_order_push(
         db,
         tenant_id,
-        entity="purchase_order",
-        source_updated_at=None,
-        source_id=external_id,
+        dict(po),
+        request_id=request_id,
     )
-
     db.commit()
-    friendly_message = _ok("erp_accepted") if resolved_status == "erp_accepted" else _ok("order_sent_to_erp")
-    if resolved_status == "erp_error":
-        friendly_message = _err("erp_unavailable", _err("erp_temporarily_unavailable"))
+
     return jsonify(
         {
             "purchase_order_id": purchase_order_id,
-            "status": resolved_status,
-            "external_id": external_id,
-            "sync_run_id": sync_run_id,
-            "message": friendly_message,
+            "status": "sent_to_erp",
+            "external_id": po["external_id"],
+            "sync_run_id": int(queue_result["sync_run_id"]),
+            "queued": True,
+            "already_queued": bool(queue_result.get("already_queued")),
+            "message": _ok("erp_send_queued", _ok("order_sent_to_erp")),
         }
     )
 
@@ -4490,13 +4434,13 @@ def _parse_inbox_filters(args) -> Dict[str, str]:
 
 
 def _tenant_clause(tenant_id: str | None, alias: str | None = None) -> Tuple[str, List[str]]:
-    effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
+    effective_tenant_id = scoped_tenant_id(tenant_id)
     prefix = f"{alias}." if alias else ""
     return f"{prefix}tenant_id = ?", [effective_tenant_id]
 
 
 def _tenant_filter(tenant_id: str | None, occurrences: int) -> Tuple[str, List[str]]:
-    effective_tenant_id = tenant_id or DEFAULT_TENANT_ID
+    effective_tenant_id = scoped_tenant_id(tenant_id)
     return "tenant_id = ?", [effective_tenant_id] * occurrences
 
 

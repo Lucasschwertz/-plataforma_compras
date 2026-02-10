@@ -23,6 +23,7 @@
             <div class="small" style="color: var(--danger); margin-bottom: 8px">{{ error }}</div>
           {% endif %}
           <form method="post" class="modal-body">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
             <input type="hidden" name="next" value="{{ request.args.get('next', '') }}" />
             <div class="field">
               <label class="field-label" for="emailInput">Usuario</label>

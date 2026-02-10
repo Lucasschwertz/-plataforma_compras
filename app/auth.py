@@ -10,6 +10,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app.db import get_db
 from app.errors import PermissionError as AppPermissionError
 from app.errors import ValidationError
+from app.policies import normalize_role
+from app.security import validate_csrf_token
 from app.tenant import DEFAULT_TENANT_ID
 from app.ui_strings import error_message
 
@@ -63,18 +65,21 @@ def login():
 
     error = None
     if request.method == "POST":
-        email = (request.form.get("email") or "").strip().lower()
-        password = request.form.get("password") or ""
+        if not validate_csrf_token(request.form.get("csrf_token")):
+            error = _err("csrf_invalid")
+        else:
+            email = (request.form.get("email") or "").strip().lower()
+            password = request.form.get("password") or ""
 
-        user = _find_user(email, password, current_app.config.get("APP_USERS"))
-        if user:
-            session["user_email"] = user["email"]
-            session["display_name"] = user["display_name"]
-            session["tenant_id"] = user["tenant_id"]
-            session["user_role"] = user.get("role", "buyer")
-            return redirect(_safe_next_url() or url_for("home.home"))
+            user = _find_user(email, password, current_app.config.get("APP_USERS"))
+            if user:
+                session["user_email"] = user["email"]
+                session["display_name"] = user["display_name"]
+                session["tenant_id"] = user["tenant_id"]
+                session["user_role"] = normalize_role(user.get("role"), default="buyer")
+                return redirect(_safe_next_url() or url_for("home.home"))
 
-        error = _err("auth_invalid_credentials")
+            error = _err("auth_invalid_credentials")
 
     return render_template("login.html", error=error)
 
@@ -86,25 +91,28 @@ def register():
 
     error = None
     if request.method == "POST":
-        email = (request.form.get("email") or "").strip().lower()
-        password = request.form.get("password") or ""
-        display_name = (request.form.get("display_name") or "").strip() or None
-        company_name = (request.form.get("company_name") or "").strip()
-
-        if not email or not password:
-            error = _err("auth_missing_credentials")
+        if not validate_csrf_token(request.form.get("csrf_token")):
+            error = _err("csrf_invalid")
         else:
-            tenant_id = _resolve_tenant_id(company_name)
-            try:
-                user = _create_user(email, password, display_name, tenant_id, company_name or None)
-            except ValidationError as exc:
-                error = exc.user_message()
+            email = (request.form.get("email") or "").strip().lower()
+            password = request.form.get("password") or ""
+            display_name = (request.form.get("display_name") or "").strip() or None
+            company_name = (request.form.get("company_name") or "").strip()
+
+            if not email or not password:
+                error = _err("auth_missing_credentials")
             else:
-                session["user_email"] = user["email"]
-                session["display_name"] = user["display_name"]
-                session["tenant_id"] = user["tenant_id"]
-                session["user_role"] = user.get("role", "buyer")
-                return redirect(url_for("home.home"))
+                tenant_id = _resolve_tenant_id(company_name)
+                try:
+                    user = _create_user(email, password, display_name, tenant_id, company_name or None)
+                except ValidationError as exc:
+                    error = exc.user_message()
+                else:
+                    session["user_email"] = user["email"]
+                    session["display_name"] = user["display_name"]
+                    session["tenant_id"] = user["tenant_id"]
+                    session["user_role"] = normalize_role(user.get("role"), default="buyer")
+                    return redirect(url_for("home.home"))
 
     return render_template("register.html", error=error)
 
@@ -245,9 +253,7 @@ def _parse_users(raw_users: object) -> Iterable[dict]:
             continue
         email, password, tenant_id = parts[0].lower(), parts[1], parts[2]
         display_name = parts[3] if len(parts) > 3 and parts[3] else email.split("@")[0]
-        role = parts[4].lower() if len(parts) > 4 and parts[4] else "buyer"
-        if role not in {"buyer", "admin", "approver", "manager", "supplier"}:
-            role = "buyer"
+        role = normalize_role(parts[4] if len(parts) > 4 else "buyer", default="buyer")
         users.append(
             {
                 "email": email,

@@ -1,5 +1,4 @@
 import os
-import uuid
 
 from flask import Flask, g, jsonify, request, session
 from werkzeug.exceptions import HTTPException
@@ -7,17 +6,29 @@ from werkzeug.exceptions import HTTPException
 from app.config import Config
 from app.db import close_db, init_db
 from app.db_migrations import register_db_cli
+from app.observability import (
+    configure_json_logging,
+    ensure_request_id,
+    mark_request_start,
+    metrics_snapshot,
+    observe_response,
+    outbox_health,
+)
+from app.policies import normalize_role
 from app.procurement.critical_actions import CRITICAL_ACTIONS
 from app.procurement.flow_policy import build_process_steps
+from app.security import apply_security_headers, csrf_token, enforce_form_csrf, enforce_rate_limit
 from app.ui_strings import confirm_message, get_ui_text, template_bundle
 
 
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+    configure_json_logging(app)
 
     _ensure_database_dir(app)
     _register_error_handlers(app)
+    _register_security(app)
     _register_auth(app)
     _register_tenant(app)
     _register_template_context(app)
@@ -80,47 +91,42 @@ def _register_error_handlers(app: Flask) -> None:
     from app.erp_client import ErpError
     from app.errors import AppError, IntegrationError, SystemError, classify_erp_failure
 
-    def _resolve_request_id() -> str:
-        request_id = (getattr(g, "request_id", None) or "").strip()
-        if request_id:
-            return request_id
-        incoming = (request.headers.get("X-Request-Id") or "").strip()
-        request_id = incoming or str(uuid.uuid4())
-        g.request_id = request_id
-        return request_id
-
     @app.before_request
     def _ensure_request_id() -> None:
-        _resolve_request_id()
+        ensure_request_id()
+        mark_request_start()
 
     @app.after_request
     def _append_request_id(response):
-        response.headers["X-Request-Id"] = _resolve_request_id()
-        return response
+        response.headers["X-Request-Id"] = ensure_request_id()
+        response = observe_response(response)
+        return apply_security_headers(response)
 
     def _log_error(error: AppError, request_id: str) -> None:
         log_method = app.logger.error if error.critical else app.logger.warning
         log_method(
-            "request_id=%s code=%s status=%s message_key=%s details=%s path=%s method=%s",
-            request_id,
-            error.code,
-            error.http_status,
-            error.message_key,
-            error.details,
-            request.path,
-            request.method,
+            "application_error",
+            extra={
+                "request_id": request_id,
+                "error_code": error.code,
+                "http_status": error.http_status,
+                "message_key": error.message_key,
+                "details": error.details,
+                "request_path": request.path,
+                "http_method": request.method,
+            },
             exc_info=error.critical,
         )
 
     @app.errorhandler(AppError)
     def _handle_app_error(exc: AppError):
-        request_id = _resolve_request_id()
+        request_id = ensure_request_id()
         _log_error(exc, request_id)
         return jsonify(exc.to_response_payload(request_id)), exc.http_status
 
     @app.errorhandler(ErpError)
     def _handle_erp_error(exc: ErpError):
-        request_id = _resolve_request_id()
+        request_id = ensure_request_id()
         code, message_key, http_status = classify_erp_failure(str(exc))
         mapped = IntegrationError(
             code=code,
@@ -137,7 +143,7 @@ def _register_error_handlers(app: Flask) -> None:
         if isinstance(exc, HTTPException):
             return exc
 
-        request_id = _resolve_request_id()
+        request_id = ensure_request_id()
         mapped = SystemError(
             code="unexpected_error",
             message_key="unexpected_error",
@@ -146,13 +152,25 @@ def _register_error_handlers(app: Flask) -> None:
             details=str(exc),
         )
         app.logger.exception(
-            "request_id=%s code=%s path=%s method=%s",
-            request_id,
-            mapped.code,
-            request.path,
-            request.method,
+            "unexpected_exception",
+            extra={
+                "request_id": request_id,
+                "error_code": mapped.code,
+                "request_path": request.path,
+                "http_method": request.method,
+            },
         )
         return jsonify(mapped.to_response_payload(request_id)), mapped.http_status
+
+
+def _register_security(app: Flask) -> None:
+    @app.before_request
+    def _rate_limit_guard():
+        return enforce_rate_limit()
+
+    @app.before_request
+    def _csrf_guard():
+        enforce_form_csrf()
 
 
 def _register_tenant(app: Flask) -> None:
@@ -162,7 +180,7 @@ def _register_tenant(app: Flask) -> None:
         requested_workspace = (request.args.get("workspace_id") or "").strip()
 
         # Workspace switch via UI is allowed only for admin users.
-        user_role = (session.get("user_role") or "buyer").strip().lower()
+        user_role = normalize_role(session.get("user_role"), default="buyer")
         if requested_workspace and requested_workspace != session_tenant:
             if not session_tenant:
                 session["tenant_id"] = requested_workspace
@@ -186,7 +204,9 @@ def _register_tenant(app: Flask) -> None:
             g.tenant_id = f"tenant-{header_company}"
             return
 
-        g.tenant_id = None
+        from app.tenant import DEFAULT_TENANT_ID
+
+        g.tenant_id = DEFAULT_TENANT_ID
 
 
 def _tenant_exists(tenant_id: str) -> bool:
@@ -212,9 +232,7 @@ def _register_template_context(app: Flask) -> None:
         header_tenant = (current_tenant_id() or "").strip()
         workspace_id = session_tenant or header_tenant or DEFAULT_TENANT_ID
 
-        role = (session.get("user_role") or "buyer").strip().lower()
-        if role not in {"buyer", "admin", "approver", "manager", "supplier"}:
-            role = "buyer"
+        role = normalize_role(session.get("user_role"), default="buyer")
 
         workspace_name = f"Empresa {workspace_id}"
         workspace_options = [{"id": workspace_id, "name": workspace_name}]
@@ -267,6 +285,7 @@ def _register_template_context(app: Flask) -> None:
             "ui_text": get_ui_text,
             "ui_process_steps": build_process_steps,
             "ui_critical_actions": critical_actions_bundle,
+            "csrf_token": csrf_token,
             **ui_bundle,
         }
 
@@ -274,6 +293,33 @@ def _register_template_context(app: Flask) -> None:
 def _register_health(app: Flask) -> None:
     @app.route("/health")
     def health():
+        from app.db import get_read_db
+
         db_path = app.config.get("DB_PATH") or "unknown"
         backend = "postgres" if str(db_path).startswith("postgres") else "sqlite"
-        return {"status": "ok", "db": backend, "env": app.config.get("ENV", "unknown")}, 200
+        payload = {
+            "status": "ok",
+            "db": backend,
+            "env": app.config.get("ENV", "unknown"),
+            "metrics": {
+                "http": metrics_snapshot(),
+            },
+        }
+        try:
+            payload["worker"] = outbox_health(get_read_db())
+        except Exception:
+            payload["status"] = "degraded"
+            payload["worker"] = {
+                "worker_status": "unknown",
+                "queue": {
+                    "pending_jobs": 0,
+                    "running_jobs": 0,
+                    "failed_jobs": 0,
+                    "completed_jobs": 0,
+                    "avg_processing_ms": 0.0,
+                    "oldest_pending_age_seconds": 0,
+                    "last_started_at": None,
+                    "last_finished_at": None,
+                },
+            }
+        return payload, 200
