@@ -50,6 +50,55 @@
   gap: 6px;
 }
 
+.nav-group {
+  display: grid;
+  gap: 6px;
+}
+
+.nav-group-toggle {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nav-group-toggle:hover,
+.nav-group-toggle.active {
+  border-color: rgba(76, 111, 255, 0.35);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.nav-group-chevron {
+  font-size: 11px;
+  line-height: 1;
+  transition: transform 150ms ease;
+}
+
+.nav-group.open .nav-group-chevron {
+  transform: rotate(180deg);
+}
+
+.nav-group-links {
+  display: none;
+  gap: 4px;
+}
+
+.nav-group.open .nav-group-links {
+  display: grid;
+}
+
+.nav-group-links a {
+  margin-left: 8px;
+}
+
 .nav-section-title {
   font-size: 10px;
   letter-spacing: 0.7px;

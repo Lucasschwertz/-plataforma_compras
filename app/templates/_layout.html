@@ -44,6 +44,17 @@
   {% else %}
     {% set role_label = "Comprador" %}
   {% endif %}
+  {% set panel_nav_keys = ["dashboard", "requests", "sourcing", "orders", "procurement", "open_quote", "approvals"] %}
+  {% set analytics_nav_keys = [
+    "analytics_overview",
+    "analytics_efficiency",
+    "analytics_costs",
+    "analytics_suppliers",
+    "analytics_quality_erp",
+    "analytics_compliance",
+  ] %}
+  {% set panel_group_open = active_nav in panel_nav_keys %}
+  {% set analytics_group_open = active_nav in analytics_nav_keys %}
   <body class="role-{{ ui_role }}">
     <div class="app-shell">
       <aside class="sidebar">
@@ -55,23 +66,47 @@
           </div>
         </a>
         <nav class="nav">
-          <div class="nav-section-title">Operacao</div>
-          <a class="{% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Painel</a>
-          <a class="{% if active_nav == 'requests' %}active{% endif %}" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">Solicitacoes</a>
-          <a class="{% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Cotacoes</a>
-          <a class="{% if active_nav == 'orders' %}active{% endif %}" href="/procurement/ordens-compra?workspace_id={{ workspace_id }}">Ordens de compra</a>
-          <a class="{% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
-          <a class="{% if active_nav == 'open_quote' %}active{% endif %}" href="/procurement/cotacoes/abrir?workspace_id={{ workspace_id }}">Abrir cotacao</a>
-          {% if ui_role == "approver" or ui_role == "admin" or ui_role == "manager" %}
-            <a class="{% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>
-          {% endif %}
-          <div class="nav-section-title">Analises</div>
-          <a class="{% if active_nav == 'analytics_overview' %}active{% endif %}" href="/procurement/analises/visao-geral?workspace_id={{ workspace_id }}">Visao Geral</a>
-          <a class="{% if active_nav == 'analytics_efficiency' %}active{% endif %}" href="/procurement/analises/eficiencia-processo?workspace_id={{ workspace_id }}">Eficiencia do Processo</a>
-          <a class="{% if active_nav == 'analytics_costs' %}active{% endif %}" href="/procurement/analises/custos-economia?workspace_id={{ workspace_id }}">Custos e Economia</a>
-          <a class="{% if active_nav == 'analytics_suppliers' %}active{% endif %}" href="/procurement/analises/fornecedores?workspace_id={{ workspace_id }}">Fornecedores</a>
-          <a class="{% if active_nav == 'analytics_quality_erp' %}active{% endif %}" href="/procurement/analises/qualidade-erp?workspace_id={{ workspace_id }}">Qualidade e ERP</a>
-          <a class="{% if active_nav == 'analytics_compliance' %}active{% endif %}" href="/procurement/analises/compliance?workspace_id={{ workspace_id }}">Compliance</a>
+          <div class="nav-group {% if panel_group_open %}open{% endif %}" data-nav-group="panel">
+            <button
+              type="button"
+              class="nav-group-toggle {% if panel_group_open %}active{% endif %}"
+              data-nav-group-toggle="panel"
+              aria-expanded="{% if panel_group_open %}true{% else %}false{% endif %}"
+            >
+              <span>Painel</span>
+              <span class="nav-group-chevron" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="nav-group-links" data-nav-group-links="panel">
+              <a class="{% if active_nav == 'dashboard' %}active{% endif %}" href="/?workspace_id={{ workspace_id }}">Visao do painel</a>
+              <a class="{% if active_nav == 'requests' %}active{% endif %}" href="/procurement/solicitacoes?workspace_id={{ workspace_id }}">Solicitacoes</a>
+              <a class="{% if active_nav == 'sourcing' %}active{% endif %}" href="/procurement/cotacoes?workspace_id={{ workspace_id }}">Cotacoes</a>
+              <a class="{% if active_nav == 'orders' %}active{% endif %}" href="/procurement/ordens-compra?workspace_id={{ workspace_id }}">Ordens de compra</a>
+              <a class="{% if active_nav == 'procurement' %}active{% endif %}" href="/procurement/inbox?workspace_id={{ workspace_id }}">Inbox</a>
+              <a class="{% if active_nav == 'open_quote' %}active{% endif %}" href="/procurement/cotacoes/abrir?workspace_id={{ workspace_id }}">Abrir cotacao</a>
+              {% if ui_role == "approver" or ui_role == "admin" or ui_role == "manager" %}
+                <a class="{% if active_nav == 'approvals' %}active{% endif %}" href="/procurement/aprovacoes?workspace_id={{ workspace_id }}">Aprovacoes</a>
+              {% endif %}
+            </div>
+          </div>
+          <div class="nav-group {% if analytics_group_open %}open{% endif %}" data-nav-group="analytics">
+            <button
+              type="button"
+              class="nav-group-toggle {% if analytics_group_open %}active{% endif %}"
+              data-nav-group-toggle="analytics"
+              aria-expanded="{% if analytics_group_open %}true{% else %}false{% endif %}"
+            >
+              <span>Analises</span>
+              <span class="nav-group-chevron" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="nav-group-links" data-nav-group-links="analytics">
+              <a class="{% if active_nav == 'analytics_overview' %}active{% endif %}" href="/procurement/analises/visao-geral?workspace_id={{ workspace_id }}">Visao Geral</a>
+              <a class="{% if active_nav == 'analytics_efficiency' %}active{% endif %}" href="/procurement/analises/eficiencia-processo?workspace_id={{ workspace_id }}">Eficiencia do Processo</a>
+              <a class="{% if active_nav == 'analytics_costs' %}active{% endif %}" href="/procurement/analises/custos-economia?workspace_id={{ workspace_id }}">Custos e Economia</a>
+              <a class="{% if active_nav == 'analytics_suppliers' %}active{% endif %}" href="/procurement/analises/fornecedores?workspace_id={{ workspace_id }}">Fornecedores</a>
+              <a class="{% if active_nav == 'analytics_quality_erp' %}active{% endif %}" href="/procurement/analises/qualidade-erp?workspace_id={{ workspace_id }}">Qualidade e ERP</a>
+              <a class="{% if active_nav == 'analytics_compliance' %}active{% endif %}" href="/procurement/analises/compliance?workspace_id={{ workspace_id }}">Compliance</a>
+            </div>
+          </div>
           <div class="nav-section-title">Analise</div>
           <a class="{% if active_nav == 'governanca' %}active{% endif %}" href="/procurement/integrations/logs?scope=rfq&workspace_id={{ workspace_id }}">Trilha de cotacoes</a>
           <div class="nav-section-title">Plataforma</div>
@@ -237,7 +272,10 @@
         const sidebarBackdrop = document.getElementById("sidebarBackdrop");
         const desktopNavBreakpoint = 1100;
         const sidebarStateStoreKey = "platform.sidebar.collapsed.v1";
+        const sidebarGroupStateStoreKey = "platform.sidebar.groups.v1";
         const workspaceRouteStoreKey = "platform.workspace.last_route.v1";
+        const navGroupElements = Array.from(document.querySelectorAll("[data-nav-group]"));
+        const accordionGroupKeys = new Set(["panel", "analytics"]);
         const criticalActionsBundle = (window.UI_STRINGS && window.UI_STRINGS.critical_actions) || {};
         const criticalConfirmBackdrop = document.getElementById("criticalConfirmBackdrop");
         const criticalConfirmMessage = document.getElementById("criticalConfirmMessage");
@@ -338,6 +376,79 @@
           }
         }
 
+        function readSidebarGroups() {
+          try {
+            const raw = localStorage.getItem(sidebarGroupStateStoreKey);
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : {};
+          } catch (error) {
+            return {};
+          }
+        }
+
+        function writeSidebarGroups(groupsState) {
+          try {
+            localStorage.setItem(sidebarGroupStateStoreKey, JSON.stringify(groupsState || {}));
+          } catch (error) {
+          }
+        }
+
+        function setNavGroupOpen(groupEl, open) {
+          if (!groupEl) return;
+          const expanded = Boolean(open);
+          groupEl.classList.toggle("open", expanded);
+          const toggle = groupEl.querySelector("[data-nav-group-toggle]");
+          if (toggle) {
+            toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+          }
+        }
+
+        function currentSidebarGroupState() {
+          const snapshot = {};
+          navGroupElements.forEach((groupEl) => {
+            const key = String(groupEl.getAttribute("data-nav-group") || "").trim();
+            if (!key) return;
+            snapshot[key] = groupEl.classList.contains("open");
+          });
+          return snapshot;
+        }
+
+        function applyInitialSidebarGroups() {
+          if (!navGroupElements.length) return;
+          const saved = readSidebarGroups();
+          navGroupElements.forEach((groupEl) => {
+            const key = String(groupEl.getAttribute("data-nav-group") || "").trim();
+            if (!key) return;
+            const hasActiveLink = Boolean(groupEl.querySelector("a.active"));
+            const fallbackOpen = groupEl.classList.contains("open");
+            const savedOpen = Object.prototype.hasOwnProperty.call(saved, key) ? Boolean(saved[key]) : fallbackOpen;
+            setNavGroupOpen(groupEl, hasActiveLink || savedOpen);
+          });
+        }
+
+        function bindSidebarGroupToggles() {
+          if (!navGroupElements.length) return;
+          navGroupElements.forEach((groupEl) => {
+            const groupKey = String(groupEl.getAttribute("data-nav-group") || "").trim();
+            const toggle = groupEl.querySelector("[data-nav-group-toggle]");
+            if (!groupKey || !toggle) return;
+            toggle.addEventListener("click", () => {
+              const shouldOpen = !groupEl.classList.contains("open");
+              if (shouldOpen && accordionGroupKeys.has(groupKey)) {
+                navGroupElements.forEach((otherEl) => {
+                  const otherKey = String(otherEl.getAttribute("data-nav-group") || "").trim();
+                  if (otherKey && otherKey !== groupKey && accordionGroupKeys.has(otherKey)) {
+                    setNavGroupOpen(otherEl, false);
+                  }
+                });
+              }
+              setNavGroupOpen(groupEl, shouldOpen);
+              writeSidebarGroups(currentSidebarGroupState());
+            });
+          });
+        }
+
         function setSidebarCollapsed(collapsed, persist) {
           document.body.classList.toggle("sidebar-collapsed", Boolean(collapsed));
           if (persist) {
@@ -345,6 +456,8 @@
           }
         }
 
+        applyInitialSidebarGroups();
+        bindSidebarGroupToggles();
         setSidebarCollapsed(readSidebarCollapsed(), false);
 
         function setNavOpen(open) {
