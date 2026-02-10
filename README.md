@@ -82,6 +82,22 @@ Arquivos principais do bridge CSV:
 - `ERP_CSV_SCHEMA`, `ERP_CSV_E405SOL`, `ERP_CSV_E410COT`, `ERP_CSV_E410PCT`, `ERP_CSV_E410FPC`
 - opcionais para etapa OC e recebimento: `ERP_CSV_E420OCP`, `ERP_CSV_E420IPO`, `ERP_CSV_E440NFC`, `ERP_CSV_E440IPC`, `ERP_CSV_E440ISC`
 
+Worker de integracao ERP (outbox assincrono):
+- A rota de envio de OC apenas registra a intencao e coloca na fila interna (`sync_runs` com `scope=purchase_order`).
+- Para processar pendencias execute worker separado:
+
+```powershell
+python -m app.workers.erp_outbox_worker --once
+python -m app.workers.erp_outbox_worker
+```
+
+- Configuracoes:
+  - `ERP_OUTBOX_MAX_ATTEMPTS` (default: `4`)
+  - `ERP_OUTBOX_BACKOFF_SECONDS` (default: `30`)
+  - `ERP_OUTBOX_MAX_BACKOFF_SECONDS` (default: `600`)
+  - `ERP_OUTBOX_WORKER_INTERVAL_SECONDS` (default: `5`)
+  - `ERP_OUTBOX_WORKER_BATCH_SIZE` (default: `25`)
+
 Deploy (Docker Compose):
 - docs/deploy/docker-compose.md
 Deploy (Render app-only):
