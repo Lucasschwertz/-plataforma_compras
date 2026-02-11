@@ -4,6 +4,7 @@ from app.application.analytics_service import AnalyticsService
 from app.application.auth_service import AuthService
 from app.application.erp_outbox_service import ErpOutboxService
 from app.application.procurement_service import ProcurementService
+from app.errors import IntegrationError
 from app.domain.contracts import (
     AnalyticsRequestInput,
     AuthLoginInput,
@@ -141,7 +142,72 @@ class ApplicationServicesTest(unittest.TestCase):
         self.assertEqual(result.payload.get("sync_run_id"), 77)
         self.assertEqual(result.payload.get("status"), "sent_to_erp")
 
+    def test_procurement_service_send_po_immediate_success(self) -> None:
+        service = ProcurementService()
+        calls = {"count": 0}
+
+        def load_po(_db, _tenant, _po_id):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {"id": 123, "status": "approved", "external_id": "PO-123"}
+            return {"id": 123, "status": "erp_accepted", "external_id": "PO-123"}
+
+        result = service.send_po_to_erp_intent(
+            db=None,
+            tenant_id="tenant-1",
+            intent_input=PurchaseOrderErpIntentInput(
+                purchase_order_id=123,
+                request_id="req-1",
+                payload={"confirm": True},
+            ),
+            load_purchase_order_fn=load_po,
+            find_pending_push_fn=lambda *_args, **_kwargs: None,
+            flow_action_allowed_fn=lambda *_args, **_kwargs: True,
+            forbidden_action_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not block")),
+            require_confirmation_fn=lambda *_args, **_kwargs: None,
+            queue_push_fn=lambda *_args, **_kwargs: {"sync_run_id": 11, "already_queued": False},
+            process_outbox_fn=lambda *_args, **_kwargs: {"processed": 1, "succeeded": 1, "failed": 0, "requeued": 0},
+            push_purchase_order_fn=lambda po: {"external_id": po.get("external_id"), "status": "erp_accepted"},
+            immediate_response=True,
+            err_fn=lambda key, fallback=None: key if fallback is None else key,
+            ok_fn=lambda key, fallback=None: key if fallback is None else key,
+        )
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.payload.get("status"), "erp_accepted")
+        self.assertEqual(result.payload.get("sync_run_id"), 11)
+
+    def test_procurement_service_send_po_immediate_rejection_raises(self) -> None:
+        service = ProcurementService()
+        calls = {"count": 0}
+
+        def load_po(_db, _tenant, _po_id):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {"id": 123, "status": "approved", "external_id": "PO-123"}
+            return {"id": 123, "status": "erp_error", "external_id": "PO-123", "erp_last_error": "ERP HTTP 422 rejected"}
+
+        with self.assertRaises(IntegrationError):
+            service.send_po_to_erp_intent(
+                db=None,
+                tenant_id="tenant-1",
+                intent_input=PurchaseOrderErpIntentInput(
+                    purchase_order_id=123,
+                    request_id="req-1",
+                    payload={"confirm": True},
+                ),
+                load_purchase_order_fn=load_po,
+                find_pending_push_fn=lambda *_args, **_kwargs: None,
+                flow_action_allowed_fn=lambda *_args, **_kwargs: True,
+                forbidden_action_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not block")),
+                require_confirmation_fn=lambda *_args, **_kwargs: None,
+                queue_push_fn=lambda *_args, **_kwargs: {"sync_run_id": 11, "already_queued": False},
+                process_outbox_fn=lambda *_args, **_kwargs: {"processed": 1, "succeeded": 0, "failed": 1, "requeued": 0},
+                push_purchase_order_fn=lambda _po: {"status": "erp_error"},
+                immediate_response=True,
+                err_fn=lambda key, fallback=None: key if fallback is None else key,
+                ok_fn=lambda key, fallback=None: key if fallback is None else key,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -21,7 +21,7 @@ from app.domain.contracts import (
     RfqAwardInput,
     RfqCreateInput,
 )
-from app.erp_client import DEFAULT_RISK_FLAGS, fetch_erp_records
+from app.erp_client import DEFAULT_RISK_FLAGS, fetch_erp_records, push_purchase_order
 from app.errors import IntegrationError, ValidationError
 from app.policies import current_role as policy_current_role
 from app.policies import require_roles as policy_require_roles
@@ -36,6 +36,7 @@ from app.procurement.analytics import (
 from app.procurement.critical_actions import get_critical_action, resolve_confirmation
 from app.procurement.erp_outbox import (
     find_pending_purchase_order_push,
+    process_purchase_order_outbox,
     queue_purchase_order_push,
 )
 from app.procurement.flow_policy import (
@@ -583,198 +584,44 @@ def procurement_solicitacoes_api():
 def procurement_solicitacao_crud_api(purchase_request_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    row = db.execute(
-        """
-        SELECT id, status, external_id, erp_num_cot, erp_num_pct
-        FROM purchase_requests
-        WHERE id = ? AND tenant_id = ?
-        LIMIT 1
-        """,
-        (purchase_request_id, tenant_id),
-    ).fetchone()
-    if not row:
-        return (
-            jsonify(
-                {
-                    "error": "purchase_request_not_found", "message": _err("purchase_request_not_found"),
-                    "purchase_request_id": purchase_request_id,
-                }
-            ),
-            404,
-        )
-
-    previous_status = row["status"]
-    is_erp_managed = bool(row["external_id"] or row["erp_num_cot"] or row["erp_num_pct"])
-    if is_erp_managed:
-        return (
-            jsonify(
-                {
-                    "error": "erp_managed_request_readonly", "message": _err("erp_managed_request_readonly"),
-                }
-            ),
-            409,
-        )
-
-    if request.method == "DELETE":
-        if not flow_action_allowed("solicitacao", previous_status, "cancel_request"):
-            return _forbidden_action("solicitacao", previous_status, "cancel_request")
-        _require_critical_confirmation(
-            "cancel_request",
-            entity="purchase_request",
-            entity_id=purchase_request_id,
-        )
-        if previous_status == "cancelled":
-            return jsonify({"status": "cancelled", "purchase_request_id": purchase_request_id}), 200
-        db.execute(
-            """
-            UPDATE purchase_requests
-            SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND tenant_id = ?
-            """,
-            (purchase_request_id, tenant_id),
-        )
-        db.execute(
-            """
-            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-            VALUES ('purchase_request', ?, ?, 'cancelled', 'purchase_request_cancelled', ?)
-            """,
-            (purchase_request_id, previous_status, tenant_id),
-        )
-        db.commit()
-        return jsonify({"status": "cancelled", "purchase_request_id": purchase_request_id}), 200
-
-    if not flow_action_allowed("solicitacao", previous_status, "edit_request"):
-        return _forbidden_action("solicitacao", previous_status, "edit_request")
-
     payload = request.get_json(silent=True) or {}
-    updates: List[str] = []
-    params: List[object] = []
-
-    if "number" in payload:
-        updates.append("number = ?")
-        params.append((payload.get("number") or "").strip() or None)
-
-    if "requested_by" in payload:
-        updates.append("requested_by = ?")
-        params.append((payload.get("requested_by") or "").strip() or None)
-
-    if "department" in payload:
-        updates.append("department = ?")
-        params.append((payload.get("department") or "").strip() or None)
-
-    if "needed_at" in payload:
-        updates.append("needed_at = ?")
-        params.append((payload.get("needed_at") or "").strip() or None)
-
-    if "priority" in payload:
-        priority = str(payload.get("priority") or "").strip()
-        if priority and priority not in ALLOWED_PRIORITIES:
-            return jsonify({"error": "priority_invalid", "message": _err("priority_invalid")}), 400
-        updates.append("priority = ?")
-        params.append(priority or "medium")
-
-    next_status = previous_status
-    if "status" in payload:
-        if not flow_action_allowed("solicitacao", previous_status, "update_request_status"):
-            return _forbidden_action("solicitacao", previous_status, "update_request_status")
-        candidate = str(payload.get("status") or "").strip()
-        if candidate not in ALLOWED_PR_STATUSES:
-            return jsonify({"error": "status_invalid", "message": _err("status_invalid")}), 400
-        if candidate == "cancelled" and candidate != previous_status:
-            _require_critical_confirmation(
-                "cancel_request",
-                entity="purchase_request",
-                entity_id=purchase_request_id,
-                payload=payload,
-            )
-        next_status = candidate
-        updates.append("status = ?")
-        params.append(candidate)
-
-    if not updates:
-        return jsonify({"error": "no_changes", "message": _err("no_changes")}), 400
-
-    params.extend([purchase_request_id, tenant_id])
-    db.execute(
-        f"""
-        UPDATE purchase_requests
-        SET {", ".join(updates)}, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND tenant_id = ?
-        """,
-        tuple(params),
+    result = _PROCUREMENT_SERVICE.update_purchase_request(
+        db,
+        tenant_id=tenant_id,
+        purchase_request_id=purchase_request_id,
+        payload=payload,
+        is_delete=request.method == "DELETE",
+        allowed_priorities=ALLOWED_PRIORITIES,
+        allowed_statuses=ALLOWED_PR_STATUSES,
+        flow_action_allowed_fn=flow_action_allowed,
+        forbidden_action_fn=_forbidden_action,
+        require_confirmation_fn=_require_critical_confirmation,
+        err_fn=_err,
     )
-
-    if next_status != previous_status:
-        db.execute(
-            """
-            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-            VALUES ('purchase_request', ?, ?, ?, 'purchase_request_updated', ?)
-            """,
-            (purchase_request_id, previous_status, next_status, tenant_id),
-        )
-
-    db.commit()
-    return jsonify({"purchase_request_id": purchase_request_id, "status": next_status}), 200
+    if result.status_code < 400:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/procurement/solicitacoes/<int:purchase_request_id>/itens", methods=["POST"])
 def procurement_solicitacao_item_create_api(purchase_request_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    request_row = db.execute(
-        """
-        SELECT id, status, external_id, erp_num_cot, erp_num_pct
-        FROM purchase_requests
-        WHERE id = ? AND tenant_id = ?
-        LIMIT 1
-        """,
-        (purchase_request_id, tenant_id),
-    ).fetchone()
-    if not request_row:
-        return jsonify({"error": "purchase_request_not_found", "message": _err("purchase_request_not_found")}), 404
-    if request_row["external_id"] or request_row["erp_num_cot"] or request_row["erp_num_pct"]:
-        return (
-            jsonify(
-                {
-                    "error": "erp_managed_request_readonly", "message": _err("erp_managed_request_readonly"),
-                }
-            ),
-            409,
-        )
-    if not flow_action_allowed("solicitacao", request_row["status"], "add_request_item"):
-        return _forbidden_action("solicitacao", request_row["status"], "add_request_item")
-    if request_row["status"] != "pending_rfq":
-        return jsonify({"error": "request_locked", "message": _err("request_locked")}), 400
-
     payload = request.get_json(silent=True) or {}
-    description = (payload.get("description") or "").strip()
-    if not description:
-        return jsonify({"error": "description_required", "message": _err("description_required")}), 400
-    quantity = _parse_optional_float(payload.get("quantity"))
-    if quantity is None or quantity <= 0:
-        quantity = 1
-    uom = (payload.get("uom") or "UN").strip() or "UN"
-    category = (payload.get("category") or "").strip() or None
-    line_no = _parse_optional_int(payload.get("line_no"))
-    if line_no is None:
-        next_line = db.execute(
-            "SELECT COALESCE(MAX(line_no), 0) + 1 AS next_line FROM purchase_request_items WHERE purchase_request_id = ? AND tenant_id = ?",
-            (purchase_request_id, tenant_id),
-        ).fetchone()
-        line_no = int(next_line["next_line"] or 1)
-
-    cursor = db.execute(
-        """
-        INSERT INTO purchase_request_items (
-            purchase_request_id, line_no, description, quantity, uom, category, tenant_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        RETURNING id
-        """,
-        (purchase_request_id, line_no, description, quantity, uom, category, tenant_id),
+    result = _PROCUREMENT_SERVICE.create_purchase_request_item(
+        db,
+        tenant_id=tenant_id,
+        purchase_request_id=purchase_request_id,
+        payload=payload,
+        flow_action_allowed_fn=flow_action_allowed,
+        forbidden_action_fn=_forbidden_action,
+        parse_optional_int_fn=_parse_optional_int,
+        parse_optional_float_fn=_parse_optional_float,
+        err_fn=_err,
     )
-    item_row = cursor.fetchone()
-    db.commit()
-    return jsonify({"id": int(item_row["id"] if isinstance(item_row, dict) else item_row[0])}), 201
+    if result.status_code < 400:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route(
@@ -784,94 +631,23 @@ def procurement_solicitacao_item_create_api(purchase_request_id: int):
 def procurement_solicitacao_item_crud_api(purchase_request_id: int, item_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    request_row = db.execute(
-        """
-        SELECT id, status, external_id, erp_num_cot, erp_num_pct
-        FROM purchase_requests
-        WHERE id = ? AND tenant_id = ?
-        LIMIT 1
-        """,
-        (purchase_request_id, tenant_id),
-    ).fetchone()
-    if not request_row:
-        return jsonify({"error": "purchase_request_not_found", "message": _err("purchase_request_not_found")}), 404
-    if request_row["external_id"] or request_row["erp_num_cot"] or request_row["erp_num_pct"]:
-        return (
-            jsonify(
-                {
-                    "error": "erp_managed_request_readonly", "message": _err("erp_managed_request_readonly"),
-                }
-            ),
-            409,
-        )
-    requested_action = "delete_request_item" if request.method == "DELETE" else "edit_request_item"
-    if not flow_action_allowed("solicitacao", request_row["status"], requested_action):
-        return _forbidden_action("solicitacao", request_row["status"], requested_action)
-    if request_row["status"] != "pending_rfq":
-        return jsonify({"error": "request_locked", "message": _err("request_locked")}), 400
-
-    item_row = db.execute(
-        """
-        SELECT id
-        FROM purchase_request_items
-        WHERE id = ? AND purchase_request_id = ? AND tenant_id = ?
-        LIMIT 1
-        """,
-        (item_id, purchase_request_id, tenant_id),
-    ).fetchone()
-    if not item_row:
-        return jsonify({"error": "item_not_found", "message": _err("item_not_found")}), 404
-
-    if request.method == "DELETE":
-        db.execute(
-            "DELETE FROM purchase_request_items WHERE id = ? AND purchase_request_id = ? AND tenant_id = ?",
-            (item_id, purchase_request_id, tenant_id),
-        )
-        db.commit()
-        return jsonify({"deleted": True, "item_id": item_id}), 200
-
     payload = request.get_json(silent=True) or {}
-    updates: List[str] = []
-    params: List[object] = []
-    if "description" in payload:
-        description = (payload.get("description") or "").strip()
-        if not description:
-            return jsonify({"error": "description_required", "message": _err("description_required")}), 400
-        updates.append("description = ?")
-        params.append(description)
-    if "quantity" in payload:
-        quantity = _parse_optional_float(payload.get("quantity"))
-        if quantity is None or quantity <= 0:
-            return jsonify({"error": "quantity_invalid", "message": _err("quantity_invalid")}), 400
-        updates.append("quantity = ?")
-        params.append(quantity)
-    if "uom" in payload:
-        updates.append("uom = ?")
-        params.append((payload.get("uom") or "UN").strip() or "UN")
-    if "line_no" in payload:
-        line_no = _parse_optional_int(payload.get("line_no"))
-        if line_no is None or line_no <= 0:
-            return jsonify({"error": "line_no_invalid", "message": _err("line_no_invalid")}), 400
-        updates.append("line_no = ?")
-        params.append(line_no)
-    if "category" in payload:
-        updates.append("category = ?")
-        params.append((payload.get("category") or "").strip() or None)
-
-    if not updates:
-        return jsonify({"error": "no_changes", "message": _err("no_changes")}), 400
-
-    params.extend([item_id, purchase_request_id, tenant_id])
-    db.execute(
-        f"""
-        UPDATE purchase_request_items
-        SET {", ".join(updates)}, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND purchase_request_id = ? AND tenant_id = ?
-        """,
-        tuple(params),
+    result = _PROCUREMENT_SERVICE.update_purchase_request_item(
+        db,
+        tenant_id=tenant_id,
+        purchase_request_id=purchase_request_id,
+        item_id=item_id,
+        payload=payload,
+        is_delete=request.method == "DELETE",
+        flow_action_allowed_fn=flow_action_allowed,
+        forbidden_action_fn=_forbidden_action,
+        parse_optional_int_fn=_parse_optional_int,
+        parse_optional_float_fn=_parse_optional_float,
+        err_fn=_err,
     )
-    db.commit()
-    return jsonify({"item_id": item_id, "updated": True}), 200
+    if result.status_code < 400:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/procurement/cotacoes/abertura-data", methods=["GET"])
@@ -924,150 +700,49 @@ def fornecedores_api():
 def cotacao_detail_api(rfq_id: int):
     db = get_read_db()
     tenant_id = current_tenant_id()
-
-    rfq = _load_rfq(db, tenant_id, rfq_id)
-    if not rfq:
-        return (
-            jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}),
-            404,
-        )
-
-    award = _load_latest_award_for_rfq(db, tenant_id, rfq_id)
-    purchase_order = None
-    if award and award.get("purchase_order_id"):
-        purchase_order = _load_purchase_order(db, tenant_id, int(award["purchase_order_id"]))
-
-    itens = _load_rfq_items_with_quotes(db, tenant_id, rfq_id)
-    convites = _load_rfq_supplier_invites(db, tenant_id, rfq_id)
-    events = _load_status_events(db, tenant_id, entity="rfq", entity_id=rfq_id, limit=80)
-    award_events: List[dict] = []
-    if award:
-        award_events = _load_status_events(db, tenant_id, entity="award", entity_id=int(award["id"]), limit=40)
-
-    rfq_status = rfq["status"]
-    rfq_flow = flow_meta("cotacao", rfq_status)
-    award_flow = flow_meta("decisao", award["status"] if award else None)
-    po_flow = flow_meta("ordem_compra", purchase_order["status"] if purchase_order else None)
-
-    process_stage = stage_for_rfq_status(rfq_status)
-    if award:
-        process_stage = stage_for_award_status(award.get("status"))
-    if purchase_order:
-        process_stage = stage_for_purchase_order_status(purchase_order["status"])
-
-    invite_items: List[dict] = []
-    for invite in convites:
-        invite_status = invite.get("status")
-        invite_meta = flow_meta("fornecedor", invite_status)
-        allowed_invite_actions: List[str] = []
-        for action in ("reopen_invite", "extend_invite", "cancel_invite"):
-            if flow_action_allowed("fornecedor", invite_status, action) and flow_action_allowed("cotacao", rfq_status, action):
-                allowed_invite_actions.append(action)
-        if invite.get("access_url") and flow_action_allowed("fornecedor", invite_status, "open_invite_portal"):
-            allowed_invite_actions.append("open_invite_portal")
-        primary_invite_action = invite_meta.get("primary_action")
-        if primary_invite_action not in allowed_invite_actions:
-            primary_invite_action = allowed_invite_actions[0] if allowed_invite_actions else None
-        invite_items.append(
-            {
-                **invite,
-                "allowed_actions": allowed_invite_actions,
-                "primary_action": primary_invite_action,
-            }
-        )
-
-    decisao_payload = None
-    if award:
-        decisao_payload = {
-            **award,
-            "allowed_actions": award_flow["allowed_actions"],
-            "primary_action": award_flow["primary_action"],
-            "process_stage": stage_for_award_status(award.get("status")),
-        }
-
-    ordem_compra_payload = None
-    if purchase_order:
-        ordem_compra_payload = {
-            **_serialize_purchase_order(purchase_order),
-            "allowed_actions": po_flow["allowed_actions"],
-            "primary_action": po_flow["primary_action"],
-            "process_stage": stage_for_purchase_order_status(purchase_order["status"]),
-        }
-
-    return jsonify(
-        {
-            "cotacao": {
-                "id": rfq["id"],
-                "titulo": rfq["title"],
-                "status": rfq_status,
-                "criada_em": rfq["created_at"],
-                "atualizada_em": rfq["updated_at"],
-                "allowed_actions": rfq_flow["allowed_actions"],
-                "primary_action": rfq_flow["primary_action"],
-                "process_stage": stage_for_rfq_status(rfq_status),
-            },
-            "itens": itens,
-            "convites": invite_items,
-            "decisao": decisao_payload,
-            "ordem_compra": ordem_compra_payload,
-            "eventos_cotacao": events,
-            "eventos_decisao": award_events,
-            "flow": {
-                "process_stage": process_stage,
-                "process_steps": build_process_steps(process_stage),
-            },
-        }
+    result = _PROCUREMENT_SERVICE.get_rfq_detail(
+        db,
+        tenant_id=tenant_id,
+        rfq_id=rfq_id,
+        load_rfq_fn=_load_rfq,
+        load_latest_award_for_rfq_fn=_load_latest_award_for_rfq,
+        load_purchase_order_fn=_load_purchase_order,
+        load_rfq_items_with_quotes_fn=_load_rfq_items_with_quotes,
+        load_rfq_supplier_invites_fn=_load_rfq_supplier_invites,
+        load_status_events_fn=_load_status_events,
+        flow_meta_fn=flow_meta,
+        stage_for_rfq_status_fn=stage_for_rfq_status,
+        stage_for_award_status_fn=stage_for_award_status,
+        stage_for_purchase_order_status_fn=stage_for_purchase_order_status,
+        build_process_steps_fn=build_process_steps,
+        flow_action_allowed_fn=flow_action_allowed,
+        serialize_purchase_order_fn=_serialize_purchase_order,
+        err_fn=_err,
     )
+    return jsonify(result.payload), result.status_code
 
 @procurement_bp.route("/api/procurement/cotacoes/<int:rfq_id>/itens/<int:rfq_item_id>/fornecedores", methods=["POST"])
 def cotacao_item_fornecedores_api(rfq_id: int, rfq_item_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     payload = request.get_json(silent=True) or {}
-
-    rfq = _load_rfq(db, tenant_id, rfq_id)
-    if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
-    if not flow_action_allowed("cotacao", rfq["status"], "manage_item_supplier"):
-        return _forbidden_action("cotacao", rfq["status"], "manage_item_supplier")
-
-    rfq_item = _load_rfq_item(db, tenant_id, rfq_item_id)
-    if not rfq_item or int(rfq_item["rfq_id"]) != rfq_id:
-        return (
-            jsonify(
-                {
-                    "error": "rfq_item_not_found", "message": _err("rfq_item_not_found"),
-                    "rfq_item_id": rfq_item_id,
-                }
-            ),
-            404,
-        )
-
-    supplier_ids = payload.get("supplier_ids") or []
-    if not isinstance(supplier_ids, list) or not supplier_ids:
-        return jsonify({"error": "supplier_ids_required", "message": _err("supplier_ids_required")}), 400
-
-    valid_supplier_ids = {s["id"] for s in _load_suppliers(db, tenant_id)}
-
-    for supplier_id in supplier_ids:
-        try:
-            parsed_supplier_id = int(supplier_id)
-        except (TypeError, ValueError):
-            continue
-        if parsed_supplier_id not in valid_supplier_ids:
-            continue
-        db.execute(
-            """
-            INSERT INTO rfq_item_suppliers (rfq_item_id, supplier_id, tenant_id)
-            VALUES (?, ?, ?)
-            ON CONFLICT DO NOTHING
-            """,
-            (rfq_item_id, parsed_supplier_id, tenant_id),
-        )
-
-    db.commit()
-    itens = _load_rfq_items_with_quotes(db, tenant_id, rfq_id)
-    return jsonify({"itens": itens})
+    result = _PROCUREMENT_SERVICE.assign_rfq_item_suppliers(
+        db,
+        tenant_id=tenant_id,
+        rfq_id=rfq_id,
+        rfq_item_id=rfq_item_id,
+        supplier_ids=payload.get("supplier_ids") or [],
+        load_rfq_fn=_load_rfq,
+        load_rfq_item_fn=_load_rfq_item,
+        load_suppliers_fn=_load_suppliers,
+        load_rfq_items_with_quotes_fn=_load_rfq_items_with_quotes,
+        flow_action_allowed_fn=flow_action_allowed,
+        forbidden_action_fn=_forbidden_action,
+        err_fn=_err,
+    )
+    if result.status_code < 400:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/procurement/cotacoes/<int:rfq_id>/propostas", methods=["POST", "PATCH"])
@@ -1075,135 +750,23 @@ def cotacao_propostas_api(rfq_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     payload = request.get_json(silent=True) or {}
-
-    rfq = _load_rfq(db, tenant_id, rfq_id)
-    if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
-    if not flow_action_allowed("cotacao", rfq["status"], "save_supplier_quote"):
-        return _forbidden_action("cotacao", rfq["status"], "save_supplier_quote")
-
-    supplier_id = payload.get("supplier_id")
-    items = payload.get("items") or []
-
-    if not supplier_id:
-        return jsonify({"error": "supplier_id_required", "message": _err("supplier_id_required")}), 400
-    if not isinstance(items, list) or not items:
-        return jsonify({"error": "items_required", "message": _err("items_required")}), 400
-
-    try:
-        supplier_id = int(supplier_id)
-    except (TypeError, ValueError):
-        return jsonify({"error": "supplier_id_invalid", "message": _err("supplier_id_invalid")}), 400
-
-    valid_supplier_ids = {s["id"] for s in _load_suppliers(db, tenant_id)}
-    if supplier_id not in valid_supplier_ids:
-        return jsonify({"error": "supplier_not_found", "message": _err("supplier_not_found")}), 404
-
-    normalized_items_by_id: Dict[int, dict] = {}
-    for item in items:
-        rfq_item_id = item.get("rfq_item_id")
-        unit_price = item.get("unit_price")
-        lead_time_days = item.get("lead_time_days")
-
-        if rfq_item_id in (None, "") or unit_price in (None, ""):
-            continue
-
-        try:
-            parsed_rfq_item_id = int(rfq_item_id)
-            parsed_unit_price = float(unit_price)
-        except (TypeError, ValueError):
-            continue
-
-        if parsed_unit_price < 0:
-            continue
-
-        parsed_lead_time_days = None
-        if lead_time_days not in (None, ""):
-            try:
-                parsed_lead_time_days = int(lead_time_days)
-            except (TypeError, ValueError):
-                continue
-            if parsed_lead_time_days < 0:
-                continue
-
-        normalized_items_by_id[parsed_rfq_item_id] = {
-            "rfq_item_id": parsed_rfq_item_id,
-            "unit_price": parsed_unit_price,
-            "lead_time_days": parsed_lead_time_days,
-        }
-
-    normalized_items = list(normalized_items_by_id.values())
-    if not normalized_items:
-        return (
-            jsonify(
-                {
-                    "error": "valid_items_required", "message": _err("valid_items_required"),
-                }
-            ),
-            400,
-        )
-
-    requested_item_ids = sorted(normalized_items_by_id.keys())
-    placeholders = ",".join("?" for _ in requested_item_ids)
-
-    valid_item_rows = db.execute(
-        f"""
-        SELECT id
-        FROM rfq_items
-        WHERE rfq_id = ? AND tenant_id = ? AND id IN ({placeholders})
-        """,
-        (rfq_id, tenant_id, *requested_item_ids),
-    ).fetchall()
-    valid_item_ids = {int(row["id"]) for row in valid_item_rows}
-    invalid_item_ids = [item_id for item_id in requested_item_ids if item_id not in valid_item_ids]
-    if invalid_item_ids:
-        return (
-            jsonify(
-                {
-                    "error": "rfq_items_not_found", "message": _err("rfq_items_not_found"),
-                    "rfq_item_ids": invalid_item_ids,
-                }
-            ),
-            400,
-        )
-
-    invited_rows = db.execute(
-        f"""
-        SELECT rfq_item_id
-        FROM rfq_item_suppliers
-        WHERE tenant_id = ? AND supplier_id = ? AND rfq_item_id IN ({placeholders})
-        """,
-        (tenant_id, supplier_id, *requested_item_ids),
-    ).fetchall()
-    invited_item_ids = {int(row["rfq_item_id"]) for row in invited_rows}
-    uninvited_item_ids = [item_id for item_id in requested_item_ids if item_id not in invited_item_ids]
-    if uninvited_item_ids:
-        return (
-            jsonify(
-                {
-                    "error": "supplier_not_invited_for_items", "message": _err("supplier_not_invited_for_items"),
-                    "rfq_item_ids": uninvited_item_ids,
-                    "supplier_id": supplier_id,
-                }
-            ),
-            400,
-        )
-
-    quote_id = _get_or_create_quote(db, rfq_id, supplier_id, tenant_id)
-
-    for item in normalized_items:
-        _upsert_quote_item(
-            db,
-            quote_id=int(quote_id),
-            rfq_item_id=int(item["rfq_item_id"]),
-            unit_price=float(item["unit_price"]),
-            lead_time_days=item["lead_time_days"],
-            tenant_id=tenant_id,
-        )
-
-    db.commit()
-    itens = _load_rfq_items_with_quotes(db, tenant_id, rfq_id)
-    return jsonify({"itens": itens, "quote_id": quote_id, "saved_items": len(normalized_items)})
+    result = _PROCUREMENT_SERVICE.save_supplier_quote(
+        db,
+        tenant_id=tenant_id,
+        rfq_id=rfq_id,
+        payload=payload,
+        load_rfq_fn=_load_rfq,
+        load_suppliers_fn=_load_suppliers,
+        get_or_create_quote_fn=_get_or_create_quote,
+        upsert_quote_item_fn=_upsert_quote_item,
+        load_rfq_items_with_quotes_fn=_load_rfq_items_with_quotes,
+        flow_action_allowed_fn=flow_action_allowed,
+        forbidden_action_fn=_forbidden_action,
+        err_fn=_err,
+    )
+    if result.status_code < 400:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route(
@@ -1213,260 +776,71 @@ def cotacao_propostas_api(rfq_id: int):
 def cotacao_supplier_proposta_api(rfq_id: int, supplier_id: int):
     db = get_db() if request.method == "DELETE" else get_read_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-
-    rfq = _load_rfq(db, tenant_id, rfq_id)
-    if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
-
-    supplier = db.execute(
-        "SELECT id, name FROM suppliers WHERE id = ? AND tenant_id = ? LIMIT 1",
-        (supplier_id, tenant_id),
-    ).fetchone()
-    if not supplier:
-        return jsonify({"error": "supplier_not_found", "message": _err("supplier_not_found")}), 404
-
-    quote = db.execute(
-        """
-        SELECT id
-        FROM quotes
-        WHERE rfq_id = ? AND supplier_id = ? AND tenant_id = ?
-        LIMIT 1
-        """,
-        (rfq_id, supplier_id, tenant_id),
-    ).fetchone()
-
     if request.method == "GET":
-        quote_id = int(quote["id"]) if quote else None
-        rows = db.execute(
-            """
-            SELECT
-                ri.id AS rfq_item_id,
-                ri.description,
-                ri.quantity,
-                ri.uom,
-                qi.unit_price,
-                qi.lead_time_days
-            FROM rfq_items ri
-            JOIN rfq_item_suppliers ris
-              ON ris.rfq_item_id = ri.id
-             AND ris.supplier_id = ?
-             AND ris.tenant_id = ri.tenant_id
-            LEFT JOIN quote_items qi
-              ON qi.rfq_item_id = ri.id
-             AND qi.quote_id = ?
-             AND qi.tenant_id = ri.tenant_id
-            WHERE ri.rfq_id = ? AND ri.tenant_id = ?
-            ORDER BY ri.id
-            """,
-            (supplier_id, quote_id, rfq_id, tenant_id),
-        ).fetchall()
-        return jsonify(
-            {
-                "rfq_id": rfq_id,
-                "supplier": {"id": supplier_id, "name": supplier["name"]},
-                "quote_id": quote_id,
-                "items": [
-                    {
-                        "rfq_item_id": int(row["rfq_item_id"]),
-                        "description": row["description"],
-                        "quantity": row["quantity"],
-                        "uom": row["uom"],
-                        "unit_price": row["unit_price"],
-                        "lead_time_days": row["lead_time_days"],
-                    }
-                    for row in rows
-                ],
-            }
+        result = _PROCUREMENT_SERVICE.get_supplier_quote_detail(
+            db,
+            tenant_id=tenant_id,
+            rfq_id=rfq_id,
+            supplier_id=supplier_id,
+            load_rfq_fn=_load_rfq,
+            err_fn=_err,
         )
+        return jsonify(result.payload), result.status_code
 
-    if not quote:
-        return jsonify({"error": "quote_not_found", "message": _err("quote_not_found")}), 404
-
-    _require_critical_confirmation(
-        "delete_supplier_proposal",
-        entity="quote",
-        entity_id=int(quote["id"]),
+    payload = request.get_json(silent=True) or {}
+    result = _PROCUREMENT_SERVICE.delete_supplier_quote(
+        db,
+        tenant_id=tenant_id,
+        rfq_id=rfq_id,
+        supplier_id=supplier_id,
+        payload=payload,
+        load_rfq_fn=_load_rfq,
+        require_confirmation_fn=_require_critical_confirmation,
+        err_fn=_err,
     )
-
-    quote_id = int(quote["id"])
-    db.execute("DELETE FROM quote_items WHERE quote_id = ? AND tenant_id = ?", (quote_id, tenant_id))
-    db.execute("DELETE FROM quotes WHERE id = ? AND tenant_id = ?", (quote_id, tenant_id))
-    db.execute(
-        """
-        UPDATE rfq_supplier_invites
-        SET status = CASE WHEN status = 'submitted' THEN 'opened' ELSE status END,
-            submitted_at = NULL,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE rfq_id = ? AND supplier_id = ? AND tenant_id = ?
-        """,
-        (rfq_id, supplier_id, tenant_id),
-    )
-    db.commit()
-    return jsonify({"deleted": True, "rfq_id": rfq_id, "supplier_id": supplier_id}), 200
+    if result.status_code < 400:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/fornecedor/convite/<string:token>", methods=["GET"])
 def supplier_invite_detail_api(token: str):
     db = get_db()
-    invite = _load_supplier_invite_by_token(db, token)
-    if not invite:
-        return jsonify({"error": "invite_not_found", "message": _err("invite_not_found")}), 404
-
-    if _invite_is_expired(invite):
-        db.execute(
-            "UPDATE rfq_supplier_invites SET status = 'expired', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (invite["id"],),
-        )
+    result = _PROCUREMENT_SERVICE.open_supplier_invite(
+        db,
+        token=token,
+        load_supplier_invite_by_token_fn=_load_supplier_invite_by_token,
+        invite_is_expired_fn=_invite_is_expired,
+        build_supplier_invite_payload_fn=_build_supplier_invite_payload,
+        err_fn=_err,
+    )
+    if result.status_code < 400 or result.status_code == 410:
         db.commit()
-        return jsonify({"error": "invite_expired", "message": _err("invite_expired")}), 410
-
-    if invite["status"] == "pending":
-        db.execute(
-            """
-            UPDATE rfq_supplier_invites
-            SET status = 'opened', opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (invite["id"],),
-        )
-        db.commit()
-
-    payload = _build_supplier_invite_payload(db, invite)
-    return jsonify(payload)
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/fornecedor/convite/<string:token>/propostas", methods=["POST"])
 def supplier_invite_submit_api(token: str):
     db = get_db()
-    invite = _load_supplier_invite_by_token(db, token)
-    if not invite:
-        return jsonify({"error": "invite_not_found", "message": _err("invite_not_found")}), 404
-    if _invite_is_expired(invite):
-        db.execute(
-            "UPDATE rfq_supplier_invites SET status = 'expired', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (invite["id"],),
-        )
-        db.commit()
-        return jsonify({"error": "invite_expired", "message": _err("invite_expired")}), 410
-
     payload = request.get_json(silent=True) or {}
-    items = payload.get("items") or []
-    if not isinstance(items, list) or not items:
-        return jsonify({"error": "items_required", "message": _err("items_required")}), 400
-
-    rfq_id = int(invite["rfq_id"])
-    supplier_id = int(invite["supplier_id"])
-    tenant_id = str(invite["tenant_id"])
-    rfq = _load_rfq(db, tenant_id, rfq_id)
-    if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found")}), 404
-    if not flow_action_allowed("fornecedor", invite["status"], "submit_quote"):
-        return _forbidden_action("fornecedor", invite["status"], "submit_quote")
-    if not flow_action_allowed("cotacao", rfq["status"], "save_supplier_quote"):
-        return _forbidden_action("cotacao", rfq["status"], "save_supplier_quote")
-    if rfq["status"] not in {"open", "collecting_quotes"}:
-        return (
-            jsonify(
-                {
-                    "error": "rfq_closed_for_quotes", "message": _err("rfq_closed_for_quotes"),
-                }
-            ),
-            400,
-        )
-
-    rfq_item_rows = db.execute(
-        """
-        SELECT id
-        FROM rfq_items
-        WHERE rfq_id = ? AND tenant_id = ?
-        ORDER BY id
-        """,
-        (rfq_id, tenant_id),
-    ).fetchall()
-    all_rfq_item_ids = {int(row["id"]) for row in rfq_item_rows}
-    if not all_rfq_item_ids:
-        return jsonify({"error": "rfq_items_not_found", "message": _err("rfq_items_not_found")}), 400
-
-    invited_rows = db.execute(
-        """
-        SELECT rfq_item_id
-        FROM rfq_item_suppliers
-        WHERE rfq_item_id IN ({placeholders}) AND supplier_id = ? AND tenant_id = ?
-        """.format(placeholders=",".join("?" for _ in all_rfq_item_ids)),
-        (*sorted(all_rfq_item_ids), supplier_id, tenant_id),
-    ).fetchall()
-    invited_item_ids = {int(row["rfq_item_id"]) for row in invited_rows}
-    if not invited_item_ids:
-        return (
-            jsonify(
-                {
-                    "error": "supplier_not_invited", "message": _err("supplier_not_invited"),
-                }
-            ),
-            400,
-        )
-
-    normalized_by_id: Dict[int, dict] = {}
-    for item in items:
-        rfq_item_id = _parse_optional_int(item.get("rfq_item_id"))
-        unit_price = _parse_optional_float(item.get("unit_price"))
-        lead_time_days = _parse_optional_int(item.get("lead_time_days"))
-
-        if rfq_item_id is None or unit_price is None:
-            continue
-        if rfq_item_id not in invited_item_ids:
-            continue
-        if unit_price < 0:
-            continue
-        if lead_time_days is not None and lead_time_days < 0:
-            continue
-
-        normalized_by_id[rfq_item_id] = {
-            "rfq_item_id": rfq_item_id,
-            "unit_price": unit_price,
-            "lead_time_days": lead_time_days,
-        }
-
-    normalized_items = list(normalized_by_id.values())
-    if not normalized_items:
-        return jsonify({"error": "valid_items_required", "message": _err("valid_items_required")}), 400
-
-    quote_id = _get_or_create_quote(db, rfq_id, supplier_id, tenant_id)
-    for item in normalized_items:
-        _upsert_quote_item(
-            db=db,
-            quote_id=int(quote_id),
-            rfq_item_id=int(item["rfq_item_id"]),
-            unit_price=float(item["unit_price"]),
-            lead_time_days=item["lead_time_days"],
-            tenant_id=tenant_id,
-        )
-
-    db.execute(
-        """
-        UPDATE rfq_supplier_invites
-        SET status = 'submitted',
-            submitted_at = CURRENT_TIMESTAMP,
-            opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        """,
-        (invite["id"],),
+    result = _PROCUREMENT_SERVICE.submit_supplier_invite(
+        db,
+        token=token,
+        payload=payload,
+        load_supplier_invite_by_token_fn=_load_supplier_invite_by_token,
+        invite_is_expired_fn=_invite_is_expired,
+        load_rfq_fn=_load_rfq,
+        parse_optional_int_fn=_parse_optional_int,
+        parse_optional_float_fn=_parse_optional_float,
+        get_or_create_quote_fn=_get_or_create_quote,
+        upsert_quote_item_fn=_upsert_quote_item,
+        flow_action_allowed_fn=flow_action_allowed,
+        forbidden_action_fn=_forbidden_action,
+        err_fn=_err,
     )
-    db.execute(
-        """
-        INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-        VALUES ('rfq', ?, ?, ?, 'supplier_quote_received', ?)
-        """,
-        (rfq_id, rfq["status"], "collecting_quotes", tenant_id),
-    )
-    db.execute(
-        "UPDATE rfqs SET status = 'collecting_quotes', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ?",
-        (rfq_id, tenant_id),
-    )
-    db.commit()
-
-    return jsonify({"status": "submitted", "quote_id": quote_id, "saved_items": len(normalized_items)})
+    if result.status_code < 400 or result.status_code == 410:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 def _upsert_quote_item(
@@ -1516,42 +890,17 @@ def purchase_orders_api():
         db = get_db()
         tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
         payload = request.get_json(silent=True) or {}
-
-        number = (payload.get("number") or "").strip() or None
-        supplier_name = (payload.get("supplier_name") or payload.get("fornecedor") or "").strip() or None
-        if not supplier_name:
-            return jsonify({"error": "supplier_name_required", "message": _err("supplier_name_required")}), 400
-
-        status = str(payload.get("status") or "draft").strip()
-        if status not in ALLOWED_PO_STATUSES:
-            return jsonify({"error": "status_invalid", "message": _err("status_invalid")}), 400
-
-        currency = (payload.get("currency") or "BRL").strip() or "BRL"
-        total_amount = _parse_optional_float(payload.get("total_amount"))
-        if total_amount is None:
-            total_amount = 0.0
-
-        cursor = db.execute(
-            """
-            INSERT INTO purchase_orders (
-                number, supplier_name, status, currency, total_amount, tenant_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            RETURNING id
-            """,
-            (number, supplier_name, status, currency, total_amount, tenant_id),
+        result = _PROCUREMENT_SERVICE.create_purchase_order(
+            db,
+            tenant_id=tenant_id,
+            payload=payload,
+            allowed_statuses=ALLOWED_PO_STATUSES,
+            parse_optional_float_fn=_parse_optional_float,
+            err_fn=_err,
         )
-        created_row = cursor.fetchone()
-        purchase_order_id = int(created_row["id"] if isinstance(created_row, dict) else created_row[0])
-
-        db.execute(
-            """
-            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-            VALUES ('purchase_order', ?, NULL, ?, 'purchase_order_created', ?)
-            """,
-            (purchase_order_id, status, tenant_id),
-        )
-        db.commit()
-        return jsonify({"id": purchase_order_id, "status": status}), 201
+        if result.status_code < 400:
+            db.commit()
+        return jsonify(result.payload), result.status_code
 
     db = get_read_db()
     tenant_id = current_tenant_id()
@@ -1588,183 +937,61 @@ def purchase_order_detail_api(purchase_order_id: int):
         )
 
     if request.method == "DELETE":
-        if not flow_action_allowed("ordem_compra", po["status"], "cancel_order"):
-            return _forbidden_action("ordem_compra", po["status"], "cancel_order")
-        if po["external_id"]:
-            return (
-                jsonify(
-                    {
-                        "error": "erp_managed_purchase_order_readonly", "message": _err("erp_managed_purchase_order_readonly"),
-                    }
-                ),
-                409,
-            )
-        _require_critical_confirmation(
-            "cancel_order",
-            entity="purchase_order",
-            entity_id=purchase_order_id,
+        payload = request.get_json(silent=True) or {}
+        result = _PROCUREMENT_SERVICE.cancel_purchase_order(
+            db,
+            tenant_id=tenant_id,
+            purchase_order_id=purchase_order_id,
+            payload=payload,
+            load_purchase_order_fn=_load_purchase_order,
+            flow_action_allowed_fn=flow_action_allowed,
+            forbidden_action_fn=_forbidden_action,
+            require_confirmation_fn=_require_critical_confirmation,
+            err_fn=_err,
         )
-        previous_status = po["status"]
-        if previous_status != "cancelled":
-            db.execute(
-                """
-                UPDATE purchase_orders
-                SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND tenant_id = ?
-                """,
-                (purchase_order_id, tenant_id),
-            )
-            db.execute(
-                """
-                INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-                VALUES ('purchase_order', ?, ?, 'cancelled', 'purchase_order_cancelled', ?)
-                """,
-                (purchase_order_id, previous_status, tenant_id),
-            )
+        if result.status_code < 400:
             db.commit()
-        return jsonify({"purchase_order_id": purchase_order_id, "status": "cancelled"}), 200
+        return jsonify(result.payload), result.status_code
 
     if request.method == "PATCH":
-        if not flow_action_allowed("ordem_compra", po["status"], "edit_order"):
-            return _forbidden_action("ordem_compra", po["status"], "edit_order")
-        if po["external_id"]:
-            return (
-                jsonify(
-                    {
-                        "error": "erp_managed_purchase_order_readonly", "message": _err("erp_managed_purchase_order_readonly"),
-                    }
-                ),
-                409,
-            )
         payload = request.get_json(silent=True) or {}
-        updates: List[str] = []
-        params: List[object] = []
-
-        if "number" in payload:
-            updates.append("number = ?")
-            params.append((payload.get("number") or "").strip() or None)
-
-        if "supplier_name" in payload or "fornecedor" in payload:
-            supplier_name = (payload.get("supplier_name") or payload.get("fornecedor") or "").strip() or None
-            updates.append("supplier_name = ?")
-            params.append(supplier_name)
-
-        if "currency" in payload:
-            currency = (payload.get("currency") or "BRL").strip() or "BRL"
-            updates.append("currency = ?")
-            params.append(currency)
-
-        if "total_amount" in payload:
-            total_amount = _parse_optional_float(payload.get("total_amount"))
-            if total_amount is None:
-                return jsonify({"error": "total_amount_invalid", "message": _err("total_amount_invalid")}), 400
-            updates.append("total_amount = ?")
-            params.append(total_amount)
-
-        next_status = po["status"]
-        if "status" in payload:
-            status = str(payload.get("status") or "").strip()
-            if status not in ALLOWED_PO_STATUSES:
-                return jsonify({"error": "status_invalid", "message": _err("status_invalid")}), 400
-            if status in {"sent_to_erp", "erp_accepted", "erp_error", "partially_received", "received"} and status != po["status"]:
-                return _forbidden_action("ordem_compra", po["status"], "push_to_erp", http_status=400)
-            required_action = "cancel_order" if status == "cancelled" else "edit_order"
-            if not flow_action_allowed("ordem_compra", po["status"], required_action):
-                return _forbidden_action("ordem_compra", po["status"], required_action)
-            if status == "cancelled" and status != po["status"]:
-                _require_critical_confirmation(
-                    "cancel_order",
-                    entity="purchase_order",
-                    entity_id=purchase_order_id,
-                    payload=payload,
-                )
-            next_status = status
-            updates.append("status = ?")
-            params.append(status)
-
-        if not updates:
-            return jsonify({"error": "no_changes", "message": _err("no_changes")}), 400
-
-        params.extend([purchase_order_id, tenant_id])
-        db.execute(
-            f"""
-            UPDATE purchase_orders
-            SET {", ".join(updates)}, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND tenant_id = ?
-            """,
-            tuple(params),
+        result = _PROCUREMENT_SERVICE.update_purchase_order(
+            db,
+            tenant_id=tenant_id,
+            purchase_order_id=purchase_order_id,
+            payload=payload,
+            allowed_statuses=ALLOWED_PO_STATUSES,
+            load_purchase_order_fn=_load_purchase_order,
+            flow_action_allowed_fn=flow_action_allowed,
+            forbidden_action_fn=_forbidden_action,
+            require_confirmation_fn=_require_critical_confirmation,
+            parse_optional_float_fn=_parse_optional_float,
+            err_fn=_err,
         )
-
-        if next_status != po["status"]:
-            db.execute(
-                """
-                INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-                VALUES ('purchase_order', ?, ?, ?, 'purchase_order_updated', ?)
-                """,
-                (purchase_order_id, po["status"], next_status, tenant_id),
-            )
-
-        db.commit()
-        return jsonify({"purchase_order_id": purchase_order_id, "status": next_status}), 200
+        if result.status_code < 400:
+            db.commit()
+        return jsonify(result.payload), result.status_code
 
     include_history_raw = (request.args.get("include_history") or "").strip().lower()
     include_history = include_history_raw not in {"0", "false", "no", "off"}
-
-    events: List[dict] = []
-    erp_timeline: List[dict] = []
-    sync_runs: List[dict] = []
-    if include_history:
-        events = _load_status_events(db, tenant_id, entity="purchase_order", entity_id=purchase_order_id)
-        erp_timeline = _build_erp_timeline(events)
-        sync_runs = _load_sync_runs(db, tenant_id, scope="purchase_order", limit=20)
-    po_flow = flow_meta("ordem_compra", po["status"])
-    process_stage = stage_for_purchase_order_status(po["status"])
-    last_erp_update = (erp_timeline[0]["occurred_at"] if erp_timeline else None) or po["updated_at"]
-    erp_status = erp_status_payload(
-        po["status"],
-        erp_last_error=po["erp_last_error"],
-        last_updated_at=last_erp_update,
+    result = _PROCUREMENT_SERVICE.get_purchase_order_detail(
+        db,
+        tenant_id=tenant_id,
+        purchase_order_id=purchase_order_id,
+        include_history=include_history,
+        load_purchase_order_fn=_load_purchase_order,
+        load_status_events_fn=_load_status_events,
+        build_erp_timeline_fn=_build_erp_timeline,
+        load_sync_runs_fn=_load_sync_runs,
+        flow_meta_fn=flow_meta,
+        stage_for_purchase_order_status_fn=stage_for_purchase_order_status,
+        erp_status_payload_fn=erp_status_payload,
+        erp_next_action_key_fn=_erp_next_action_key,
+        erp_action_label_fn=_erp_action_label,
+        build_process_steps_fn=build_process_steps,
+        err_fn=_err,
     )
-    next_action_key = _erp_next_action_key(
-        po["status"],
-        list(po_flow.get("allowed_actions") or []),
-        po_flow.get("primary_action"),
-        str(erp_status.get("key") or ""),
-    )
-    next_action_label = _erp_action_label(next_action_key, str(erp_status.get("key") or ""))
-
-    return jsonify(
-        {
-            "purchase_order": {
-                "id": po["id"],
-                "number": po["number"],
-                "award_id": po["award_id"],
-                "supplier_name": po["supplier_name"],
-                "status": po["status"],
-                "currency": po["currency"],
-                "total_amount": po["total_amount"],
-                "external_id": po["external_id"],
-                "erp_last_error": po["erp_last_error"],
-                "created_at": po["created_at"],
-                "updated_at": po["updated_at"],
-                "allowed_actions": po_flow["allowed_actions"],
-                "primary_action": po_flow["primary_action"],
-                "process_stage": process_stage,
-                "erp_status": erp_status,
-                "erp_last_attempt_at": last_erp_update,
-                "erp_next_action": next_action_key,
-                "erp_next_action_label": next_action_label,
-            },
-            "erp_timeline": erp_timeline,
-            "events": events,
-            "sync_runs": sync_runs,
-            "history_loaded": include_history,
-            "flow": {
-                "process_stage": process_stage,
-                "process_steps": build_process_steps(process_stage),
-            },
-        }
-    )
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/procurement/integrations/logs", methods=["GET"])
@@ -1808,61 +1035,18 @@ def erp_followup_api():
         supplier_search=(request.args.get("supplier") or "").strip(),
         erp_only=False,
     )
-
-    rows: List[dict] = []
-    for item in items:
-        erp_status = item.get("erp_status") or erp_status_payload(
-            item.get("status"),
-            erp_last_error=item.get("erp_last_error"),
-            last_updated_at=item.get("erp_last_attempt_at") or item.get("updated_at"),
-        )
-        erp_key = str(erp_status.get("key") or "")
-        if status_filter_values and erp_key not in status_filter_values:
-            continue
-
-        allowed_actions = list(item.get("allowed_actions") or [])
-        next_action_key = _erp_next_action_key(
-            item.get("status"),
-            allowed_actions,
-            item.get("primary_action"),
-            erp_key,
-        )
-        can_resend = "push_to_erp" in set(allowed_actions) and erp_key in {"rejeitado", "reenvio_necessario"}
-        next_action_label = _erp_action_label(next_action_key, erp_key)
-        if next_action_key == "refresh_order":
-            next_action_label = get_ui_text("erp.next_action.await_response", "Aguardar retorno do ERP.")
-        elif can_resend:
-            next_action_label = get_ui_text("erp.next_action.resend", "Reenviar ao ERP")
-        elif erp_key == "rejeitado":
-            next_action_label = get_ui_text("erp.next_action.review_data", "Revisar dados da ordem e reenviar ao ERP.")
-
-        rows.append(
-            {
-                "purchase_order_id": item.get("id"),
-                "number": item.get("number"),
-                "supplier_name": item.get("supplier_name"),
-                "technical_status": item.get("status"),
-                "erp_status": erp_status,
-                "last_attempt_at": item.get("erp_last_attempt_at") or erp_status.get("last_updated_at") or item.get("updated_at"),
-                "next_action": next_action_key,
-                "next_action_label": next_action_label,
-                "can_resend": can_resend,
-                "allowed_actions": allowed_actions,
-                "detail_url": f"/procurement/purchase-orders/{item.get('id')}",
-            }
-        )
-
-    rows.sort(
-        key=lambda row: (
-            str(row.get("last_attempt_at") or ""),
-            int(row.get("purchase_order_id") or 0),
-        ),
-        reverse=True,
+    result = _PROCUREMENT_SERVICE.list_erp_followup_orders(
+        items=items,
+        status_filter_values=status_filter_values,
+        erp_status_payload_fn=erp_status_payload,
+        erp_next_action_key_fn=_erp_next_action_key,
+        erp_action_label_fn=_erp_action_label,
+        get_ui_text_fn=get_ui_text,
     )
 
     return jsonify(
         {
-            "items": rows,
+            "items": result.payload["items"],
             "filters": {
                 "limit": limit,
                 "erp_status": sorted(status_filter_values),
@@ -1876,23 +1060,6 @@ def integration_sync_api():
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     payload = request.get_json(silent=True) or {}
-
-    scope_value = (payload.get("scope") or request.args.get("scope") or "").strip()
-    if not scope_value:
-        return jsonify({"error": "scope_required", "message": _err("scope_required")}), 400
-
-    canonical_scope = SCOPE_ALIASES.get(scope_value, (scope_value,))[0]
-    if canonical_scope not in SYNC_SUPPORTED_SCOPES:
-        return (
-            jsonify(
-                {
-                    "error": "scope_not_supported", "message": _err("scope_not_supported"),
-                    "scope": canonical_scope,
-                }
-            ),
-            400,
-        )
-
     limit_value = payload.get("limit")
     if limit_value is None:
         limit_value = request.args.get("limit")
@@ -1902,182 +1069,42 @@ def integration_sync_api():
         min_value=1,
         max_value=500,
     )
-
-    sync_run_id = _start_sync_run(db, tenant_id, scope=canonical_scope)
-
     try:
-        result = _sync_from_erp(db, tenant_id, canonical_scope, limit=limit)
-        _finish_sync_run(
+        result = _PROCUREMENT_SERVICE.run_integration_sync(
             db,
-            tenant_id,
-            sync_run_id,
-            status="succeeded",
-            records_in=result["records_in"],
-            records_upserted=result["records_upserted"],
+            tenant_id=tenant_id,
+            scope_value=(payload.get("scope") or request.args.get("scope") or "").strip(),
+            limit=limit,
+            scope_aliases=SCOPE_ALIASES,
+            supported_scopes=SYNC_SUPPORTED_SCOPES,
+            start_sync_run_fn=_start_sync_run,
+            finish_sync_run_fn=_finish_sync_run,
+            sync_from_erp_fn=_sync_from_erp,
+            integration_error_cls=IntegrationError,
+            err_fn=_err,
         )
+        if result.status_code < 400:
+            db.commit()
+        return jsonify(result.payload), result.status_code
+    except IntegrationError:
         db.commit()
-    except Exception as exc:  # noqa: BLE001 - MVP: loga erro resumido
-        _finish_sync_run(db, tenant_id, sync_run_id, status="failed", records_in=0, records_upserted=0)
-        db.execute(
-            """
-            UPDATE sync_runs
-            SET error_summary = ?
-            WHERE id = ? AND tenant_id = ?
-            """,
-            (str(exc)[:200], sync_run_id, tenant_id),
-        )
-        db.commit()
-        raise IntegrationError(
-            code="sync_failed",
-            message_key="sync_failed",
-            http_status=500,
-            critical=False,
-            details=str(exc),
-            payload={"scope": canonical_scope},
-        )
-
-    return jsonify(
-        {
-            "status": "succeeded",
-            "scope": canonical_scope,
-            "sync_run_id": sync_run_id,
-            "result": result,
-        }
-    )
+        raise
 
 
 @procurement_bp.route("/api/procurement/seed", methods=["POST", "GET"])
 def procurement_seed():
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-
-    db.execute(
-        "INSERT INTO tenants (id, name, subdomain) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
-        (tenant_id, f"Tenant {tenant_id}", tenant_id),
+    result = _PROCUREMENT_SERVICE.seed_procurement_data(
+        db,
+        tenant_id=tenant_id,
+        load_inbox_cards_fn=_load_inbox_cards,
+        ensure_demo_suppliers_fn=_ensure_demo_suppliers,
+        seed_demo_items_for_pending_requests_fn=_seed_demo_items_for_pending_requests,
     )
-
-    existing = db.execute(
-        "SELECT COUNT(*) AS total FROM purchase_requests WHERE tenant_id = ?",
-        (tenant_id,),
-    ).fetchone()["total"]
-    if existing:
-        open_items = db.execute(
-            """
-            SELECT COUNT(*) AS total
-            FROM purchase_request_items pri
-            JOIN purchase_requests pr
-              ON pr.id = pri.purchase_request_id AND pr.tenant_id = pri.tenant_id
-            WHERE pr.status = 'pending_rfq' AND pr.tenant_id = ?
-            """,
-            (tenant_id,),
-        ).fetchone()["total"]
-        if not open_items:
-            _seed_demo_items_for_pending_requests(db, tenant_id)
-        _ensure_demo_suppliers(db, tenant_id)
+    if result.status_code < 400:
         db.commit()
-        cards = _load_inbox_cards(db, tenant_id)
-        return jsonify(
-            {
-                "seeded": open_items == 0,
-                "tenant_id": tenant_id,
-                "kpis": cards,
-                "hint": "Seed ja aplicado. Use GET /api/procurement/inbox",
-            }
-        )
-
-    needed_at_pr1 = (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat()
-    needed_at_pr2 = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
-
-    cursor = db.execute(
-        """
-        INSERT INTO purchase_requests (number, status, priority, requested_by, department, needed_at, tenant_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        RETURNING id
-        """,
-        ("SR-1001", "pending_rfq", "high", "Joao", "Manutencao", needed_at_pr1, tenant_id),
-    )
-    pr1_row = cursor.fetchone()
-    pr1_id = pr1_row["id"] if isinstance(pr1_row, dict) else pr1_row[0]
-
-    cursor = db.execute(
-        """
-        INSERT INTO purchase_requests (number, status, priority, requested_by, department, needed_at, tenant_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        RETURNING id
-        """,
-        ("SR-1002", "in_rfq", "urgent", "Maria", "Operacoes", needed_at_pr2, tenant_id),
-    )
-    pr2_row = cursor.fetchone()
-    pr2_id = pr2_row["id"] if isinstance(pr2_row, dict) else pr2_row[0]
-
-    if pr1_id:
-        db.execute(
-            """
-            INSERT INTO purchase_request_items (purchase_request_id, line_no, description, quantity, uom, tenant_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (pr1_id, 1, "Rolamento 6202", 10, "UN", tenant_id),
-        )
-        db.execute(
-            """
-            INSERT INTO purchase_request_items (purchase_request_id, line_no, description, quantity, uom, tenant_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (pr1_id, 2, "Correia dentada", 4, "UN", tenant_id),
-        )
-
-    if pr2_id:
-        db.execute(
-            """
-            INSERT INTO purchase_request_items (purchase_request_id, line_no, description, quantity, uom, tenant_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (pr2_id, 1, "Luva nitrilica", 200, "UN", tenant_id),
-        )
-        db.execute(
-            """
-            INSERT INTO purchase_request_items (purchase_request_id, line_no, description, quantity, uom, tenant_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (pr2_id, 2, "Mascara PFF2", 150, "UN", tenant_id),
-        )
-
-    db.execute(
-        "INSERT INTO rfqs (title, status, tenant_id) VALUES (?, ?, ?)",
-        ("Cotacao - Rolamentos", "collecting_quotes", tenant_id),
-    )
-    db.execute(
-        "INSERT INTO rfqs (title, status, tenant_id) VALUES (?, ?, ?)",
-        ("Cotacao - EPIs", "awarded", tenant_id),
-    )
-
-    db.execute(
-        """
-        INSERT INTO purchase_orders (number, status, tenant_id, supplier_name, total_amount)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        ("OC-2001", "approved", tenant_id, "Fornecedor A", 12450.90),
-    )
-    db.execute(
-        """
-        INSERT INTO purchase_orders (number, status, tenant_id, supplier_name, erp_last_error, total_amount)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        ("OC-2002", "erp_error", tenant_id, "Fornecedor B", "Fornecedor sem codigo no ERP", 9870.00),
-    )
-
-    _ensure_demo_suppliers(db, tenant_id)
-    db.commit()
-
-    cards = _load_inbox_cards(db, tenant_id)
-    return jsonify(
-        {
-            "seeded": True,
-            "tenant_id": tenant_id,
-            "kpis": cards,
-            "hint": "Agora use GET /api/procurement/inbox",
-        }
-    )
+    return jsonify(result.payload), result.status_code
 
 
 def _seed_demo_items_for_pending_requests(db, tenant_id: str, limit: int = 2) -> None:
@@ -2123,60 +1150,16 @@ def _seed_demo_items_for_pending_requests(db, tenant_id: str, limit: int = 2) ->
 def list_rfqs():
     db = get_read_db()
     tenant_id = current_tenant_id()
-    clause, params = _tenant_clause(tenant_id, alias="r")
-
-    filters: List[str] = []
-    status_values = _parse_csv_values(request.args.get("status"))
-    normalized_statuses = [status for status in status_values if status in ALLOWED_RFQ_STATUSES]
-    if normalized_statuses:
-        filters.append(f"r.status IN ({','.join('?' for _ in normalized_statuses)})")
-        params.extend(normalized_statuses)
-
-    where_sql = clause
-    if filters:
-        where_sql = f"{clause} AND {' AND '.join(filters)}"
-
-    rows = db.execute(
-        f"""
-        SELECT
-            r.id,
-            r.title,
-            r.status,
-            r.updated_at,
-            COUNT(DISTINCT ri.id) AS item_count,
-            COUNT(DISTINCT ris.supplier_id) AS supplier_count
-        FROM rfqs r
-        LEFT JOIN rfq_items ri
-          ON ri.rfq_id = r.id AND ri.tenant_id = r.tenant_id
-        LEFT JOIN rfq_item_suppliers ris
-          ON ris.rfq_item_id = ri.id AND ris.tenant_id = r.tenant_id
-        WHERE {where_sql}
-        GROUP BY r.id, r.title, r.status, r.updated_at
-        ORDER BY r.updated_at DESC, r.id DESC
-        LIMIT 150
-        """,
-        tuple(params),
-    ).fetchall()
-
-    items = []
-    for row in rows:
-        status = row["status"]
-        stage = stage_for_rfq_status(status)
-        meta = flow_meta("cotacao", status)
-        items.append(
-            {
-                "id": row["id"],
-                "title": row["title"],
-                "status": status,
-                "updated_at": row["updated_at"],
-                "item_count": int(row["item_count"] or 0),
-                "supplier_count": int(row["supplier_count"] or 0),
-                "process_stage": stage,
-                "allowed_actions": meta["allowed_actions"],
-                "primary_action": meta["primary_action"],
-            }
-        )
-    return jsonify({"items": items})
+    result = _PROCUREMENT_SERVICE.list_rfqs(
+        db,
+        tenant_id=tenant_id,
+        status_values=_parse_csv_values(request.args.get("status")),
+        allowed_statuses=ALLOWED_RFQ_STATUSES,
+        tenant_clause_fn=_tenant_clause,
+        stage_for_rfq_status_fn=stage_for_rfq_status,
+        flow_meta_fn=flow_meta,
+    )
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/procurement/rfqs", methods=["POST"])
@@ -2201,103 +1184,23 @@ def create_rfq():
 def rfq_crud_api(rfq_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    rfq = _load_rfq(db, tenant_id, rfq_id)
-    if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
-
-    previous_status = rfq["status"]
-    if request.method == "DELETE":
-        if not flow_action_allowed("cotacao", previous_status, "cancel_rfq"):
-            return _forbidden_action("cotacao", previous_status, "cancel_rfq")
-        _require_critical_confirmation(
-            "cancel_rfq",
-            entity="rfq",
-            entity_id=rfq_id,
-        )
-        if previous_status == "cancelled":
-            return jsonify({"rfq_id": rfq_id, "status": "cancelled"}), 200
-        db.execute(
-            """
-            UPDATE rfqs
-            SET status = 'cancelled', cancel_reason = COALESCE(cancel_reason, 'rfq_cancelled'), updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND tenant_id = ?
-            """,
-            (rfq_id, tenant_id),
-        )
-        db.execute(
-            """
-            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-            VALUES ('rfq', ?, ?, 'cancelled', 'rfq_cancelled', ?)
-            """,
-            (rfq_id, previous_status, tenant_id),
-        )
-        db.commit()
-        return jsonify({"rfq_id": rfq_id, "status": "cancelled"}), 200
-
     payload = request.get_json(silent=True) or {}
-    updates: List[str] = []
-    params: List[object] = []
-    next_status = previous_status
-
-    if "title" in payload:
-        if not flow_action_allowed("cotacao", previous_status, "edit_rfq"):
-            return _forbidden_action("cotacao", previous_status, "edit_rfq")
-        updates.append("title = ?")
-        params.append((payload.get("title") or "").strip() or None)
-
-    if "status" in payload:
-        status = str(payload.get("status") or "").strip()
-        if status not in ALLOWED_RFQ_STATUSES:
-            return jsonify({"error": "status_invalid", "message": _err("status_invalid")}), 400
-        required_action = "cancel_rfq" if status == "cancelled" else "update_rfq_status"
-        if status == "awarded":
-            required_action = "award_rfq"
-        if not flow_action_allowed("cotacao", previous_status, required_action):
-            return _forbidden_action("cotacao", previous_status, required_action)
-        if status == "awarded":
-            return _forbidden_action("cotacao", previous_status, "award_rfq", http_status=400)
-        if status == "cancelled" and status != previous_status:
-            _require_critical_confirmation(
-                "cancel_rfq",
-                entity="rfq",
-                entity_id=rfq_id,
-                payload=payload,
-            )
-        next_status = status
-        updates.append("status = ?")
-        params.append(status)
-        if status == "cancelled":
-            updates.append("cancel_reason = ?")
-            params.append((payload.get("cancel_reason") or "rfq_cancelled").strip() or "rfq_cancelled")
-
-    if "cancel_reason" in payload and "status" not in payload:
-        updates.append("cancel_reason = ?")
-        params.append((payload.get("cancel_reason") or "").strip() or None)
-
-    if not updates:
-        return jsonify({"error": "no_changes", "message": _err("no_changes")}), 400
-
-    params.extend([rfq_id, tenant_id])
-    db.execute(
-        f"""
-        UPDATE rfqs
-        SET {", ".join(updates)}, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND tenant_id = ?
-        """,
-        tuple(params),
+    result = _PROCUREMENT_SERVICE.update_rfq(
+        db,
+        tenant_id=tenant_id,
+        rfq_id=rfq_id,
+        payload=payload,
+        is_delete=request.method == "DELETE",
+        allowed_statuses=ALLOWED_RFQ_STATUSES,
+        load_rfq_fn=_load_rfq,
+        flow_action_allowed_fn=flow_action_allowed,
+        forbidden_action_fn=_forbidden_action,
+        require_confirmation_fn=_require_critical_confirmation,
+        err_fn=_err,
     )
-
-    if next_status != previous_status:
-        db.execute(
-            """
-            INSERT INTO status_events (entity, entity_id, from_status, to_status, reason, tenant_id)
-            VALUES ('rfq', ?, ?, ?, 'rfq_updated', ?)
-            """,
-            (rfq_id, previous_status, next_status, tenant_id),
-        )
-
-    db.commit()
-    return jsonify({"rfq_id": rfq_id, "status": next_status}), 200
+    if result.status_code < 400:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/procurement/cotacoes/abertura", methods=["POST"])
@@ -2305,37 +1208,21 @@ def open_rfq_with_suppliers():
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     payload = request.get_json(silent=True) or {}
-
-    title = (payload.get("title") or "Cotacao aberta").strip()
-    item_ids = _normalize_int_list(payload.get("purchase_request_item_ids"))
-    supplier_ids = _normalize_int_list(payload.get("supplier_ids"))
-    if not supplier_ids:
-        return (
-            jsonify(
-                {
-                    "error": "supplier_ids_required", "message": _err("supplier_ids_required"),
-                }
-            ),
-            400,
-        )
-    valid_supplier_ids = {int(item["id"]) for item in _load_suppliers(db, tenant_id)}
-    if not any(supplier_id in valid_supplier_ids for supplier_id in supplier_ids):
-        return jsonify({"error": "suppliers_not_found", "message": _err("suppliers_not_found")}), 400
-
-    created, error_payload, status_code = _create_rfq_core(db, tenant_id, title, item_ids)
-    if error_payload:
-        return jsonify(error_payload), status_code
-
-    invite_result = _create_rfq_supplier_invites(
-        db=db,
+    result = _PROCUREMENT_SERVICE.create_rfq_with_suppliers(
+        db,
         tenant_id=tenant_id,
-        rfq_id=int(created["id"]),
-        rfq_items=created["rfq_items"],
-        supplier_ids=supplier_ids,
-        valid_days=_parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30),
+        title=(payload.get("title") or "Cotacao aberta").strip(),
+        purchase_request_item_ids=_normalize_int_list(payload.get("purchase_request_item_ids")),
+        supplier_ids=_normalize_int_list(payload.get("supplier_ids")),
+        invite_valid_days=_parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30),
+        create_rfq_core_fn=_create_rfq_core,
+        load_suppliers_fn=_load_suppliers,
+        create_rfq_supplier_invites_fn=_create_rfq_supplier_invites,
+        err_fn=_err,
     )
-    db.commit()
-    return jsonify({"rfq": created, "invites": invite_result}), 201
+    if result.status_code < 400:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/procurement/cotacoes/<int:rfq_id>/convites", methods=["POST"])
@@ -2343,53 +1230,23 @@ def create_rfq_invites(rfq_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     payload = request.get_json(silent=True) or {}
-
-    rfq = _load_rfq(db, tenant_id, rfq_id)
-    if not rfq:
-        return (
-            jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}),
-            404,
-        )
-    if not flow_action_allowed("cotacao", rfq["status"], "invite_supplier"):
-        return _forbidden_action("cotacao", rfq["status"], "invite_supplier")
-
-    supplier_ids = _normalize_int_list(payload.get("supplier_ids"))
-    if not supplier_ids:
-        return (
-            jsonify({"error": "supplier_ids_required", "message": _err("supplier_ids_required")}),
-            400,
-        )
-
-    requested_item_ids = _normalize_int_list(payload.get("rfq_item_ids"))
-    all_items = _load_rfq_items(db, tenant_id, rfq_id)
-    if requested_item_ids:
-        items = [item for item in all_items if int(item["id"]) in set(requested_item_ids)]
-    else:
-        items = all_items
-    if not items:
-        return jsonify({"error": "rfq_items_required", "message": _err("rfq_items_required")}), 400
-
-    invite_result = _create_rfq_supplier_invites(
-        db=db,
+    result = _PROCUREMENT_SERVICE.invite_suppliers(
+        db,
         tenant_id=tenant_id,
         rfq_id=rfq_id,
-        rfq_items=[
-            {
-                "rfq_item_id": int(item["id"]),
-                "purchase_request_item_id": item.get("purchase_request_item_id"),
-                "description": item.get("description"),
-                "quantity": item.get("quantity"),
-                "uom": item.get("uom"),
-            }
-            for item in items
-        ],
-        supplier_ids=supplier_ids,
-        valid_days=_parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30),
+        supplier_ids=_normalize_int_list(payload.get("supplier_ids")),
+        requested_item_ids=_normalize_int_list(payload.get("rfq_item_ids")),
+        invite_valid_days=_parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30),
+        load_rfq_fn=_load_rfq,
+        load_rfq_items_fn=_load_rfq_items,
+        create_rfq_supplier_invites_fn=_create_rfq_supplier_invites,
+        flow_action_allowed_fn=flow_action_allowed,
+        forbidden_action_fn=_forbidden_action,
+        err_fn=_err,
     )
-    if invite_result["supplier_count"] == 0:
-        return jsonify({"error": "suppliers_not_found", "message": _err("suppliers_not_found")}), 400
-    db.commit()
-    return jsonify({"rfq_id": rfq_id, "invites": invite_result}), 200
+    if result.status_code < 400:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/procurement/cotacoes/<int:rfq_id>/convites", methods=["GET"])
@@ -2410,103 +1267,27 @@ def list_rfq_invites(rfq_id: int):
 def rfq_invite_crud_api(rfq_id: int, invite_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
-    rfq = _load_rfq(db, tenant_id, rfq_id)
-    if not rfq:
-        return jsonify({"error": "rfq_not_found", "message": _err("rfq_not_found"), "rfq_id": rfq_id}), 404
-
-    invite = _load_rfq_supplier_invite_by_id(db, tenant_id, rfq_id, invite_id)
-    if not invite:
-        return jsonify({"error": "invite_not_found", "message": _err("invite_not_found")}), 404
-
-    if request.method == "DELETE":
-        if not flow_action_allowed("cotacao", rfq["status"], "cancel_invite"):
-            return _forbidden_action("cotacao", rfq["status"], "cancel_invite")
-        if not flow_action_allowed("fornecedor", invite["status"], "cancel_invite"):
-            return _forbidden_action("fornecedor", invite["status"], "cancel_invite")
-        _require_critical_confirmation(
-            "cancel_invite",
-            entity="rfq_supplier_invite",
-            entity_id=invite_id,
-        )
-        _remove_supplier_from_rfq(db, tenant_id, rfq_id, int(invite["supplier_id"]))
-        db.execute(
-            """
-            UPDATE rfq_supplier_invites
-            SET status = 'cancelled',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND tenant_id = ?
-            """,
-            (invite_id, tenant_id),
-        )
-        db.commit()
-        return jsonify({"deleted": True, "invite_id": invite_id}), 200
-
     payload = request.get_json(silent=True) or {}
-    action = str(payload.get("action") or "").strip().lower()
-    valid_days = _parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30)
-    expires_at = (datetime.now(timezone.utc) + timedelta(days=valid_days)).replace(microsecond=0).isoformat()
-    action_map = {"reopen": "reopen_invite", "extend": "extend_invite", "cancel": "cancel_invite"}
-    requested_action = action_map.get(action)
-    if not requested_action:
-        return (
-            jsonify(
-                {
-                    "error": "action_invalid", "message": _err("action_invalid"),
-                }
-            ),
-            400,
-        )
-    if not flow_action_allowed("cotacao", rfq["status"], requested_action):
-        return _forbidden_action("cotacao", rfq["status"], requested_action)
-    if not flow_action_allowed("fornecedor", invite["status"], requested_action):
-        return _forbidden_action("fornecedor", invite["status"], requested_action)
-    if action == "cancel":
-        _require_critical_confirmation(
-            "cancel_invite",
-            entity="rfq_supplier_invite",
-            entity_id=invite_id,
-            payload=payload,
-        )
-
-    if action == "reopen":
-        new_token = secrets.token_urlsafe(24)
-        db.execute(
-            """
-            UPDATE rfq_supplier_invites
-            SET token = ?,
-                status = 'pending',
-                expires_at = ?,
-                opened_at = NULL,
-                submitted_at = NULL,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND tenant_id = ?
-            """,
-            (new_token, expires_at, invite_id, tenant_id),
-        )
-    elif action == "extend":
-        db.execute(
-            """
-            UPDATE rfq_supplier_invites
-            SET expires_at = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND tenant_id = ?
-            """,
-            (expires_at, invite_id, tenant_id),
-        )
-    elif action == "cancel":
-        db.execute(
-            """
-            UPDATE rfq_supplier_invites
-            SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND tenant_id = ?
-            """,
-            (invite_id, tenant_id),
-        )
-
-    db.commit()
-    updated = _load_rfq_supplier_invite_by_id(db, tenant_id, rfq_id, invite_id)
-    if not updated:
-        return jsonify({"error": "invite_not_found", "message": _err("invite_not_found")}), 404
-    return jsonify({"invite": _serialize_rfq_invite_row(updated)}), 200
+    result = _PROCUREMENT_SERVICE.manage_rfq_invite(
+        db,
+        tenant_id=tenant_id,
+        rfq_id=rfq_id,
+        invite_id=invite_id,
+        payload=payload,
+        is_delete=request.method == "DELETE",
+        valid_days=_parse_int(payload.get("invite_valid_days"), default=7, min_value=1, max_value=30),
+        load_rfq_fn=_load_rfq,
+        load_invite_fn=_load_rfq_supplier_invite_by_id,
+        serialize_invite_fn=_serialize_rfq_invite_row,
+        remove_supplier_from_rfq_fn=_remove_supplier_from_rfq,
+        flow_action_allowed_fn=flow_action_allowed,
+        forbidden_action_fn=_forbidden_action,
+        require_confirmation_fn=_require_critical_confirmation,
+        err_fn=_err,
+    )
+    if result.status_code < 400:
+        db.commit()
+    return jsonify(result.payload), result.status_code
 
 
 @procurement_bp.route("/api/procurement/rfqs/<int:rfq_id>/comparison", methods=["GET"])
@@ -2582,25 +1363,32 @@ def push_purchase_order_to_erp(purchase_order_id: int):
     db = get_db()
     tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
     payload = request.get_json(silent=True) or {}
-    result = _PROCUREMENT_SERVICE.register_erp_intent(
-        db,
-        tenant_id=tenant_id,
-        intent_input=PurchaseOrderErpIntentInput(
-            purchase_order_id=purchase_order_id,
-            request_id=(getattr(g, "request_id", None) or "").strip() or None,
-            payload=payload,
-        ),
-        load_purchase_order_fn=_load_purchase_order,
-        find_pending_push_fn=find_pending_purchase_order_push,
-        flow_action_allowed_fn=flow_action_allowed,
-        forbidden_action_fn=_forbidden_action,
-        require_confirmation_fn=_require_critical_confirmation,
-        queue_push_fn=queue_purchase_order_push,
-        err_fn=_err,
-        ok_fn=_ok,
-    )
-    db.commit()
-    return jsonify(result.payload), result.status_code
+    try:
+        result = _PROCUREMENT_SERVICE.send_po_to_erp_intent(
+            db,
+            tenant_id=tenant_id,
+            intent_input=PurchaseOrderErpIntentInput(
+                purchase_order_id=purchase_order_id,
+                request_id=(getattr(g, "request_id", None) or "").strip() or None,
+                payload=payload,
+            ),
+            load_purchase_order_fn=_load_purchase_order,
+            find_pending_push_fn=find_pending_purchase_order_push,
+            flow_action_allowed_fn=flow_action_allowed,
+            forbidden_action_fn=_forbidden_action,
+            require_confirmation_fn=_require_critical_confirmation,
+            queue_push_fn=queue_purchase_order_push,
+            process_outbox_fn=process_purchase_order_outbox,
+            push_purchase_order_fn=push_purchase_order,
+            immediate_response=bool(current_app.config.get("ERP_PUSH_IMMEDIATE_RESPONSE", False)),
+            err_fn=_err,
+            ok_fn=_ok,
+        )
+        db.commit()
+        return jsonify(result.payload), result.status_code
+    except IntegrationError:
+        db.commit()
+        raise
 
 
 def _load_open_purchase_requests(db, tenant_id: str | None, limit: int = 80) -> List[dict]:
