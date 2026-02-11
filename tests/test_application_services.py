@@ -39,6 +39,17 @@ class _FakeAuthRepo:
         }
 
 
+class _RowLike:
+    def __init__(self, values):
+        self._values = dict(values)
+
+    def keys(self):
+        return list(self._values.keys())
+
+    def __getitem__(self, key):
+        return self._values[key]
+
+
 class ApplicationServicesTest(unittest.TestCase):
     def test_auth_service_login_from_env_users(self) -> None:
         service = AuthService(repository=_FakeAuthRepo())
@@ -141,6 +152,26 @@ class ApplicationServicesTest(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.payload.get("sync_run_id"), 77)
         self.assertEqual(result.payload.get("status"), "sent_to_erp")
+
+    def test_erp_outbox_service_accepts_row_like_records(self) -> None:
+        outbox = ErpOutboxService()
+        result = outbox.register_erp_intent(
+            db=None,
+            tenant_id="tenant-1",
+            purchase_order=_RowLike({"external_id": "PO-ROW"}),
+            intent_input=PurchaseOrderErpIntentInput(
+                purchase_order_id=123,
+                request_id="req-1",
+                payload={},
+            ),
+            queue_push_fn=lambda *_args, **_kwargs: _RowLike({"sync_run_id": 88, "already_queued": True}),
+            success_message_fn=lambda key, fallback=None: key if fallback is None else key,
+        )
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.payload.get("status"), "sent_to_erp")
+        self.assertEqual(result.payload.get("sync_run_id"), 88)
+        self.assertEqual(result.payload.get("external_id"), "PO-ROW")
+        self.assertTrue(result.payload.get("already_queued"))
 
     def test_procurement_service_send_po_immediate_success(self) -> None:
         service = ProcurementService()

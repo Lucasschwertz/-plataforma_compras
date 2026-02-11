@@ -3,6 +3,17 @@ from __future__ import annotations
 from app.domain.contracts import PurchaseOrderErpIntentInput, ServiceOutput
 
 
+def _row_to_dict(value) -> dict:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    keys = getattr(value, "keys", None)
+    if callable(keys):
+        return {key: value[key] for key in value.keys()}
+    return {}
+
+
 class ErpOutboxService:
     def find_pending(self, db, *, tenant_id: str, purchase_order_id: int, find_pending_fn) -> dict | None:
         return find_pending_fn(db, tenant_id, purchase_order_id)
@@ -12,27 +23,29 @@ class ErpOutboxService:
         db,
         *,
         tenant_id: str,
-        purchase_order: dict,
+        purchase_order,
         intent_input: PurchaseOrderErpIntentInput,
         queue_push_fn,
         success_message_fn,
     ) -> ServiceOutput:
+        purchase_order_data = _row_to_dict(purchase_order)
         queue_result = queue_push_fn(
             db,
             tenant_id,
-            dict(purchase_order),
+            dict(purchase_order_data),
             request_id=intent_input.request_id,
         )
+        queue_payload = _row_to_dict(queue_result)
+        sync_run_id = int(queue_payload.get("sync_run_id") or 0)
         return ServiceOutput(
             payload={
                 "purchase_order_id": intent_input.purchase_order_id,
                 "status": "sent_to_erp",
-                "external_id": purchase_order.get("external_id"),
-                "sync_run_id": int(queue_result["sync_run_id"]),
+                "external_id": purchase_order_data.get("external_id"),
+                "sync_run_id": sync_run_id,
                 "queued": True,
-                "already_queued": bool(queue_result.get("already_queued")),
+                "already_queued": bool(queue_payload.get("already_queued")),
                 "message": success_message_fn("erp_send_queued", success_message_fn("order_sent_to_erp")),
             },
             status_code=200,
         )
-
