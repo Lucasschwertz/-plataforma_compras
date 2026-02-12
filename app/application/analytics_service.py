@@ -3,16 +3,22 @@ from __future__ import annotations
 import copy
 import threading
 import time
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from app.domain.contracts import AnalyticsRequestInput
+from app.infrastructure.repositories.procurement import AnalyticsRepository
 
 
 class AnalyticsService:
-    def __init__(self, ttl_seconds: int = 60) -> None:
+    def __init__(
+        self,
+        ttl_seconds: int = 60,
+        repository_factory: Callable[[str], AnalyticsRepository] | None = None,
+    ) -> None:
         self.ttl_seconds = max(1, int(ttl_seconds))
         self._cache: Dict[tuple, dict] = {}
         self._lock = threading.Lock()
+        self._repository_factory = repository_factory or (lambda tenant_id: AnalyticsRepository(tenant_id=tenant_id))
 
     @staticmethod
     def _normalize_csv_filter_value(raw_value: str | None) -> str:
@@ -79,6 +85,9 @@ class AnalyticsService:
         with self._lock:
             self._cache.clear()
 
+    def _repository(self, tenant_id: str) -> AnalyticsRepository:
+        return self._repository_factory(tenant_id)
+
     def build_filters_payload(
         self,
         db,
@@ -95,7 +104,13 @@ class AnalyticsService:
             request_input.team_members,
         )
         filters = parse_filters_fn(request_input.request_args, request_input.tenant_id)
-        payload = build_filter_options_fn(db, request_input.tenant_id, visibility, filters)
+        repo = self._repository(request_input.tenant_id)
+        payload = repo.build_filter_options(
+            db,
+            visibility=visibility,
+            selected_filters=filters,
+            build_filter_options_fn=build_filter_options_fn,
+        )
         if request_input.role not in {"manager", "admin"}:
             payload["sections"] = [item for item in list(payload.get("sections") or []) if item.get("key") != "executive"]
         return payload
@@ -120,7 +135,14 @@ class AnalyticsService:
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
-        payload = build_payload_fn(db, request_input.tenant_id, request_input.section, filters, visibility)
+        repo = self._repository(request_input.tenant_id)
+        payload = repo.build_dashboard_payload(
+            db,
+            section_key=request_input.section,
+            filters=filters,
+            visibility=visibility,
+            build_payload_fn=build_payload_fn,
+        )
         self._cache_set(cache_key, payload)
         return payload
 
@@ -128,4 +150,3 @@ class AnalyticsService:
         if role not in {"manager", "admin"}:
             return [item for item in list(sections or []) if item.get("key") != "executive"]
         return list(sections or [])
-
