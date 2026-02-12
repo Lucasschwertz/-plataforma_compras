@@ -88,7 +88,7 @@ def _register_scheduler(app: Flask) -> None:
 
 
 def _register_error_handlers(app: Flask) -> None:
-    from app.erp_client import ErpError
+    from app.domain.erp_gateway import ErpGatewayError
     from app.errors import AppError, IntegrationError, SystemError, classify_erp_failure
 
     @app.before_request
@@ -124,8 +124,8 @@ def _register_error_handlers(app: Flask) -> None:
         _log_error(exc, request_id)
         return jsonify(exc.to_response_payload(request_id)), exc.http_status
 
-    @app.errorhandler(ErpError)
-    def _handle_erp_error(exc: ErpError):
+    @app.errorhandler(ErpGatewayError)
+    def _handle_erp_error(exc: ErpGatewayError):
         request_id = ensure_request_id()
         code, message_key, http_status = classify_erp_failure(str(exc))
         mapped = IntegrationError(

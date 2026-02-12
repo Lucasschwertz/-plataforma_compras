@@ -8,6 +8,7 @@ import uuid
 from app import create_app
 from app.db import close_db, get_db
 from app.procurement.erp_outbox import process_purchase_order_outbox
+from app.workers.erp_runtime import build_worker_push_fn
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -19,7 +20,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_once(app, tenant_id: str | None, limit: int) -> dict:
+def _run_once(app, tenant_id: str | None, limit: int, push_fn) -> dict:
     with app.app_context():
         db = get_db()
         try:
@@ -27,6 +28,7 @@ def _run_once(app, tenant_id: str | None, limit: int) -> dict:
                 db,
                 tenant_id=tenant_id,
                 limit=limit,
+                push_fn=push_fn,
             )
             db.commit()
             return result
@@ -47,10 +49,11 @@ def main() -> int:
     limit = max(1, int(args.limit or configured_limit))
     interval_seconds = max(1, int(args.interval or configured_interval))
     tenant_id = str(args.tenant_id or "").strip() or None
+    push_fn = build_worker_push_fn()
 
     while True:
         run_request_id = f"worker-{uuid.uuid4().hex[:12]}"
-        summary = _run_once(app, tenant_id=tenant_id, limit=limit)
+        summary = _run_once(app, tenant_id=tenant_id, limit=limit, push_fn=push_fn)
         app.logger.info(
             "erp_outbox_worker_batch_completed",
             extra={

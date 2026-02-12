@@ -6,7 +6,7 @@ from typing import Callable, Dict, List
 
 from flask import current_app
 
-from app.erp_client import ErpError, push_purchase_order
+from app.domain.erp_gateway import ErpGatewayError
 from app.errors import classify_erp_failure
 
 
@@ -426,7 +426,7 @@ def process_purchase_order_outbox(
     push_fn: Callable[[dict], dict] | None = None,
 ) -> Dict[str, int]:
     if push_fn is None:
-        push_fn = push_purchase_order
+        raise RuntimeError("push_fn is required for outbox processing. Use worker ERP gateway.")
     candidates = _select_due_runs(db, tenant_id, max(1, int(limit)))
     summary = {"processed": 0, "succeeded": 0, "failed": 0, "requeued": 0}
 
@@ -575,10 +575,10 @@ def process_purchase_order_outbox(
                     "result": "succeeded",
                 },
             )
-        except ErpError as exc:
+        except ErpGatewayError as exc:
             error_details = str(exc)[:1000]
             error_code, message_key, _http_status = classify_erp_failure(error_details)
-            rejection = error_code == "erp_order_rejected"
+            rejection = bool(exc.definitive) or error_code == "erp_order_rejected"
             failure_reason = "po_push_rejected" if rejection else "po_push_failed"
 
             db.execute(

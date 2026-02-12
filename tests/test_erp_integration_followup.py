@@ -1,10 +1,9 @@
 import unittest
-from unittest.mock import patch
 
 from app import create_app
 from app.config import Config
 from app.db import close_db, get_db
-from app.erp_client import ErpError
+from app.domain.erp_gateway import ErpGatewayError
 from tests.helpers.temp_db import TempDbSandbox
 from tests.outbox_utils import process_erp_outbox_once
 
@@ -195,8 +194,10 @@ class ErpIntegrationFollowupTest(unittest.TestCase):
         )
         self.assertEqual(queued.status_code, 200)
         self.assertEqual((queued.get_json() or {}).get("status"), "sent_to_erp")
-        with patch("app.procurement.erp_outbox.push_purchase_order", side_effect=ErpError("ERP HTTP 422 rejected")):
-            process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
+        def _reject_once(_po: dict) -> dict:
+            raise ErpGatewayError("ERP HTTP 422 rejected", definitive=True)
+
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id, push_fn=_reject_once)
 
         monitor_res = self.client.get(
             "/api/procurement/integrations/erp/orders",
@@ -221,32 +222,36 @@ class ErpIntegrationFollowupTest(unittest.TestCase):
         self.assertEqual(queued.status_code, 200)
         self.assertEqual((queued.get_json() or {}).get("status"), "sent_to_erp")
 
-        with patch(
-            "app.procurement.erp_outbox.push_purchase_order",
-            side_effect=[ErpError("temporary timeout"), {"external_id": "ERP-ASYNC-1", "status": "accepted"}],
-        ):
-            first = process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
-            self.assertEqual(first.get("requeued"), 1)
+        attempts = {"count": 0}
 
-            with self.app.app_context():
-                db = get_db()
-                payload_ref = (
-                    '{"kind":"po_push","purchase_order_id":'
-                    + str(purchase_order_id)
-                    + ',"next_attempt_at":"2000-01-01T00:00:00Z"}'
-                )
-                db.execute(
-                    """
-                    UPDATE sync_runs
-                    SET payload_ref = ?
-                    WHERE tenant_id = ? AND scope = 'purchase_order'
-                    """,
-                    (payload_ref, self.tenant_id),
-                )
-                db.commit()
+        def _retry_then_success(_po: dict) -> dict:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise ErpGatewayError("temporary timeout")
+            return {"external_id": "ERP-ASYNC-1", "status": "accepted"}
 
-            second = process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
-            self.assertEqual(second.get("succeeded"), 1)
+        first = process_erp_outbox_once(self.app, tenant_id=self.tenant_id, push_fn=_retry_then_success)
+        self.assertEqual(first.get("requeued"), 1)
+
+        with self.app.app_context():
+            db = get_db()
+            payload_ref = (
+                '{"kind":"po_push","purchase_order_id":'
+                + str(purchase_order_id)
+                + ',"next_attempt_at":"2000-01-01T00:00:00Z"}'
+            )
+            db.execute(
+                """
+                UPDATE sync_runs
+                SET payload_ref = ?
+                WHERE tenant_id = ? AND scope = 'purchase_order'
+                """,
+                (payload_ref, self.tenant_id),
+            )
+            db.commit()
+
+        second = process_erp_outbox_once(self.app, tenant_id=self.tenant_id, push_fn=_retry_then_success)
+        self.assertEqual(second.get("succeeded"), 1)
 
         detail = self.client.get(
             f"/api/procurement/purchase-orders/{purchase_order_id}",

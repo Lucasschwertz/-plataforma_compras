@@ -13,20 +13,7 @@ from typing import List
 
 from flask import current_app
 
-from app.erp_mock import DEFAULT_RISK_FLAGS, fetch_erp_records as fetch_mock_records, push_purchase_order as push_mock_po
-
-
-def _assert_worker_import_context() -> None:
-    context = str(os.environ.get("ERP_CLIENT_CONTEXT") or "").strip().lower()
-    if context == "worker":
-        return
-    raise RuntimeError(
-        "app.erp_client is restricted to worker context. "
-        "Use app.domain.erp_gateway + app.infrastructure.erp.senior_erp_gateway in workers."
-    )
-
-
-_assert_worker_import_context()
+from app.erp_mock import DEFAULT_RISK_FLAGS, fetch_erp_records as fetch_mock_records
 
 
 class ErpError(RuntimeError):
@@ -46,20 +33,7 @@ def fetch_erp_records(
         return _fetch_senior_csv_records(entity, since_updated_at, since_id, limit=limit)
     if mode != "senior":
         raise ErpError(f"ERP_MODE invalido: {mode}")
-    return _fetch_senior_records(entity, since_updated_at, since_id, limit=limit)
-
-
-def push_purchase_order(purchase_order: dict) -> dict:
-    mode = _get_config("ERP_MODE", "mock").lower()
-    if mode == "mock":
-        return push_mock_po(purchase_order)
-    if mode == "senior_csv":
-        response = push_mock_po(purchase_order)
-        response["message"] = response.get("message") or "Bridge CSV, retorno simulado para outbound."
-        return response
-    if mode != "senior":
-        raise ErpError(f"ERP_MODE invalido: {mode}")
-    return _push_senior_purchase_order(purchase_order)
+    raise ErpError("Sincronizacao ERP modo senior_http deve ser executada via worker, nao via request web.")
 
 
 def _fetch_senior_csv_records(

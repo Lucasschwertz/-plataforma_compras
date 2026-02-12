@@ -4,7 +4,7 @@ from unittest.mock import patch
 from app import create_app
 from app.config import Config
 from app.db import close_db
-from app.erp_client import ErpError
+from app.domain.erp_gateway import ErpGatewayError
 from app.ui_strings import error_message
 from tests.helpers.temp_db import TempDbSandbox
 from tests.outbox_utils import process_erp_outbox_once
@@ -129,8 +129,10 @@ class ErrorHandlingApiTest(unittest.TestCase):
         self.assertEqual(queued.status_code, 200)
         self.assertEqual((queued.get_json() or {}).get("status"), "sent_to_erp")
 
-        with patch("app.procurement.erp_outbox.push_purchase_order", side_effect=ErpError("ERP HTTP 422: rejected")):
-            process_erp_outbox_once(self.app, tenant_id=self.tenant_id)
+        def _reject_once(_po: dict) -> dict:
+            raise ErpGatewayError("ERP HTTP 422: rejected", definitive=True)
+
+        process_erp_outbox_once(self.app, tenant_id=self.tenant_id, push_fn=_reject_once)
 
         detail = self.client.get(
             f"/api/procurement/purchase-orders/{purchase_order_id}",

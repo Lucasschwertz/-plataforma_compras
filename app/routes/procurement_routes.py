@@ -21,7 +21,8 @@ from app.domain.contracts import (
     RfqAwardInput,
     RfqCreateInput,
 )
-from app.erp_client import DEFAULT_RISK_FLAGS, fetch_erp_records, push_purchase_order
+from app.erp_mock import DEFAULT_RISK_FLAGS
+from app.erp_sync_client import fetch_erp_records
 from app.errors import IntegrationError, ValidationError
 from app.policies import current_role as policy_current_role
 from app.policies import require_roles as policy_require_roles
@@ -36,7 +37,6 @@ from app.procurement.analytics import (
 from app.procurement.critical_actions import get_critical_action, resolve_confirmation
 from app.procurement.erp_outbox import (
     find_pending_purchase_order_push,
-    process_purchase_order_outbox,
     queue_purchase_order_push,
 )
 from app.procurement.flow_policy import (
@@ -1378,9 +1378,6 @@ def push_purchase_order_to_erp(purchase_order_id: int):
             forbidden_action_fn=_forbidden_action,
             require_confirmation_fn=_require_critical_confirmation,
             queue_push_fn=queue_purchase_order_push,
-            process_outbox_fn=process_purchase_order_outbox,
-            push_purchase_order_fn=push_purchase_order,
-            immediate_response=bool(current_app.config.get("ERP_PUSH_IMMEDIATE_RESPONSE", False)),
             err_fn=_err,
             ok_fn=_ok,
         )

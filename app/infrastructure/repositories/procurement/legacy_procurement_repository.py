@@ -13,7 +13,6 @@ from app.domain.contracts import (
     RfqCreateInput,
     ServiceOutput,
 )
-from app.errors import IntegrationError, classify_erp_failure
 
 
 class LegacyProcurementRepository:
@@ -2288,12 +2287,15 @@ class LegacyProcurementRepository:
         forbidden_action_fn,
         require_confirmation_fn,
         queue_push_fn,
-        process_outbox_fn=None,
-        push_purchase_order_fn=None,
-        immediate_response: bool = False,
         err_fn,
         ok_fn,
+        process_outbox_fn=None,
+        push_purchase_order_fn=None,
+        immediate_response: bool | None = None,
+        **_ignored_kwargs,
     ) -> ServiceOutput:
+        # Kept for backward compatibility with legacy callers/tests.
+        _ = (process_outbox_fn, push_purchase_order_fn, immediate_response)
         po = load_purchase_order_fn(db, tenant_id, intent_input.purchase_order_id)
         if not po:
             return ServiceOutput(
@@ -2321,70 +2323,14 @@ class LegacyProcurementRepository:
             find_pending_fn=find_pending_push_fn,
         )
         if pending_run:
-            queued_payload = {
-                "purchase_order_id": intent_input.purchase_order_id,
-                "status": "sent_to_erp",
-                "external_id": po["external_id"],
-                "sync_run_id": int(pending_run["id"]),
-                "queued": True,
-                "message": ok_fn("order_sent_to_erp"),
-            }
-            if not immediate_response:
-                return ServiceOutput(
-                    payload=queued_payload,
-                    status_code=200,
-                )
-
-            if process_outbox_fn and push_purchase_order_fn:
-                summary = process_outbox_fn(
-                    db,
-                    tenant_id=tenant_id,
-                    limit=1,
-                    push_fn=push_purchase_order_fn,
-                )
-                latest_po = load_purchase_order_fn(db, tenant_id, intent_input.purchase_order_id)
-                latest_status = str((latest_po or {}).get("status") or "").strip().lower()
-                if latest_status == "erp_accepted":
-                    return ServiceOutput(
-                        payload={
-                            "purchase_order_id": intent_input.purchase_order_id,
-                            "status": "erp_accepted",
-                            "external_id": (latest_po or {}).get("external_id"),
-                            "sync_run_id": int(pending_run["id"]),
-                            "queued": False,
-                            "message": ok_fn("erp_accepted"),
-                        },
-                        status_code=200,
-                    )
-                if latest_status == "erp_error":
-                    error_details = str((latest_po or {}).get("erp_last_error") or "").strip()
-                    error_code, message_key, http_status = classify_erp_failure(error_details)
-                    raise IntegrationError(
-                        code=error_code,
-                        message_key=message_key,
-                        http_status=http_status,
-                        critical=False,
-                        details=error_details or None,
-                        payload={
-                            "purchase_order_id": intent_input.purchase_order_id,
-                            "sync_run_id": int(pending_run["id"]),
-                        },
-                    )
-                if (summary or {}).get("processed", 0) and not (summary or {}).get("succeeded", 0):
-                    run = db.execute(
-                        """
-                        SELECT error_summary, error_details
-                        FROM sync_runs
-                        WHERE id = ? AND tenant_id = ?
-                        LIMIT 1
-                        """,
-                        (int(pending_run["id"]), tenant_id),
-                    ).fetchone()
-                    details = str((run or {}).get("error_details") or "erp_push_failed")
-                    raise RuntimeError(details)
             return ServiceOutput(
                 payload={
-                    **queued_payload,
+                    "purchase_order_id": intent_input.purchase_order_id,
+                    "status": "sent_to_erp",
+                    "external_id": po["external_id"],
+                    "sync_run_id": int(pending_run["id"]),
+                    "queued": True,
+                    "message": ok_fn("order_sent_to_erp"),
                 },
                 status_code=200,
             )
@@ -2406,57 +2352,6 @@ class LegacyProcurementRepository:
             queue_push_fn=queue_push_fn,
             success_message_fn=ok_fn,
         )
-        if not immediate_response:
-            return queued_result
-
-        if process_outbox_fn and push_purchase_order_fn:
-            summary = process_outbox_fn(
-                db,
-                tenant_id=tenant_id,
-                limit=1,
-                push_fn=push_purchase_order_fn,
-            )
-            latest_po = load_purchase_order_fn(db, tenant_id, intent_input.purchase_order_id)
-            latest_status = str((latest_po or {}).get("status") or "").strip().lower()
-            if latest_status == "erp_accepted":
-                return ServiceOutput(
-                    payload={
-                        "purchase_order_id": intent_input.purchase_order_id,
-                        "status": "erp_accepted",
-                        "external_id": (latest_po or {}).get("external_id"),
-                        "sync_run_id": queued_result.payload.get("sync_run_id"),
-                        "queued": False,
-                        "message": ok_fn("erp_accepted"),
-                    },
-                    status_code=200,
-                )
-            if latest_status == "erp_error":
-                error_details = str((latest_po or {}).get("erp_last_error") or "").strip()
-                error_code, message_key, http_status = classify_erp_failure(error_details)
-                raise IntegrationError(
-                    code=error_code,
-                    message_key=message_key,
-                    http_status=http_status,
-                    critical=False,
-                    details=error_details or None,
-                    payload={
-                        "purchase_order_id": intent_input.purchase_order_id,
-                        "sync_run_id": queued_result.payload.get("sync_run_id"),
-                    },
-                )
-            if (summary or {}).get("processed", 0) and not (summary or {}).get("succeeded", 0):
-                sync_run_id = int(queued_result.payload.get("sync_run_id") or 0)
-                run = db.execute(
-                    """
-                    SELECT error_summary, error_details
-                    FROM sync_runs
-                    WHERE id = ? AND tenant_id = ?
-                    LIMIT 1
-                    """,
-                    (sync_run_id, tenant_id),
-                ).fetchone()
-                details = str((run or {}).get("error_details") or "erp_push_failed")
-                raise RuntimeError(details)
         return queued_result
 
     def send_po_to_erp_intent(self, db, **kwargs) -> ServiceOutput:
