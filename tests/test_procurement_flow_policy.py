@@ -1,26 +1,19 @@
-import os
-import tempfile
 import unittest
 
 from app import create_app
 from app.config import Config
 from app.db import close_db
+from tests.helpers.temp_db import TempDbSandbox
 from tests.outbox_utils import process_erp_outbox_once
 
 
 class ProcurementFlowPolicyTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(
-            prefix="pc_flow_test_",
-            dir=os.getcwd(),
-            ignore_cleanup_errors=True,
+        self._temp_db = TempDbSandbox(prefix="flow_policy")
+        TempConfig = self._temp_db.make_config(
+            Config,
+            TESTING=True,
         )
-        db_path = os.path.join(self._tmpdir.name, "plataforma_compras_test.db")
-
-        class TempConfig(Config):
-            DATABASE_DIR = self._tmpdir.name
-            DB_PATH = db_path
-            TESTING = True
 
         self.app = create_app(TempConfig)
         self.client = self.app.test_client()
@@ -30,7 +23,7 @@ class ProcurementFlowPolicyTest(unittest.TestCase):
     def tearDown(self) -> None:
         with self.app.app_context():
             close_db()
-        self._tmpdir.cleanup()
+        self._temp_db.cleanup()
 
     @staticmethod
     def _json(response):

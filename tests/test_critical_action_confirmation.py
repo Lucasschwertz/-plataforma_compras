@@ -1,28 +1,21 @@
-import os
-import tempfile
 import unittest
 
 from app import create_app
 from app.config import Config
 from app.db import close_db
 from app.ui_strings import error_message
+from tests.helpers.temp_db import TempDbSandbox
 
 
 class CriticalActionConfirmationTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(
-            prefix="pc_critical_confirm_",
-            dir=os.getcwd(),
-            ignore_cleanup_errors=True,
+        self._temp_db = TempDbSandbox(prefix="critical_confirm")
+        TempConfig = self._temp_db.make_config(
+            Config,
+            TESTING=True,
+            AUTH_ENABLED=False,
+            SYNC_SCHEDULER_ENABLED=False,
         )
-        db_path = os.path.join(self._tmpdir.name, "plataforma_compras_test.db")
-
-        class TempConfig(Config):
-            DATABASE_DIR = self._tmpdir.name
-            DB_PATH = db_path
-            TESTING = True
-            AUTH_ENABLED = False
-            SYNC_SCHEDULER_ENABLED = False
 
         self.app = create_app(TempConfig)
         self.client = self.app.test_client()
@@ -32,7 +25,7 @@ class CriticalActionConfirmationTest(unittest.TestCase):
     def tearDown(self) -> None:
         with self.app.app_context():
             close_db()
-        self._tmpdir.cleanup()
+        self._temp_db.cleanup()
 
     def _create_rfq(self) -> int:
         seed_res = self.client.post("/api/procurement/seed", headers=self.headers)

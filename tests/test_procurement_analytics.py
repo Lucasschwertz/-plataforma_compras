@@ -1,5 +1,3 @@
-import os
-import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -9,22 +7,17 @@ from app.db import close_db, get_db, get_read_db
 from app.procurement.analytics_actions import KPI_ACTION_RULES
 from app.routes import procurement_routes
 from app.ui_strings import error_message
+from tests.helpers.temp_db import TempDbSandbox
 
 
 class ProcurementAnalyticsTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(
-            prefix="pc_analytics_test_",
-            dir=os.getcwd(),
-            ignore_cleanup_errors=True,
+        self._temp_db = TempDbSandbox(prefix="analytics_test")
+        TempConfig = self._temp_db.make_config(
+            Config,
+            TESTING=True,
+            AUTH_ENABLED=False,
         )
-        db_path = os.path.join(self._tmpdir.name, "plataforma_compras_test.db")
-
-        class TempConfig(Config):
-            DATABASE_DIR = self._tmpdir.name
-            DB_PATH = db_path
-            TESTING = True
-            AUTH_ENABLED = False
 
         self.app = create_app(TempConfig)
         self.client = self.app.test_client()
@@ -37,7 +30,7 @@ class ProcurementAnalyticsTest(unittest.TestCase):
         with self.app.app_context():
             close_db()
         procurement_routes._clear_analytics_cache_for_tests()
-        self._tmpdir.cleanup()
+        self._temp_db.cleanup()
 
     def _set_role(self, role: str, display_name: str, *, team_members=None) -> None:
         with self.client.session_transaction() as session:

@@ -1,5 +1,3 @@
-import os
-import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -8,14 +6,14 @@ from app.config import Config
 from app.db import close_db
 from app.erp_client import ErpError
 from app.ui_strings import error_message
+from tests.helpers.temp_db import TempDbSandbox
 from tests.outbox_utils import process_erp_outbox_once
 
 
-def _build_temp_app(tmpdir: str, **overrides):
-    db_path = os.path.join(tmpdir, "plataforma_compras_test.db")
+def _build_temp_app(temp_db: TempDbSandbox, **overrides):
     attrs = {
-        "DATABASE_DIR": tmpdir,
-        "DB_PATH": db_path,
+        "DATABASE_DIR": temp_db.temp_dir,
+        "DB_PATH": temp_db.db_path,
         "SYNC_SCHEDULER_ENABLED": False,
         "PROPAGATE_EXCEPTIONS": False,
     }
@@ -26,13 +24,9 @@ def _build_temp_app(tmpdir: str, **overrides):
 
 class ErrorPermissionTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(
-            prefix="pc_error_perm_",
-            dir=os.getcwd(),
-            ignore_cleanup_errors=True,
-        )
+        self._temp_db = TempDbSandbox(prefix="error_perm")
         self.app = _build_temp_app(
-            self._tmpdir.name,
+            self._temp_db,
             TESTING=False,
             AUTH_ENABLED=True,
         )
@@ -42,7 +36,7 @@ class ErrorPermissionTest(unittest.TestCase):
     def tearDown(self) -> None:
         with self.app.app_context():
             close_db()
-        self._tmpdir.cleanup()
+        self._temp_db.cleanup()
 
     def test_permission_error_for_unauthenticated_api(self) -> None:
         response = self.client.get("/api/procurement/inbox", headers=self.headers)
@@ -57,13 +51,9 @@ class ErrorPermissionTest(unittest.TestCase):
 
 class ErrorHandlingApiTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(
-            prefix="pc_error_api_",
-            dir=os.getcwd(),
-            ignore_cleanup_errors=True,
-        )
+        self._temp_db = TempDbSandbox(prefix="error_api")
         self.app = _build_temp_app(
-            self._tmpdir.name,
+            self._temp_db,
             TESTING=True,
             AUTH_ENABLED=False,
         )
@@ -74,7 +64,7 @@ class ErrorHandlingApiTest(unittest.TestCase):
     def tearDown(self) -> None:
         with self.app.app_context():
             close_db()
-        self._tmpdir.cleanup()
+        self._temp_db.cleanup()
 
     def _create_purchase_order(self) -> int:
         seed_res = self.client.post("/api/procurement/seed", headers=self.headers)

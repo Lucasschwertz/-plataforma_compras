@@ -1,17 +1,15 @@
 import os
-import shutil
 import sqlite3
-import tempfile
 import unittest
-import uuid
 
 from app import create_app
 from app.config import Config
 from app.db import close_db
+from tests.helpers.temp_db import TempDbSandbox, open_sqlite_temp_connection
 
 
 def _table_exists(db_path: str, table_name: str) -> bool:
-    conn = sqlite3.connect(db_path)
+    conn = open_sqlite_temp_connection(db_path)
     try:
         row = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
@@ -24,10 +22,8 @@ def _table_exists(db_path: str, table_name: str) -> bool:
 
 class DbMigrationsTest(unittest.TestCase):
     def setUp(self) -> None:
-        base_tmp = tempfile.gettempdir()
-        self._tmpdir_path = os.path.join(base_tmp, f"pc_migrations_test_{uuid.uuid4().hex}")
-        os.makedirs(self._tmpdir_path, exist_ok=True)
-        self.db_path = os.path.join(self._tmpdir_path, "plataforma_compras_test.db")
+        self._temp_db = TempDbSandbox(prefix="db_migrations")
+        self.db_path = self._temp_db.db_path
         self._prev_env = os.environ.get("FLASK_ENV")
         os.environ["FLASK_ENV"] = "development"
 
@@ -36,13 +32,13 @@ class DbMigrationsTest(unittest.TestCase):
             os.environ.pop("FLASK_ENV", None)
         else:
             os.environ["FLASK_ENV"] = self._prev_env
-        shutil.rmtree(self._tmpdir_path, ignore_errors=True)
+        self._temp_db.cleanup()
 
     def _build_app(self, *, testing: bool, db_auto_init: bool):
         db_path = self.db_path
 
         class TempConfig(Config):
-            DATABASE_DIR = self._tmpdir_path
+            DATABASE_DIR = self._temp_db.temp_dir
             DB_PATH = db_path
             TESTING = testing
             DB_AUTO_INIT = db_auto_init

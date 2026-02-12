@@ -1,5 +1,3 @@
-import os
-import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -7,19 +5,18 @@ from app import create_app
 from app.config import Config
 from app.db import close_db, get_db
 from app.erp_client import ErpError
+from tests.helpers.temp_db import TempDbSandbox
 from tests.outbox_utils import process_erp_outbox_once
 
 
 class ErpIntegrationFollowupTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
-        db_path = os.path.join(self._tmpdir.name, "plataforma_compras_test.db")
-
-        class TempConfig(Config):
-            DATABASE_DIR = self._tmpdir.name
-            DB_PATH = db_path
-            TESTING = True
-            AUTH_ENABLED = False
+        self._temp_db = TempDbSandbox(prefix="erp_followup")
+        TempConfig = self._temp_db.make_config(
+            Config,
+            TESTING=True,
+            AUTH_ENABLED=False,
+        )
 
         self.app = create_app(TempConfig)
         self.client = self.app.test_client()
@@ -29,7 +26,7 @@ class ErpIntegrationFollowupTest(unittest.TestCase):
     def tearDown(self) -> None:
         with self.app.app_context():
             close_db()
-        self._tmpdir.cleanup()
+        self._temp_db.cleanup()
 
     def _set_role(self, role: str) -> None:
         with self.client.session_transaction() as session:

@@ -1,6 +1,4 @@
-import os
 import re
-import tempfile
 import unittest
 
 from app import create_app
@@ -9,13 +7,13 @@ from app.db import close_db
 from app.observability import reset_metrics_for_tests
 from app.security import reset_rate_limiter_for_tests
 from app.ui_strings import error_message
+from tests.helpers.temp_db import TempDbSandbox
 
 
-def _build_temp_config(tmpdir: str, **overrides):
-    db_path = os.path.join(tmpdir, "unavailable", "plataforma_compras_test.db")
+def _build_temp_config(temp_db: TempDbSandbox, **overrides):
     attrs = {
-        "DATABASE_DIR": tmpdir,
-        "DB_PATH": db_path,
+        "DATABASE_DIR": temp_db.temp_dir,
+        "DB_PATH": temp_db.db_path,
         "TESTING": False,
         "DB_AUTO_INIT": False,
         "AUTH_ENABLED": False,
@@ -30,11 +28,8 @@ def _build_temp_config(tmpdir: str, **overrides):
 
 class SecurityHardeningTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(
-            prefix="pc_hardening_",
-            ignore_cleanup_errors=True,
-        )
-        temp_config = _build_temp_config(self._tmpdir.name)
+        self._temp_db = TempDbSandbox(prefix="security_hardening")
+        temp_config = _build_temp_config(self._temp_db)
         self.app = create_app(temp_config)
         self.client = self.app.test_client()
         reset_rate_limiter_for_tests()
@@ -43,10 +38,7 @@ class SecurityHardeningTest(unittest.TestCase):
     def tearDown(self) -> None:
         with self.app.app_context():
             close_db()
-        try:
-            self._tmpdir.cleanup()
-        except PermissionError:
-            pass
+        self._temp_db.cleanup()
         reset_rate_limiter_for_tests()
         reset_metrics_for_tests()
 

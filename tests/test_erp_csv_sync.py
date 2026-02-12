@@ -1,10 +1,10 @@
 import os
-import tempfile
 import unittest
 
 from app import create_app
 from app.config import Config
 from app.db import close_db, get_db
+from tests.helpers.temp_db import TempDbSandbox
 
 
 def _schema_line(table: str, field_name: str, order: int) -> str:
@@ -17,28 +17,22 @@ def _schema_line(table: str, field_name: str, order: int) -> str:
 
 class ErpCsvSyncTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmpdir = tempfile.TemporaryDirectory(
-            prefix="pc_test_",
-            dir=os.getcwd(),
-            ignore_cleanup_errors=True,
+        self._temp_db = TempDbSandbox(prefix="erp_csv_sync")
+        self._create_csv_fixture_files(self._temp_db.temp_dir)
+        TempConfig = self._temp_db.make_config(
+            Config,
+            TESTING=True,
+            ERP_MODE="senior_csv",
+            ERP_CSV_SCHEMA=os.path.join(self._temp_db.temp_dir, "tabelas.csv"),
+            ERP_CSV_E405SOL=os.path.join(self._temp_db.temp_dir, "e405sol.csv"),
+            ERP_CSV_E410COT=os.path.join(self._temp_db.temp_dir, "e410cot.csv"),
+            ERP_CSV_E410PCT=os.path.join(self._temp_db.temp_dir, "e410pct.csv"),
+            ERP_CSV_E410FPC=os.path.join(self._temp_db.temp_dir, "e410fpc.csv"),
+            ERP_CSV_E420OCP=os.path.join(self._temp_db.temp_dir, "e420ocp.csv"),
+            ERP_CSV_E420IPO=os.path.join(self._temp_db.temp_dir, "e420ipo.csv"),
+            ERP_CSV_E440NFC=os.path.join(self._temp_db.temp_dir, "e440nfc.csv"),
+            ERP_CSV_E440IPC=os.path.join(self._temp_db.temp_dir, "e440ipc.csv"),
         )
-        self._create_csv_fixture_files(self._tmpdir.name)
-        db_path = os.path.join(self._tmpdir.name, "plataforma_compras_test.db")
-
-        class TempConfig(Config):
-            DATABASE_DIR = self._tmpdir.name
-            DB_PATH = db_path
-            TESTING = True
-            ERP_MODE = "senior_csv"
-            ERP_CSV_SCHEMA = os.path.join(self._tmpdir.name, "tabelas.csv")
-            ERP_CSV_E405SOL = os.path.join(self._tmpdir.name, "e405sol.csv")
-            ERP_CSV_E410COT = os.path.join(self._tmpdir.name, "e410cot.csv")
-            ERP_CSV_E410PCT = os.path.join(self._tmpdir.name, "e410pct.csv")
-            ERP_CSV_E410FPC = os.path.join(self._tmpdir.name, "e410fpc.csv")
-            ERP_CSV_E420OCP = os.path.join(self._tmpdir.name, "e420ocp.csv")
-            ERP_CSV_E420IPO = os.path.join(self._tmpdir.name, "e420ipo.csv")
-            ERP_CSV_E440NFC = os.path.join(self._tmpdir.name, "e440nfc.csv")
-            ERP_CSV_E440IPC = os.path.join(self._tmpdir.name, "e440ipc.csv")
 
         self.app = create_app(TempConfig)
         self.client = self.app.test_client()
@@ -48,7 +42,7 @@ class ErpCsvSyncTest(unittest.TestCase):
     def tearDown(self) -> None:
         with self.app.app_context():
             close_db()
-        self._tmpdir.cleanup()
+        self._temp_db.cleanup()
 
     def _create_csv_fixture_files(self, base_dir: str) -> None:
         schema_lines = [
