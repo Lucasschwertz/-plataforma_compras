@@ -7,9 +7,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
 from urllib.parse import quote
 
-from app.application.analytics_service import AnalyticsService
-from app.application.erp_outbox_service import ErpOutboxService
-from app.application.procurement_service import ProcurementService
+from app.contexts.analytics.application.service import AnalyticsService
+from app.contexts.erp.application.outbox_service import ErpOutboxService
+from app.contexts.procurement.application.service import ProcurementService
 from flask import Blueprint, current_app, g, jsonify, render_template, request, session
 
 from app.db import get_db, get_read_db
@@ -21,12 +21,12 @@ from app.domain.contracts import (
     RfqAwardInput,
     RfqCreateInput,
 )
-from app.erp_mock import DEFAULT_RISK_FLAGS
-from app.erp_sync_client import fetch_erp_records
+from app.contexts.erp.infrastructure.mock import DEFAULT_RISK_FLAGS
+from app.contexts.erp.infrastructure.sync_client import fetch_erp_records
 from app.errors import IntegrationError, ValidationError
 from app.policies import current_role as policy_current_role
 from app.policies import require_roles as policy_require_roles
-from app.procurement.analytics import (
+from app.contexts.analytics.application.payload import (
     analytics_sections,
     build_analytics_payload,
     build_filter_options as build_analytics_filter_options,
@@ -34,12 +34,12 @@ from app.procurement.analytics import (
     parse_analytics_filters,
     resolve_visibility as resolve_analytics_visibility,
 )
-from app.procurement.critical_actions import get_critical_action, resolve_confirmation
-from app.procurement.erp_outbox import (
+from app.contexts.procurement.domain.critical_actions import get_critical_action, resolve_confirmation
+from app.contexts.procurement.infrastructure.erp_outbox import (
     find_pending_purchase_order_push,
     queue_purchase_order_push,
 )
-from app.procurement.flow_policy import (
+from app.contexts.procurement.domain.flow_policy import (
     action_label as flow_action_label,
     action_allowed as flow_action_allowed,
     allowed_actions as flow_allowed_actions,
@@ -4068,6 +4068,15 @@ def _load_sync_runs(db, tenant_id: str | None, scope: str | None, limit: int = 5
         }
         for row in rows
     ]
+
+
+
+
+
+
+
+
+
 
 
 

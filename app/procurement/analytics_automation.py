@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List
@@ -302,3 +302,4 @@ def _no_competition_flag(record: Dict[str, Any]) -> bool:
     if quote_count <= 1:
         return True
     return False
+

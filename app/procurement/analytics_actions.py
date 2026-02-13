@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any, Dict, List
 from urllib.parse import quote_plus
@@ -354,3 +354,5 @@ def build_supplier_primary_action(supplier_name: str | None) -> Dict[str, Any] |
         "status": None,
         "allowed_actions": [],
     }
+
+
