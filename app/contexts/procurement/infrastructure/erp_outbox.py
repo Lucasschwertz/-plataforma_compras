@@ -6,6 +6,7 @@ from typing import Callable, Dict, List
 
 from flask import current_app
 
+from app.core import ErpOrderAccepted, ErpOrderRejected, EventBus, get_event_bus
 from app.contexts.erp.domain.gateway import ErpGatewayError
 from app.errors import classify_erp_failure
 
@@ -424,9 +425,11 @@ def process_purchase_order_outbox(
     tenant_id: str | None = None,
     limit: int = 25,
     push_fn: Callable[[dict], dict] | None = None,
+    event_bus: EventBus | None = None,
 ) -> Dict[str, int]:
     if push_fn is None:
         raise RuntimeError("push_fn is required for outbox processing. Use worker ERP gateway.")
+    bus = event_bus or get_event_bus()
     candidates = _select_due_runs(db, tenant_id, max(1, int(limit)))
     summary = {"processed": 0, "succeeded": 0, "failed": 0, "requeued": 0}
 
@@ -552,6 +555,14 @@ def process_purchase_order_outbox(
                     source_updated_at=None,
                     source_id=str(external_id or ""),
                 )
+                bus.publish(
+                    ErpOrderAccepted(
+                        tenant_id=run_tenant_id,
+                        purchase_order_id=purchase_order_id,
+                        sync_run_id=run_id,
+                        external_id=str(external_id or "") or None,
+                    )
+                )
 
             _update_run_terminal(
                 db,
@@ -597,6 +608,15 @@ def process_purchase_order_outbox(
                 "erp_error",
                 failure_reason,
             )
+            if rejection:
+                bus.publish(
+                    ErpOrderRejected(
+                        tenant_id=run_tenant_id,
+                        purchase_order_id=purchase_order_id,
+                        sync_run_id=run_id,
+                        reason=message_key,
+                    )
+                )
 
             if rejection or attempt >= _max_attempts():
                 _update_run_terminal(

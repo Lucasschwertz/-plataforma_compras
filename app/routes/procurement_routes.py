@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
 from urllib.parse import quote
 
+from app.core import get_event_bus
 from app.contexts.analytics.application.service import AnalyticsService
 from app.contexts.erp.application.outbox_service import ErpOutboxService
 from app.contexts.procurement.application.service import ProcurementService
@@ -74,8 +75,12 @@ ALLOWED_RECEIPT_STATUSES = {"pending", "partially_received", "received"}
 ALLOWED_RFQ_STATUSES = set(status_keys_for_group("cotacao"))
 ALLOWED_INBOX_STATUSES = ALLOWED_PR_STATUSES | ALLOWED_PO_STATUSES | ALLOWED_RFQ_STATUSES
 
+_EVENT_BUS = get_event_bus()
+_ERP_OUTBOX_SERVICE = ErpOutboxService()
+_ERP_OUTBOX_SERVICE.register_event_handlers(_EVENT_BUS)
 _ANALYTICS_SERVICE = AnalyticsService(ttl_seconds=60)
-_PROCUREMENT_SERVICE = ProcurementService(outbox_service=ErpOutboxService())
+_ANALYTICS_SERVICE.register_event_handlers(_EVENT_BUS)
+_PROCUREMENT_SERVICE = ProcurementService(outbox_service=_ERP_OUTBOX_SERVICE, event_bus=_EVENT_BUS)
 
 
 def _clear_analytics_cache_for_tests() -> None:

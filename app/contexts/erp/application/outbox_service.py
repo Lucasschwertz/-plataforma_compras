@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+
+from app.core import EventBus, PurchaseOrderCreated
 from app.domain.contracts import PurchaseOrderErpIntentInput, ServiceOutput
 
 
@@ -15,6 +18,27 @@ def _row_to_dict(value) -> dict:
 
 
 class ErpOutboxService:
+    def __init__(self) -> None:
+        self._logger = logging.getLogger("app")
+        self._event_handlers_registered = False
+
+    def register_event_handlers(self, event_bus: EventBus) -> None:
+        if self._event_handlers_registered:
+            return
+        event_bus.subscribe(PurchaseOrderCreated, self._on_purchase_order_created)
+        self._event_handlers_registered = True
+
+    def _on_purchase_order_created(self, event: PurchaseOrderCreated) -> None:
+        # ERP context listener hook for future orchestration without direct coupling.
+        self._logger.debug(
+            "erp_listener_purchase_order_created",
+            extra={
+                "tenant_id": event.tenant_id,
+                "purchase_order_id": event.purchase_order_id,
+                "event_id": event.event_id,
+            },
+        )
+
     def find_pending(self, db, *, tenant_id: str, purchase_order_id: int, find_pending_fn) -> dict | None:
         return find_pending_fn(db, tenant_id, purchase_order_id)
 

@@ -5,6 +5,15 @@ import threading
 import time
 from typing import Any, Callable, Dict, List
 
+from app.core import (
+    ErpOrderAccepted,
+    ErpOrderRejected,
+    EventBus,
+    PurchaseOrderCreated,
+    PurchaseRequestCreated,
+    RfqAwarded,
+    RfqCreated,
+)
 from app.domain.contracts import AnalyticsRequestInput
 from app.contexts.analytics.infrastructure.repository import AnalyticsRepository
 
@@ -19,6 +28,7 @@ class AnalyticsService:
         self._cache: Dict[tuple, dict] = {}
         self._lock = threading.Lock()
         self._repository_factory = repository_factory or (lambda tenant_id: AnalyticsRepository(tenant_id=tenant_id))
+        self._event_handlers_registered = False
 
     @staticmethod
     def _normalize_csv_filter_value(raw_value: str | None) -> str:
@@ -84,6 +94,21 @@ class AnalyticsService:
     def clear_cache(self) -> None:
         with self._lock:
             self._cache.clear()
+
+    def register_event_handlers(self, event_bus: EventBus) -> None:
+        with self._lock:
+            if self._event_handlers_registered:
+                return
+            self._event_handlers_registered = True
+        event_bus.subscribe(PurchaseRequestCreated, self._on_domain_event)
+        event_bus.subscribe(RfqCreated, self._on_domain_event)
+        event_bus.subscribe(RfqAwarded, self._on_domain_event)
+        event_bus.subscribe(PurchaseOrderCreated, self._on_domain_event)
+        event_bus.subscribe(ErpOrderAccepted, self._on_domain_event)
+        event_bus.subscribe(ErpOrderRejected, self._on_domain_event)
+
+    def _on_domain_event(self, _event) -> None:
+        self.clear_cache()
 
     def _repository(self, tenant_id: str) -> AnalyticsRepository:
         return self._repository_factory(tenant_id)
