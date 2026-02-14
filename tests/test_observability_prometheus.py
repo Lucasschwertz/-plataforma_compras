@@ -61,6 +61,7 @@ class ObservabilityPrometheusTest(unittest.TestCase):
         self.assertIn("analytics_projection_failed_total", payload)
         self.assertIn("analytics_projection_lag_seconds", payload)
         self.assertIn("analytics_projection_last_success_timestamp", payload)
+        self.assertIn("analytics_read_model_hits_total", payload)
         self.assertIn('event_type="PurchaseRequestCreated"', payload)
 
     def test_log_formatter_includes_request_id_outside_request_context(self) -> None:

@@ -156,6 +156,7 @@ class MetricsRegistry:
         self._analytics_projection_failed_total: Dict[tuple[str, str], int] = {}
         self._analytics_projection_lag_seconds: Dict[str, float] = {}
         self._analytics_projection_last_success_timestamp: Dict[str, float] = {}
+        self._analytics_read_model_hits_total: Dict[str, int] = {}
 
     @staticmethod
     def _bucket_label(limit: float) -> str:
@@ -275,6 +276,13 @@ class MetricsRegistry:
             self._analytics_projection_lag_seconds[projector_key] = lag_seconds
             self._analytics_projection_last_success_timestamp[projector_key] = now_ts
 
+    def observe_analytics_read_model_hit(self, source: str) -> None:
+        source_key = str(source or "unknown").strip().lower() or "unknown"
+        with self._lock:
+            self._analytics_read_model_hits_total[source_key] = (
+                int(self._analytics_read_model_hits_total.get(source_key, 0)) + 1
+            )
+
     def snapshot(self) -> dict:
         with self._lock:
             route_stats = []
@@ -311,6 +319,10 @@ class MetricsRegistry:
                     "processed_total": int(sum(self._analytics_projection_processed_total.values())),
                     "failed_total": int(sum(self._analytics_projection_failed_total.values())),
                     "projectors": sorted(set(self._analytics_projection_lag_seconds.keys())),
+                },
+                "analytics_read_model": {
+                    "hits_total": int(sum(self._analytics_read_model_hits_total.values())),
+                    "by_source": dict(sorted(self._analytics_read_model_hits_total.items())),
                 },
             }
 
@@ -383,6 +395,10 @@ class MetricsRegistry:
                     key: float(value)
                     for key, value in sorted(self._analytics_projection_last_success_timestamp.items())
                 },
+                "analytics_read_model_hits_total": {
+                    key: int(value)
+                    for key, value in sorted(self._analytics_read_model_hits_total.items())
+                },
             }
 
     def reset(self) -> None:
@@ -401,6 +417,7 @@ class MetricsRegistry:
             self._analytics_projection_failed_total.clear()
             self._analytics_projection_lag_seconds.clear()
             self._analytics_projection_last_success_timestamp.clear()
+            self._analytics_read_model_hits_total.clear()
 
 
 _METRICS = MetricsRegistry()
@@ -455,6 +472,10 @@ def observe_analytics_projection_failed(projector: str, event_type: str) -> None
 
 def observe_analytics_projection_lag(projector: str, occurred_at: datetime | float | int | None) -> None:
     _METRICS.observe_analytics_projection_lag(projector, occurred_at)
+
+
+def observe_analytics_read_model_hit(source: str) -> None:
+    _METRICS.observe_analytics_read_model_hit(source)
 
 
 def _prom_label(value: object) -> str:
@@ -598,6 +619,17 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
                 "analytics_projection_last_success_timestamp",
                 float(value),
                 labels={"projector": projector},
+            )
+        )
+
+    lines.append("# HELP analytics_read_model_hits_total Total analytics payload hits by source path.")
+    lines.append("# TYPE analytics_read_model_hits_total counter")
+    for source, total in snapshot["analytics_read_model_hits_total"].items():
+        lines.append(
+            _prom_line(
+                "analytics_read_model_hits_total",
+                int(total),
+                labels={"source": source},
             )
         )
 
