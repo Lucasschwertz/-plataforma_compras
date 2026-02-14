@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import contextlib
 import contextvars
@@ -15,6 +15,7 @@ from flask import current_app, g, has_request_context, request
 
 _HTTP_DURATION_BUCKETS_MS = (5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0)
 _OUTBOX_PROCESSING_BUCKETS_MS = (10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0, 30000.0)
+_OUTBOX_BACKOFF_BUCKETS_SECONDS = (1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0)
 
 _LOG_REQUEST_ID_CTX: contextvars.ContextVar[str] = contextvars.ContextVar("log_request_id", default="")
 
@@ -146,7 +147,9 @@ class MetricsRegistry:
         self._http_request_duration_ms: Dict[tuple[str, str], dict] = {}
 
         self._erp_outbox_retry_count = 0
+        self._erp_dead_letter_total = 0
         self._erp_outbox_processing_time = self._new_histogram_state(_OUTBOX_PROCESSING_BUCKETS_MS)
+        self._erp_retry_backoff_seconds = self._new_histogram_state(_OUTBOX_BACKOFF_BUCKETS_SECONDS)
 
         self._domain_event_emitted_total: Dict[str, int] = {}
 
@@ -214,6 +217,17 @@ class MetricsRegistry:
         with self._lock:
             self._erp_outbox_retry_count += increment
 
+    def observe_erp_outbox_dead_letter(self, count: int = 1) -> None:
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._erp_dead_letter_total += increment
+
+    def observe_erp_outbox_retry_backoff(self, backoff_seconds: float) -> None:
+        with self._lock:
+            self._observe_histogram(self._erp_retry_backoff_seconds, float(backoff_seconds), _OUTBOX_BACKOFF_BUCKETS_SECONDS)
+
     def observe_erp_outbox_processing(self, duration_ms: float) -> None:
         with self._lock:
             self._observe_histogram(self._erp_outbox_processing_time, duration_ms, _OUTBOX_PROCESSING_BUCKETS_MS)
@@ -247,7 +261,9 @@ class MetricsRegistry:
                 "by_route": route_stats[:40],
                 "erp_outbox": {
                     "retry_count": int(self._erp_outbox_retry_count),
+                    "dead_letter_total": int(self._erp_dead_letter_total),
                     "processing_count": int(self._erp_outbox_processing_time["count"]),
+                    "retry_backoff_count": int(self._erp_retry_backoff_seconds["count"]),
                 },
                 "domain_events": {
                     "emitted_total": int(sum(self._domain_event_emitted_total.values())),
@@ -286,11 +302,21 @@ class MetricsRegistry:
                     for label, count in self._erp_outbox_processing_time["buckets"].items()
                 },
             }
+            backoff_hist = {
+                "count": int(self._erp_retry_backoff_seconds["count"]),
+                "sum": float(self._erp_retry_backoff_seconds["sum"]),
+                "buckets": {
+                    label: int(count)
+                    for label, count in self._erp_retry_backoff_seconds["buckets"].items()
+                },
+            }
             return {
                 "http_request_total": http_totals,
                 "http_request_duration_ms": http_histograms,
                 "erp_outbox_retry_count": int(self._erp_outbox_retry_count),
+                "erp_dead_letter_total": int(self._erp_dead_letter_total),
                 "erp_outbox_processing_time": outbox_hist,
+                "erp_retry_backoff_seconds": backoff_hist,
                 "domain_event_emitted_total": dict(sorted(self._domain_event_emitted_total.items())),
             }
 
@@ -302,7 +328,9 @@ class MetricsRegistry:
             self._http_request_total.clear()
             self._http_request_duration_ms.clear()
             self._erp_outbox_retry_count = 0
+            self._erp_dead_letter_total = 0
             self._erp_outbox_processing_time = self._new_histogram_state(_OUTBOX_PROCESSING_BUCKETS_MS)
+            self._erp_retry_backoff_seconds = self._new_histogram_state(_OUTBOX_BACKOFF_BUCKETS_SECONDS)
             self._domain_event_emitted_total.clear()
 
 
@@ -330,6 +358,14 @@ def metrics_snapshot() -> dict:
 
 def observe_erp_outbox_retry(count: int = 1) -> None:
     _METRICS.observe_erp_outbox_retry(count)
+
+
+def observe_erp_outbox_dead_letter(count: int = 1) -> None:
+    _METRICS.observe_erp_outbox_dead_letter(count)
+
+
+def observe_erp_outbox_retry_backoff(backoff_seconds: float) -> None:
+    _METRICS.observe_erp_outbox_retry_backoff(backoff_seconds)
 
 
 def observe_erp_outbox_processing(duration_ms: float) -> None:
@@ -397,6 +433,10 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
     lines.append("# TYPE erp_outbox_retry_count counter")
     lines.append(_prom_line("erp_outbox_retry_count", int(snapshot["erp_outbox_retry_count"])))
 
+    lines.append("# HELP erp_dead_letter_total Total outbox jobs moved to dead letter.")
+    lines.append("# TYPE erp_dead_letter_total counter")
+    lines.append(_prom_line("erp_dead_letter_total", int(snapshot["erp_dead_letter_total"])))
+
     lines.append("# HELP erp_outbox_processing_time ERP outbox processing time in milliseconds.")
     lines.append("# TYPE erp_outbox_processing_time histogram")
     processing_hist = snapshot["erp_outbox_processing_time"]
@@ -404,6 +444,32 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
         lines.append(_prom_line("erp_outbox_processing_time_bucket", int(bucket_value), labels={"le": le_label}))
     lines.append(_prom_line("erp_outbox_processing_time_sum", float(processing_hist["sum"])))
     lines.append(_prom_line("erp_outbox_processing_time_count", int(processing_hist["count"])))
+
+    lines.append("# HELP erp_retry_backoff_seconds ERP outbox retry backoff delay in seconds.")
+    lines.append("# TYPE erp_retry_backoff_seconds histogram")
+    backoff_hist = snapshot["erp_retry_backoff_seconds"]
+    for le_label, bucket_value in backoff_hist["buckets"].items():
+        lines.append(_prom_line("erp_retry_backoff_seconds_bucket", int(bucket_value), labels={"le": le_label}))
+    lines.append(_prom_line("erp_retry_backoff_seconds_sum", float(backoff_hist["sum"])))
+    lines.append(_prom_line("erp_retry_backoff_seconds_count", int(backoff_hist["count"])))
+
+    lines.append("# HELP erp_circuit_state ERP circuit breaker state (1 active, 0 inactive).")
+    lines.append("# TYPE erp_circuit_state gauge")
+    circuit_state = "closed"
+    try:
+        from app.contexts.erp.infrastructure.circuit_breaker import erp_circuit_snapshot
+
+        circuit_state = str((erp_circuit_snapshot() or {}).get("state") or "closed").strip().lower() or "closed"
+    except Exception:
+        circuit_state = "closed"
+    for state_key in ("closed", "open", "half_open"):
+        lines.append(
+            _prom_line(
+                "erp_circuit_state",
+                1 if circuit_state == state_key else 0,
+                labels={"state": state_key},
+            )
+        )
 
     lines.append("# HELP domain_event_emitted_total Domain events emitted by event type.")
     lines.append("# TYPE domain_event_emitted_total counter")

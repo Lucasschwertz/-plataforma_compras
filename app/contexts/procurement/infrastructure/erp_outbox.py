@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List
@@ -9,8 +10,15 @@ from flask import current_app
 
 from app.core import ErpOrderAccepted, ErpOrderRejected, EventBus, get_event_bus
 from app.contexts.erp.domain.gateway import ErpGatewayError
+from app.contexts.erp.infrastructure.circuit_breaker import get_erp_circuit_breaker
 from app.errors import classify_erp_failure
-from app.observability import observe_erp_outbox_processing, observe_erp_outbox_retry, set_log_request_id
+from app.observability import (
+    observe_erp_outbox_dead_letter,
+    observe_erp_outbox_processing,
+    observe_erp_outbox_retry,
+    observe_erp_outbox_retry_backoff,
+    set_log_request_id,
+)
 
 
 PO_OUTBOX_SCOPE = "purchase_order"
@@ -141,15 +149,32 @@ def _insert_status_event(
     )
 
 
-def _next_backoff_seconds(attempt: int) -> int:
-    base = int(current_app.config.get("ERP_OUTBOX_BACKOFF_SECONDS", 30) or 30)
-    max_seconds = int(current_app.config.get("ERP_OUTBOX_MAX_BACKOFF_SECONDS", 600) or 600)
+def _next_backoff_seconds(attempt: int) -> float:
+    base = max(1, int(current_app.config.get("ERP_OUTBOX_BACKOFF_SECONDS", 30) or 30))
+    max_seconds = max(base, int(current_app.config.get("ERP_OUTBOX_MAX_BACKOFF_SECONDS", 600) or 600))
     exponent = max(0, int(attempt) - 1)
-    return max(1, min(max_seconds, base * (2**exponent)))
+    raw_backoff = float(min(max_seconds, base * (2**exponent)))
+    jitter_ratio = float(current_app.config.get("ERP_OUTBOX_BACKOFF_JITTER_RATIO", 0.25) or 0.25)
+    jitter_ratio = max(0.0, min(1.0, jitter_ratio))
+    jitter_window = raw_backoff * jitter_ratio
+    jitter = random.uniform(-jitter_window, jitter_window) if jitter_window > 0 else 0.0
+    return max(1.0, min(float(max_seconds), raw_backoff + jitter))
 
 
 def _max_attempts() -> int:
     return max(1, int(current_app.config.get("ERP_OUTBOX_MAX_ATTEMPTS", 4) or 4))
+
+
+def _configure_circuit_breaker() -> None:
+    breaker = get_erp_circuit_breaker()
+    breaker.configure(
+        enabled=bool(current_app.config.get("ERP_CIRCUIT_ENABLED", True)),
+        error_rate_threshold=float(current_app.config.get("ERP_CIRCUIT_ERROR_RATE_THRESHOLD", 0.6) or 0.6),
+        min_samples=int(current_app.config.get("ERP_CIRCUIT_MIN_SAMPLES", 5) or 5),
+        window_seconds=int(current_app.config.get("ERP_CIRCUIT_WINDOW_SECONDS", 120) or 120),
+        open_seconds=int(current_app.config.get("ERP_CIRCUIT_OPEN_SECONDS", 30) or 30),
+        half_open_max_calls=int(current_app.config.get("ERP_CIRCUIT_HALF_OPEN_MAX_CALLS", 1) or 1),
+    )
 
 
 def _load_purchase_order(db, tenant_id: str, purchase_order_id: int) -> Dict[str, object] | None:
@@ -421,6 +446,88 @@ def _requeue_run(
     )
 
 
+def _delay_queued_run(
+    db,
+    *,
+    tenant_id: str,
+    run_id: int,
+    purchase_order_id: int,
+    request_id: str | None,
+    next_attempt_at: datetime,
+    error_summary: str,
+    error_details: str,
+) -> None:
+    meta = {
+        "kind": "po_push",
+        "purchase_order_id": purchase_order_id,
+        "next_attempt_at": _iso_utc(next_attempt_at),
+        "request_id": str(request_id or "").strip() or None,
+    }
+    db.execute(
+        """
+        UPDATE sync_runs
+        SET error_summary = ?,
+            error_details = ?,
+            payload_ref = ?
+        WHERE id = ? AND tenant_id = ? AND status = ?
+        """,
+        (
+            error_summary,
+            error_details,
+            _json_dumps(meta),
+            run_id,
+            tenant_id,
+            PO_OUTBOX_STATUS_QUEUED,
+        ),
+    )
+
+
+def _mark_dead_letter(
+    db,
+    *,
+    tenant_id: str,
+    run_id: int,
+    purchase_order_id: int,
+    request_id: str | None,
+    records_in: int,
+    records_upserted: int,
+    records_failed: int,
+    error_summary: str,
+    error_details: str,
+) -> None:
+    _update_run_terminal(
+        db,
+        tenant_id=tenant_id,
+        run_id=run_id,
+        status=PO_OUTBOX_STATUS_FAILED,
+        records_in=records_in,
+        records_upserted=records_upserted,
+        records_failed=records_failed,
+        error_summary=error_summary,
+        error_details=error_details,
+    )
+    dead_letter_meta = {
+        "kind": "po_push",
+        "purchase_order_id": purchase_order_id,
+        "request_id": str(request_id or "").strip() or None,
+        "dead_letter": True,
+        "dead_letter_reason": error_summary,
+        "dead_letter_at": _iso_utc(_utcnow()),
+    }
+    db.execute(
+        """
+        UPDATE sync_runs
+        SET payload_ref = ?
+        WHERE id = ? AND tenant_id = ?
+        """,
+        (
+            _json_dumps(dead_letter_meta),
+            run_id,
+            tenant_id,
+        ),
+    )
+
+
 def process_purchase_order_outbox(
     db,
     *,
@@ -433,6 +540,8 @@ def process_purchase_order_outbox(
     if push_fn is None:
         raise RuntimeError("push_fn is required for outbox processing. Use worker ERP gateway.")
     bus = event_bus or get_event_bus()
+    _configure_circuit_breaker()
+    circuit_breaker = get_erp_circuit_breaker()
     candidates = _select_due_runs(db, tenant_id, max(1, int(limit)))
     summary = {"processed": 0, "succeeded": 0, "failed": 0, "requeued": 0}
 
@@ -461,6 +570,42 @@ def process_purchase_order_outbox(
                 summary["processed"] += 1
                 summary["failed"] += 1
                 observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
+            continue
+
+        try:
+            queued_attempt = max(0, int(candidate.get("attempt") or 0))
+        except (TypeError, ValueError):
+            queued_attempt = 0
+        may_call_erp, circuit_state = circuit_breaker.before_call()
+        if not may_call_erp:
+            backoff = _next_backoff_seconds(queued_attempt + 1)
+            _delay_queued_run(
+                db,
+                tenant_id=run_tenant_id,
+                run_id=run_id,
+                purchase_order_id=purchase_order_id,
+                request_id=request_id,
+                next_attempt_at=_utcnow() + timedelta(seconds=backoff),
+                error_summary="erp_circuit_open",
+                error_details=f"circuit_state={circuit_state}",
+            )
+            db.commit()
+            summary["processed"] += 1
+            summary["requeued"] += 1
+            observe_erp_outbox_retry(1)
+            observe_erp_outbox_retry_backoff(backoff)
+            current_app.logger.warning(
+                "erp_outbox_circuit_blocked",
+                extra={
+                    "request_id": effective_request_id,
+                    "tenant_id": run_tenant_id,
+                    "purchase_order_id": purchase_order_id,
+                    "sync_run_id": run_id,
+                    "circuit_state": circuit_state,
+                    "next_backoff_seconds": round(backoff, 3),
+                },
+            )
+            observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
             continue
 
         if not _mark_run_running(db, run_tenant_id, run_id):
@@ -535,6 +680,7 @@ def process_purchase_order_outbox(
 
         try:
             result = push_fn(dict(po))
+            circuit_breaker.record_success()
             external_id = result.get("external_id")
             resolved_status = _normalize_po_status(result.get("status"))
             reason = "po_push_succeeded" if resolved_status != "sent_to_erp" else "po_push_queued"
@@ -597,6 +743,7 @@ def process_purchase_order_outbox(
             )
             observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
         except ErpGatewayError as exc:
+            circuit_breaker.record_failure()
             error_details = str(exc)[:1000]
             error_code, message_key, _http_status = classify_erp_failure(error_details)
             rejection = bool(exc.definitive) or error_code == "erp_order_rejected"
@@ -629,11 +776,12 @@ def process_purchase_order_outbox(
                 )
 
             if rejection or attempt >= _max_attempts():
-                _update_run_terminal(
+                _mark_dead_letter(
                     db,
                     tenant_id=run_tenant_id,
                     run_id=run_id,
-                    status=PO_OUTBOX_STATUS_FAILED,
+                    purchase_order_id=purchase_order_id,
+                    request_id=request_id,
                     records_in=1,
                     records_upserted=0,
                     records_failed=1,
@@ -643,6 +791,7 @@ def process_purchase_order_outbox(
                 db.commit()
                 summary["processed"] += 1
                 summary["failed"] += 1
+                observe_erp_outbox_dead_letter(1)
                 current_app.logger.warning(
                     "erp_outbox_processed",
                     extra={
@@ -672,6 +821,7 @@ def process_purchase_order_outbox(
             summary["processed"] += 1
             summary["requeued"] += 1
             observe_erp_outbox_retry(1)
+            observe_erp_outbox_retry_backoff(backoff)
             current_app.logger.warning(
                 "erp_outbox_processed",
                 extra={
@@ -685,13 +835,15 @@ def process_purchase_order_outbox(
             )
             observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
         except Exception as exc:  # noqa: BLE001
+            circuit_breaker.record_failure()
             error_details = str(exc)[:1000]
             if attempt >= _max_attempts():
-                _update_run_terminal(
+                _mark_dead_letter(
                     db,
                     tenant_id=run_tenant_id,
                     run_id=run_id,
-                    status=PO_OUTBOX_STATUS_FAILED,
+                    purchase_order_id=purchase_order_id,
+                    request_id=request_id,
                     records_in=1,
                     records_upserted=0,
                     records_failed=1,
@@ -701,6 +853,7 @@ def process_purchase_order_outbox(
                 db.commit()
                 summary["processed"] += 1
                 summary["failed"] += 1
+                observe_erp_outbox_dead_letter(1)
                 current_app.logger.error(
                     "erp_outbox_processed",
                     extra={
@@ -730,6 +883,7 @@ def process_purchase_order_outbox(
             summary["processed"] += 1
             summary["requeued"] += 1
             observe_erp_outbox_retry(1)
+            observe_erp_outbox_retry_backoff(backoff)
             current_app.logger.warning(
                 "erp_outbox_processed",
                 extra={

@@ -18,6 +18,16 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _float_env(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
 class Config:
     BASE_DIR = os.path.dirname(os.path.dirname(__file__))
     DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -70,8 +80,15 @@ class Config:
     ERP_OUTBOX_MAX_ATTEMPTS = _int_env("ERP_OUTBOX_MAX_ATTEMPTS", 4)
     ERP_OUTBOX_BACKOFF_SECONDS = _int_env("ERP_OUTBOX_BACKOFF_SECONDS", 30)
     ERP_OUTBOX_MAX_BACKOFF_SECONDS = _int_env("ERP_OUTBOX_MAX_BACKOFF_SECONDS", 600)
+    ERP_OUTBOX_BACKOFF_JITTER_RATIO = _float_env("ERP_OUTBOX_BACKOFF_JITTER_RATIO", 0.25)
     ERP_OUTBOX_WORKER_INTERVAL_SECONDS = _int_env("ERP_OUTBOX_WORKER_INTERVAL_SECONDS", 5)
     ERP_OUTBOX_WORKER_BATCH_SIZE = _int_env("ERP_OUTBOX_WORKER_BATCH_SIZE", 25)
+    ERP_CIRCUIT_ENABLED = _bool_env("ERP_CIRCUIT_ENABLED", True)
+    ERP_CIRCUIT_ERROR_RATE_THRESHOLD = _float_env("ERP_CIRCUIT_ERROR_RATE_THRESHOLD", 0.6)
+    ERP_CIRCUIT_MIN_SAMPLES = _int_env("ERP_CIRCUIT_MIN_SAMPLES", 5)
+    ERP_CIRCUIT_WINDOW_SECONDS = _int_env("ERP_CIRCUIT_WINDOW_SECONDS", 120)
+    ERP_CIRCUIT_OPEN_SECONDS = _int_env("ERP_CIRCUIT_OPEN_SECONDS", 30)
+    ERP_CIRCUIT_HALF_OPEN_MAX_CALLS = _int_env("ERP_CIRCUIT_HALF_OPEN_MAX_CALLS", 1)
     ERP_PUSH_IMMEDIATE_RESPONSE = _bool_env("ERP_PUSH_IMMEDIATE_RESPONSE", False)
     RFQ_SLA_DAYS = _int_env("RFQ_SLA_DAYS", 5)
 

@@ -52,7 +52,10 @@ class ObservabilityPrometheusTest(unittest.TestCase):
         self.assertIn("http_request_duration_ms_bucket", payload)
         self.assertIn("erp_outbox_queue_size", payload)
         self.assertIn("erp_outbox_retry_count", payload)
+        self.assertIn("erp_dead_letter_total", payload)
         self.assertIn("erp_outbox_processing_time_bucket", payload)
+        self.assertIn("erp_retry_backoff_seconds_bucket", payload)
+        self.assertIn("erp_circuit_state", payload)
         self.assertIn("domain_event_emitted_total", payload)
         self.assertIn('event_type="PurchaseRequestCreated"', payload)
 
