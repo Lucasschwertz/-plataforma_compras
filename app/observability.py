@@ -16,6 +16,7 @@ from flask import current_app, g, has_request_context, request
 _HTTP_DURATION_BUCKETS_MS = (5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0)
 _OUTBOX_PROCESSING_BUCKETS_MS = (10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0, 30000.0)
 _OUTBOX_BACKOFF_BUCKETS_SECONDS = (1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0)
+_ANALYTICS_REBUILD_DURATION_BUCKETS_SECONDS = (0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0)
 
 _LOG_REQUEST_ID_CTX: contextvars.ContextVar[str] = contextvars.ContextVar("log_request_id", default="")
 
@@ -157,6 +158,12 @@ class MetricsRegistry:
         self._analytics_projection_lag_seconds: Dict[str, float] = {}
         self._analytics_projection_last_success_timestamp: Dict[str, float] = {}
         self._analytics_read_model_hits_total: Dict[str, int] = {}
+        self._analytics_event_store_persisted_total: Dict[str, int] = {}
+        self._analytics_event_store_failed_total = 0
+        self._analytics_read_model_rebuild_total: Dict[tuple[str, str], int] = {}
+        self._analytics_read_model_rebuild_duration_seconds = self._new_histogram_state(
+            _ANALYTICS_REBUILD_DURATION_BUCKETS_SECONDS
+        )
 
     @staticmethod
     def _bucket_label(limit: float) -> str:
@@ -283,6 +290,32 @@ class MetricsRegistry:
                 int(self._analytics_read_model_hits_total.get(source_key, 0)) + 1
             )
 
+    def observe_analytics_event_store_persisted(self, event_type: str) -> None:
+        event_key = str(event_type or "unknown").strip() or "unknown"
+        with self._lock:
+            self._analytics_event_store_persisted_total[event_key] = (
+                int(self._analytics_event_store_persisted_total.get(event_key, 0)) + 1
+            )
+
+    def observe_analytics_event_store_failed(self, count: int = 1) -> None:
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._analytics_event_store_failed_total += increment
+
+    def observe_analytics_read_model_rebuild(self, mode: str, result: str, duration_seconds: float) -> None:
+        mode_key = str(mode or "unknown").strip().lower() or "unknown"
+        result_key = str(result or "unknown").strip().lower() or "unknown"
+        with self._lock:
+            key = (mode_key, result_key)
+            self._analytics_read_model_rebuild_total[key] = int(self._analytics_read_model_rebuild_total.get(key, 0)) + 1
+            self._observe_histogram(
+                self._analytics_read_model_rebuild_duration_seconds,
+                float(duration_seconds or 0.0),
+                _ANALYTICS_REBUILD_DURATION_BUCKETS_SECONDS,
+            )
+
     def snapshot(self) -> dict:
         with self._lock:
             route_stats = []
@@ -323,6 +356,13 @@ class MetricsRegistry:
                 "analytics_read_model": {
                     "hits_total": int(sum(self._analytics_read_model_hits_total.values())),
                     "by_source": dict(sorted(self._analytics_read_model_hits_total.items())),
+                },
+                "analytics_event_store": {
+                    "persisted_total": int(sum(self._analytics_event_store_persisted_total.values())),
+                    "failed_total": int(self._analytics_event_store_failed_total),
+                },
+                "analytics_read_model_rebuild": {
+                    "total": int(sum(self._analytics_read_model_rebuild_total.values())),
                 },
             }
 
@@ -399,6 +439,26 @@ class MetricsRegistry:
                     key: int(value)
                     for key, value in sorted(self._analytics_read_model_hits_total.items())
                 },
+                "analytics_event_store_persisted_total": {
+                    key: int(value)
+                    for key, value in sorted(self._analytics_event_store_persisted_total.items())
+                },
+                "analytics_event_store_failed_total": int(self._analytics_event_store_failed_total),
+                "analytics_read_model_rebuild_total": {
+                    key: int(value)
+                    for key, value in sorted(
+                        self._analytics_read_model_rebuild_total.items(),
+                        key=lambda item: (item[0][0], item[0][1]),
+                    )
+                },
+                "analytics_read_model_rebuild_duration_seconds": {
+                    "count": int(self._analytics_read_model_rebuild_duration_seconds["count"]),
+                    "sum": float(self._analytics_read_model_rebuild_duration_seconds["sum"]),
+                    "buckets": {
+                        label: int(count)
+                        for label, count in self._analytics_read_model_rebuild_duration_seconds["buckets"].items()
+                    },
+                },
             }
 
     def reset(self) -> None:
@@ -418,6 +478,12 @@ class MetricsRegistry:
             self._analytics_projection_lag_seconds.clear()
             self._analytics_projection_last_success_timestamp.clear()
             self._analytics_read_model_hits_total.clear()
+            self._analytics_event_store_persisted_total.clear()
+            self._analytics_event_store_failed_total = 0
+            self._analytics_read_model_rebuild_total.clear()
+            self._analytics_read_model_rebuild_duration_seconds = self._new_histogram_state(
+                _ANALYTICS_REBUILD_DURATION_BUCKETS_SECONDS
+            )
 
 
 _METRICS = MetricsRegistry()
@@ -476,6 +542,18 @@ def observe_analytics_projection_lag(projector: str, occurred_at: datetime | flo
 
 def observe_analytics_read_model_hit(source: str) -> None:
     _METRICS.observe_analytics_read_model_hit(source)
+
+
+def observe_analytics_event_store_persisted(event_type: str) -> None:
+    _METRICS.observe_analytics_event_store_persisted(event_type)
+
+
+def observe_analytics_event_store_failed(count: int = 1) -> None:
+    _METRICS.observe_analytics_event_store_failed(count)
+
+
+def observe_analytics_read_model_rebuild(mode: str, result: str, duration_seconds: float) -> None:
+    _METRICS.observe_analytics_read_model_rebuild(mode, result, duration_seconds)
 
 
 def _prom_label(value: object) -> str:
@@ -611,6 +689,17 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
             )
         )
 
+    lines.append("# HELP analytics_read_model_lag_seconds Read model projection lag in seconds by projector.")
+    lines.append("# TYPE analytics_read_model_lag_seconds gauge")
+    for projector, value in snapshot["analytics_projection_lag_seconds"].items():
+        lines.append(
+            _prom_line(
+                "analytics_read_model_lag_seconds",
+                float(value),
+                labels={"projector": projector},
+            )
+        )
+
     lines.append("# HELP analytics_projection_last_success_timestamp Unix timestamp of the last projection success.")
     lines.append("# TYPE analytics_projection_last_success_timestamp gauge")
     for projector, value in snapshot["analytics_projection_last_success_timestamp"].items():
@@ -632,6 +721,56 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
                 labels={"source": source},
             )
         )
+
+    lines.append("# HELP analytics_event_store_persisted_total Total domain events persisted in analytics event store.")
+    lines.append("# TYPE analytics_event_store_persisted_total counter")
+    for event_type, total in snapshot["analytics_event_store_persisted_total"].items():
+        lines.append(
+            _prom_line(
+                "analytics_event_store_persisted_total",
+                int(total),
+                labels={"event_type": event_type},
+            )
+        )
+
+    lines.append("# HELP analytics_event_store_failed_total Total failures while persisting domain events in analytics event store.")
+    lines.append("# TYPE analytics_event_store_failed_total counter")
+    lines.append(_prom_line("analytics_event_store_failed_total", int(snapshot["analytics_event_store_failed_total"])))
+
+    lines.append("# HELP analytics_read_model_rebuild_total Total analytics read model rebuild runs by mode and result.")
+    lines.append("# TYPE analytics_read_model_rebuild_total counter")
+    for (mode, result), total in snapshot["analytics_read_model_rebuild_total"].items():
+        lines.append(
+            _prom_line(
+                "analytics_read_model_rebuild_total",
+                int(total),
+                labels={"mode": mode, "result": result},
+            )
+        )
+
+    lines.append("# HELP analytics_read_model_rebuild_duration_seconds Analytics read model rebuild duration in seconds.")
+    lines.append("# TYPE analytics_read_model_rebuild_duration_seconds histogram")
+    rebuild_hist = snapshot["analytics_read_model_rebuild_duration_seconds"]
+    for le_label, bucket_value in rebuild_hist["buckets"].items():
+        lines.append(
+            _prom_line(
+                "analytics_read_model_rebuild_duration_seconds_bucket",
+                int(bucket_value),
+                labels={"le": le_label},
+            )
+        )
+    lines.append(
+        _prom_line(
+            "analytics_read_model_rebuild_duration_seconds_sum",
+            float(rebuild_hist["sum"]),
+        )
+    )
+    lines.append(
+        _prom_line(
+            "analytics_read_model_rebuild_duration_seconds_count",
+            int(rebuild_hist["count"]),
+        )
+    )
 
     return "\n".join(lines) + "\n"
 

@@ -337,11 +337,12 @@ class AnalyticsProjectionDispatcher:
                     seen.append(event_type)
         return tuple(seen)
 
-    def process(self, event: DomainEvent, db, workspace_id: str) -> None:
+    def process(self, event: DomainEvent, db, workspace_id: str) -> dict:
         normalized_workspace = str(workspace_id or "").strip()
         event_type = type(event).__name__
         event_id = str(getattr(event, "event_id", "") or "").strip()
         event_occurred_at = _coerce_datetime(getattr(event, "occurred_at", None))
+        summary = {"processed": 0, "skipped_dedupe": 0, "failed": 0}
 
         for projector in self._projectors:
             if not matches_event_type(projector, event):
@@ -361,6 +362,7 @@ class AnalyticsProjectionDispatcher:
                         last_event_id=event_id,
                         last_processed_at=event_occurred_at,
                     )
+                    summary["skipped_dedupe"] += 1
                     continue
 
                 update_state(
@@ -382,6 +384,7 @@ class AnalyticsProjectionDispatcher:
                 )
                 observe_analytics_projection_processed(projector.name, event_type)
                 observe_analytics_projection_lag(projector.name, event_occurred_at)
+                summary["processed"] += 1
             except Exception as exc:  # noqa: BLE001
                 try:
                     update_state(
@@ -396,6 +399,8 @@ class AnalyticsProjectionDispatcher:
                 except Exception:  # noqa: BLE001
                     pass
                 observe_analytics_projection_failed(projector.name, event_type)
+                summary["failed"] += 1
+        return summary
 
 
 def default_projection_dispatcher() -> AnalyticsProjectionDispatcher:

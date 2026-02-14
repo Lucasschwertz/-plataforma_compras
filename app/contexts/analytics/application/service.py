@@ -1,9 +1,12 @@
 ﻿from __future__ import annotations
 
 import copy
+import json
 import os
 import threading
 import time
+from dataclasses import fields as dataclass_fields
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
 
 from flask import current_app, has_app_context
@@ -20,7 +23,7 @@ from app.core import (
 from app.contexts.analytics.infrastructure.repository import AnalyticsRepository
 from app.contexts.analytics.infrastructure.read_model_repository import AnalyticsReadModelRepository
 from app.contexts.analytics.projections import AnalyticsProjectionDispatcher, default_projection_dispatcher
-from app.observability import observe_analytics_read_model_hit
+from app.observability import observe_analytics_read_model_hit, observe_analytics_read_model_rebuild
 from app.contexts.analytics.application.payload import normalize_section_key, section_meta
 from app.db import get_db
 from app.domain.contracts import AnalyticsRequestInput
@@ -791,3 +794,131 @@ class AnalyticsService:
         if role not in {"manager", "admin"}:
             return [item for item in list(sections or []) if item.get("key") != "executive"]
         return list(sections or [])
+
+    def rebuild_read_model(
+        self,
+        db,
+        *,
+        workspace_id: str,
+        mode: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict:
+        normalized_workspace = str(workspace_id or "").strip()
+        if not normalized_workspace:
+            raise ValueError("workspace_id is required")
+        normalized_mode = str(mode or "").strip().lower() or "full"
+        if normalized_mode not in {"full", "range"}:
+            raise ValueError("mode must be 'full' or 'range'")
+
+        started_at = time.perf_counter()
+        result = "success"
+        total_events = 0
+        processed = 0
+        skipped_dedupe = 0
+        failed = 0
+
+        try:
+            read_repo = self._read_model_repository(normalized_workspace)
+            if normalized_mode == "full":
+                read_repo.clear_projection_workspace(db, workspace_id=normalized_workspace)
+
+            events = read_repo.list_event_store_events(
+                db,
+                workspace_id=normalized_workspace,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            total_events = len(events)
+
+            for row in events:
+                event = self._event_from_store_row(row, workspace_id=normalized_workspace)
+                if event is None:
+                    failed += 1
+                    continue
+                event_summary = self._projection_dispatcher.process(event, db, normalized_workspace)
+                processed += int(event_summary.get("processed") or 0)
+                skipped_dedupe += int(event_summary.get("skipped_dedupe") or 0)
+                failed += int(event_summary.get("failed") or 0)
+
+            self.clear_cache()
+        except Exception:
+            result = "failed"
+            raise
+        finally:
+            duration_seconds = max(0.0, time.perf_counter() - started_at)
+            observe_analytics_read_model_rebuild(normalized_mode, result, duration_seconds)
+
+        duration_ms = int(round(max(0.0, time.perf_counter() - started_at) * 1000.0))
+        return {
+            "workspace_id": normalized_workspace,
+            "mode": normalized_mode,
+            "total_events": int(total_events),
+            "processed": int(processed),
+            "skipped_dedupe": int(skipped_dedupe),
+            "failed": int(failed),
+            "duration_ms": duration_ms,
+        }
+
+    @staticmethod
+    def _event_from_store_row(row: Dict[str, Any], *, workspace_id: str):
+        payload_json = str(row.get("payload_json") or "").strip()
+        try:
+            payload = json.loads(payload_json) if payload_json else {}
+        except json.JSONDecodeError:
+            payload = {}
+
+        event_type = str(row.get("event_type") or payload.get("event_type") or "").strip()
+        event_id = str(row.get("event_id") or payload.get("event_id") or "").strip()
+        occurred_at = AnalyticsService._parse_datetime(
+            row.get("occurred_at") or payload.get("occurred_at")
+        )
+        event_registry = {
+            "PurchaseRequestCreated": PurchaseRequestCreated,
+            "RfqCreated": RfqCreated,
+            "RfqAwarded": RfqAwarded,
+            "PurchaseOrderCreated": PurchaseOrderCreated,
+            "ErpOrderAccepted": ErpOrderAccepted,
+            "ErpOrderRejected": ErpOrderRejected,
+        }
+        event_cls = event_registry.get(event_type)
+        if event_cls is None:
+            return None
+
+        payload = dict(payload or {})
+        payload["event_id"] = event_id or payload.get("event_id")
+        payload["occurred_at"] = occurred_at or payload.get("occurred_at")
+        payload["workspace_id"] = str(payload.get("workspace_id") or workspace_id).strip() or workspace_id
+        payload["tenant_id"] = str(payload.get("tenant_id") or workspace_id).strip() or workspace_id
+
+        allowed_fields = {field.name for field in dataclass_fields(event_cls)}
+        event_kwargs = {key: payload.get(key) for key in allowed_fields if key in payload}
+        event_kwargs["workspace_id"] = str(event_kwargs.get("workspace_id") or workspace_id).strip() or workspace_id
+        event_kwargs["tenant_id"] = str(event_kwargs.get("tenant_id") or workspace_id).strip() or workspace_id
+        if event_id:
+            event_kwargs["event_id"] = event_id
+        if occurred_at is not None:
+            event_kwargs["occurred_at"] = occurred_at
+
+        try:
+            return event_cls(**event_kwargs)
+        except TypeError:
+            return None
+
+    @staticmethod
+    def _parse_datetime(value: Any) -> datetime | None:
+        if isinstance(value, datetime):
+            resolved = value
+        else:
+            raw = str(value or "").strip()
+            if not raw:
+                return None
+            normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+            try:
+                resolved = datetime.fromisoformat(normalized)
+            except ValueError:
+                return None
+
+        if resolved.tzinfo is None:
+            resolved = resolved.replace(tzinfo=timezone.utc)
+        return resolved.astimezone(timezone.utc)

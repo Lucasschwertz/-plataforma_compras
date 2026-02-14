@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import logging
+import json
 import uuid
+from dataclasses import asdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import RLock
 from typing import Callable, Dict, List, Type
 
-from app.observability import observe_domain_event_emitted
+from app.observability import (
+    observe_analytics_event_store_failed,
+    observe_analytics_event_store_persisted,
+    observe_domain_event_emitted,
+)
 
 
 EventHandler = Callable[["DomainEvent"], None]
@@ -100,6 +106,7 @@ class EventBus:
 
     def publish(self, event: DomainEvent) -> None:
         observe_domain_event_emitted(type(event).__name__)
+        self._persist_event_best_effort(event)
         with self._lock:
             handlers = list(self._handlers.get(type(event), []))
         for handler in handlers:
@@ -107,6 +114,62 @@ class EventBus:
                 handler(event)
             except Exception:  # noqa: BLE001
                 self._logger.exception("event_handler_failed", extra={"event_type": type(event).__name__})
+
+    def _persist_event_best_effort(self, event: DomainEvent) -> None:
+        try:
+            from flask import current_app, has_app_context
+
+            if not has_app_context():
+                return
+            if not bool(current_app.config.get("ANALYTICS_PROJECTION_ENABLED", True)):
+                return
+
+            from app.contexts.analytics.infrastructure.read_model_repository import AnalyticsReadModelRepository
+            from app.db import get_db
+
+            workspace_id = str(getattr(event, "workspace_id", "") or getattr(event, "tenant_id", "")).strip()
+            if not workspace_id:
+                workspace_id = "unknown"
+
+            payload = self._serialize_event_payload(event)
+            db = get_db()
+            repository = AnalyticsReadModelRepository(workspace_id=workspace_id)
+            inserted = repository.append_event_store(
+                db,
+                workspace_id=workspace_id,
+                event_id=str(getattr(event, "event_id", "") or ""),
+                event_type=type(event).__name__,
+                occurred_at=getattr(event, "occurred_at", None),
+                payload=payload,
+            )
+            if inserted:
+                observe_analytics_event_store_persisted(type(event).__name__)
+        except Exception:  # noqa: BLE001
+            observe_analytics_event_store_failed(1)
+            self._logger.exception(
+                "analytics_event_store_persist_failed",
+                extra={
+                    "event_type": type(event).__name__,
+                    "event_id": str(getattr(event, "event_id", "") or ""),
+                },
+            )
+
+    @staticmethod
+    def _serialize_event_payload(event: DomainEvent) -> Dict[str, object]:
+        raw = asdict(event)
+        payload: Dict[str, object] = {}
+        for key, value in raw.items():
+            if isinstance(value, datetime):
+                resolved = value
+                if resolved.tzinfo is None:
+                    resolved = resolved.replace(tzinfo=timezone.utc)
+                payload[key] = resolved.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            else:
+                payload[key] = value
+
+        # Defensive serialization to avoid non-JSON values leaking into payload_json.
+        json.loads(json.dumps(payload, default=str))
+        return payload
 
     def clear(self) -> None:
         with self._lock:

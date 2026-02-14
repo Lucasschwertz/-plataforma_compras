@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+import json
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Any, Dict, List
 
@@ -32,6 +33,64 @@ def _parse_date(value: Any) -> date | None:
         return date.fromisoformat(raw[:10])
     except ValueError:
         return None
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        resolved = value
+    else:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        try:
+            resolved = datetime.fromisoformat(normalized)
+        except ValueError:
+            day = _parse_date(raw)
+            if not day:
+                return None
+            resolved = datetime.combine(day, time.min)
+
+    if resolved.tzinfo is None:
+        resolved = resolved.replace(tzinfo=timezone.utc)
+    return resolved.astimezone(timezone.utc)
+
+
+def _coerce_range_datetime(value: Any, *, is_end: bool) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        day_time = time.max if is_end else time.min
+        resolved = datetime.combine(value, day_time).replace(tzinfo=timezone.utc)
+        return resolved.astimezone(timezone.utc)
+    raw = str(value).strip()
+    if raw and len(raw) <= 10:
+        day = _parse_date(raw)
+        if day is not None:
+            day_time = time.max if is_end else time.min
+            resolved = datetime.combine(day, day_time).replace(tzinfo=timezone.utc)
+            return resolved.astimezone(timezone.utc)
+    return _parse_datetime(value)
+
+
+def _to_iso_timestamp(value: datetime | None) -> str:
+    resolved = value or datetime.now(timezone.utc)
+    if resolved.tzinfo is None:
+        resolved = resolved.replace(tzinfo=timezone.utc)
+    return resolved.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _row_to_dict(row: Any) -> Dict[str, Any]:
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        return dict(row)
+    keys = getattr(row, "keys", None)
+    if callable(keys):
+        return {key: row[key] for key in row.keys()}
+    return {}
 
 
 class AnalyticsReadModelRepository(BaseRepository):
@@ -234,3 +293,100 @@ class AnalyticsReadModelRepository(BaseRepository):
             "supplier_rows_count": supplier_count,
             "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
+
+    @staticmethod
+    def _datetime_bounds(start_value: Any, end_value: Any) -> tuple[datetime | None, datetime | None]:
+        start_dt = _coerce_range_datetime(start_value, is_end=False)
+        end_dt = _coerce_range_datetime(end_value, is_end=True)
+        if start_dt and end_dt and start_dt > end_dt:
+            start_dt, end_dt = end_dt, start_dt
+        return start_dt, end_dt
+
+    def append_event_store(
+        self,
+        db,
+        *,
+        workspace_id: str | None,
+        event_id: str,
+        event_type: str,
+        occurred_at: datetime | str | None,
+        payload: Dict[str, Any] | str,
+    ) -> bool:
+        normalized_workspace = self._normalize_workspace_id(workspace_id)
+        normalized_event_id = str(event_id or "").strip()
+        normalized_event_type = str(event_type or "").strip()
+        if not normalized_event_id:
+            raise ValueError("event_id is required")
+        if not normalized_event_type:
+            raise ValueError("event_type is required")
+
+        occurred_dt = _parse_datetime(occurred_at)
+        payload_json = payload if isinstance(payload, str) else json.dumps(payload or {}, ensure_ascii=True, separators=(",", ":"))
+        cursor = db.execute(
+            """
+            INSERT INTO ar_event_store (
+                workspace_id,
+                event_id,
+                event_type,
+                occurred_at,
+                payload_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(workspace_id, event_id) DO NOTHING
+            """,
+            (
+                normalized_workspace,
+                normalized_event_id,
+                normalized_event_type,
+                _to_iso_timestamp(occurred_dt),
+                str(payload_json or "{}"),
+            ),
+        )
+        return int(getattr(cursor, "rowcount", 0) or 0) > 0
+
+    def list_event_store_events(
+        self,
+        db,
+        *,
+        workspace_id: str | None,
+        start_date: Any = None,
+        end_date: Any = None,
+    ) -> List[Dict[str, Any]]:
+        normalized_workspace = self._normalize_workspace_id(workspace_id)
+        start_dt, end_dt = self._datetime_bounds(start_date, end_date)
+
+        where_clause = ""
+        params: list[Any] = [normalized_workspace]
+        if start_dt:
+            where_clause += " AND occurred_at >= ?"
+            params.append(_to_iso_timestamp(start_dt))
+        if end_dt:
+            where_clause += " AND occurred_at <= ?"
+            params.append(_to_iso_timestamp(end_dt))
+
+        rows = db.execute(
+            f"""
+            SELECT workspace_id, event_id, event_type, occurred_at, payload_json, created_at
+            FROM ar_event_store
+            WHERE workspace_id = ?
+              {where_clause}
+            ORDER BY occurred_at ASC, created_at ASC, event_id ASC
+            """,
+            tuple(params),
+        ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+    def clear_projection_workspace(self, db, *, workspace_id: str | None) -> None:
+        normalized_workspace = self._normalize_workspace_id(workspace_id)
+        for table_name in (
+            "ar_kpi_daily",
+            "ar_supplier_daily",
+            "ar_process_stage_daily",
+            "ar_event_dedupe",
+            "ar_projection_state",
+        ):
+            db.execute(
+                f"DELETE FROM {table_name} WHERE workspace_id = ?",
+                (normalized_workspace,),
+            )

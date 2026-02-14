@@ -514,6 +514,42 @@ def analytics_dashboard_api(section: str = "overview"):
     return jsonify(payload)
 
 
+@procurement_bp.route("/api/procurement/analytics/read-model/rebuild", methods=["POST"])
+def analytics_read_model_rebuild_api():
+    _require_roles("manager", "admin")
+    db = get_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    payload = request.get_json(silent=True) or {}
+
+    workspace_id = scoped_tenant_id(payload.get("workspace_id") or tenant_id)
+    mode = str(payload.get("mode") or "full").strip().lower()
+    if mode not in {"full", "range"}:
+        raise ValidationError(
+            code="invalid_rebuild_mode",
+            message_key="action_invalid",
+            http_status=400,
+            critical=False,
+            payload={"supported_modes": ["full", "range"]},
+        )
+
+    start_date = str(payload.get("start_date") or "").strip() or None
+    end_date = str(payload.get("end_date") or "").strip() or None
+    summary = _ANALYTICS_SERVICE.rebuild_read_model(
+        db,
+        workspace_id=workspace_id,
+        mode=mode,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    db.commit()
+    return jsonify(
+        {
+            "message": _ok("analytics_read_model_rebuild_completed", "Rebuild do read model concluido."),
+            **summary,
+        }
+    )
+
+
 @procurement_bp.route("/api/procurement/purchase-requests/open", methods=["GET"])
 def purchase_requests_open():
     db = get_db()
