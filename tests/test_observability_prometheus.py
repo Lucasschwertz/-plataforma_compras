@@ -67,6 +67,10 @@ class ObservabilityPrometheusTest(unittest.TestCase):
         self.assertIn("analytics_event_store_failed_total", payload)
         self.assertIn("analytics_read_model_rebuild_total", payload)
         self.assertIn("analytics_read_model_rebuild_duration_seconds_bucket", payload)
+        self.assertIn("analytics_shadow_compare_total", payload)
+        self.assertIn("analytics_shadow_compare_diff_fields_total", payload)
+        self.assertIn("analytics_shadow_compare_latency_ms_bucket", payload)
+        self.assertIn("analytics_shadow_compare_last_diff_timestamp", payload)
         self.assertIn('event_type="PurchaseRequestCreated"', payload)
 
     def test_log_formatter_includes_request_id_outside_request_context(self) -> None:

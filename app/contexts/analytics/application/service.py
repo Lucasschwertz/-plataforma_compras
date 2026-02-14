@@ -3,13 +3,14 @@
 import copy
 import json
 import os
+import random
 import threading
 import time
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
 
-from flask import current_app, has_app_context
+from flask import current_app, has_app_context, has_request_context, request
 
 from app.core import (
     ErpOrderAccepted,
@@ -23,7 +24,20 @@ from app.core import (
 from app.contexts.analytics.infrastructure.repository import AnalyticsRepository
 from app.contexts.analytics.infrastructure.read_model_repository import AnalyticsReadModelRepository
 from app.contexts.analytics.projections import AnalyticsProjectionDispatcher, default_projection_dispatcher
-from app.observability import observe_analytics_read_model_hit, observe_analytics_read_model_rebuild
+from app.contexts.analytics.application.shadow_compare import (
+    diff_payload,
+    hash_payload,
+    should_emit_diff_log,
+)
+from app.observability import (
+    current_request_id,
+    observe_analytics_read_model_hit,
+    observe_analytics_read_model_rebuild,
+    observe_analytics_shadow_compare,
+    observe_analytics_shadow_compare_diff_fields,
+    observe_analytics_shadow_compare_last_diff_timestamp,
+    observe_analytics_shadow_compare_latency,
+)
 from app.contexts.analytics.application.payload import normalize_section_key, section_meta
 from app.db import get_db
 from app.domain.contracts import AnalyticsRequestInput
@@ -77,6 +91,70 @@ class AnalyticsService:
         if has_app_context():
             return bool(current_app.config.get("ANALYTICS_READ_MODEL_ENABLED", False))
         return self._env_bool("ANALYTICS_READ_MODEL_ENABLED", False)
+
+    def _shadow_compare_enabled(self) -> bool:
+        if has_app_context():
+            return bool(current_app.config.get("ANALYTICS_SHADOW_COMPARE_ENABLED", False))
+        return self._env_bool("ANALYTICS_SHADOW_COMPARE_ENABLED", False)
+
+    @staticmethod
+    def _clamp_sample_rate(value: Any) -> float:
+        try:
+            sample = float(value)
+        except (TypeError, ValueError):
+            return 0.05
+        if sample < 0.0:
+            return 0.0
+        if sample > 1.0:
+            return 1.0
+        return sample
+
+    def _shadow_compare_sample_rate(self) -> float:
+        default = 0.05
+        if has_app_context():
+            return self._clamp_sample_rate(current_app.config.get("ANALYTICS_SHADOW_COMPARE_SAMPLE_RATE", default))
+        raw = os.environ.get("ANALYTICS_SHADOW_COMPARE_SAMPLE_RATE")
+        if raw is None:
+            return default
+        return self._clamp_sample_rate(raw)
+
+    def _shadow_compare_max_diff_logs_per_min(self) -> int:
+        default = 20
+        if has_app_context():
+            try:
+                value = int(current_app.config.get("ANALYTICS_SHADOW_COMPARE_MAX_DIFF_LOGS_PER_MIN", default))
+            except (TypeError, ValueError):
+                value = default
+            return max(0, value)
+        raw = os.environ.get("ANALYTICS_SHADOW_COMPARE_MAX_DIFF_LOGS_PER_MIN")
+        if raw is None:
+            return default
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            return default
+
+    @staticmethod
+    def _is_analytics_path(path: str) -> bool:
+        normalized = str(path or "").strip().lower()
+        return normalized.startswith("/api/procurement/analytics") or normalized.startswith("/procurement/analises")
+
+    def _should_run_shadow_compare(self, request_input: AnalyticsRequestInput, *, read_model_enabled: bool) -> bool:
+        if not read_model_enabled:
+            return False
+        if not self._shadow_compare_enabled():
+            return False
+        role = str(request_input.role or "").strip().lower()
+        if role == "supplier" or role not in {"buyer", "manager", "admin", "approver"}:
+            return False
+        if not has_request_context():
+            return False
+        if not self._is_analytics_path(request.path):
+            return False
+        sample_rate = self._shadow_compare_sample_rate()
+        if sample_rate <= 0.0:
+            return False
+        return random.random() < sample_rate
 
     def _cache_key(
         self,
@@ -255,6 +333,17 @@ class AnalyticsService:
         cached = self._cache_get(cache_key)
         if cached is not None:
             source = str(cached.get("source") or "").strip().lower() or "transacional"
+            if read_model_enabled:
+                self._maybe_run_shadow_compare(
+                    db,
+                    request_input=request_input,
+                    filters=filters,
+                    visibility=visibility,
+                    build_payload_fn=build_payload_fn,
+                    payload_primary=cached,
+                    primary_source=source,
+                    read_model_enabled=read_model_enabled,
+                )
             observe_analytics_read_model_hit(source)
             return cached
 
@@ -294,9 +383,90 @@ class AnalyticsService:
             )
             payload["source"] = "transacional"
 
+        primary_source = str(payload.get("source") or "transacional").strip().lower() or "transacional"
+        if read_model_enabled:
+            self._maybe_run_shadow_compare(
+                db,
+                request_input=request_input,
+                filters=filters,
+                visibility=visibility,
+                build_payload_fn=build_payload_fn,
+                payload_primary=payload,
+                primary_source=primary_source,
+                read_model_enabled=read_model_enabled,
+            )
+
         observe_analytics_read_model_hit(str(payload.get("source") or "transacional"))
         self._cache_set(cache_key, payload)
         return payload
+
+    def _maybe_run_shadow_compare(
+        self,
+        db,
+        *,
+        request_input: AnalyticsRequestInput,
+        filters: Dict[str, Any],
+        visibility: Dict[str, Any],
+        build_payload_fn,
+        payload_primary: Dict[str, Any],
+        primary_source: str,
+        read_model_enabled: bool,
+    ) -> None:
+        if not self._should_run_shadow_compare(request_input, read_model_enabled=read_model_enabled):
+            return
+
+        started = time.perf_counter()
+        try:
+            payload_shadow = self._build_dashboard_payload_transacional(
+                db,
+                request_input=request_input,
+                filters=filters,
+                visibility=visibility,
+                build_payload_fn=build_payload_fn,
+            )
+            payload_shadow["source"] = "transacional"
+
+            compare_result = diff_payload(payload_primary, payload_shadow, max_diffs=20)
+            if bool(compare_result.get("equal")):
+                observe_analytics_shadow_compare("equal", primary_source)
+                return
+
+            summary = dict(compare_result.get("summary") or {})
+            observe_analytics_shadow_compare("diff", primary_source)
+            observe_analytics_shadow_compare_diff_fields(summary)
+            observe_analytics_shadow_compare_last_diff_timestamp(time.time())
+
+            if has_app_context() and should_emit_diff_log(self._shadow_compare_max_diff_logs_per_min()):
+                raw_filters = dict(filters.get("raw") or {}) if isinstance(filters.get("raw"), dict) else {}
+                current_app.logger.warning(
+                    "analytics_shadow_compare_diff",
+                    extra={
+                        "request_id": current_request_id(default="n/a"),
+                        "workspace_id": request_input.tenant_id,
+                        "section": request_input.section,
+                        "filters": raw_filters,
+                        "primary_source": primary_source,
+                        "shadow_source": "transacional",
+                        "primary_hash": hash_payload(payload_primary),
+                        "shadow_hash": hash_payload(payload_shadow),
+                        "diff_summary": summary,
+                        "diffs": list(compare_result.get("diffs") or []),
+                    },
+                )
+        except Exception:  # noqa: BLE001
+            observe_analytics_shadow_compare("error", primary_source)
+            if has_app_context():
+                current_app.logger.exception(
+                    "analytics_shadow_compare_error",
+                    extra={
+                        "request_id": current_request_id(default="n/a"),
+                        "workspace_id": request_input.tenant_id,
+                        "section": request_input.section,
+                        "primary_source": primary_source,
+                    },
+                )
+        finally:
+            observe_analytics_shadow_compare_latency((time.perf_counter() - started) * 1000.0)
 
     def _build_dashboard_payload_transacional(
         self,

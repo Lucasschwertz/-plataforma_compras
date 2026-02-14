@@ -17,6 +17,7 @@ _HTTP_DURATION_BUCKETS_MS = (5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0,
 _OUTBOX_PROCESSING_BUCKETS_MS = (10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0, 30000.0)
 _OUTBOX_BACKOFF_BUCKETS_SECONDS = (1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0)
 _ANALYTICS_REBUILD_DURATION_BUCKETS_SECONDS = (0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0)
+_ANALYTICS_SHADOW_COMPARE_LATENCY_BUCKETS_MS = (1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0)
 
 _LOG_REQUEST_ID_CTX: contextvars.ContextVar[str] = contextvars.ContextVar("log_request_id", default="")
 
@@ -164,6 +165,12 @@ class MetricsRegistry:
         self._analytics_read_model_rebuild_duration_seconds = self._new_histogram_state(
             _ANALYTICS_REBUILD_DURATION_BUCKETS_SECONDS
         )
+        self._analytics_shadow_compare_total: Dict[tuple[str, str], int] = {}
+        self._analytics_shadow_compare_diff_fields_total: Dict[str, int] = {}
+        self._analytics_shadow_compare_latency_ms = self._new_histogram_state(
+            _ANALYTICS_SHADOW_COMPARE_LATENCY_BUCKETS_MS
+        )
+        self._analytics_shadow_compare_last_diff_timestamp = 0.0
 
     @staticmethod
     def _bucket_label(limit: float) -> str:
@@ -316,6 +323,40 @@ class MetricsRegistry:
                 _ANALYTICS_REBUILD_DURATION_BUCKETS_SECONDS,
             )
 
+    def observe_analytics_shadow_compare(self, result: str, primary_source: str) -> None:
+        result_key = str(result or "unknown").strip().lower() or "unknown"
+        source_key = str(primary_source or "unknown").strip().lower() or "unknown"
+        with self._lock:
+            key = (result_key, source_key)
+            self._analytics_shadow_compare_total[key] = int(self._analytics_shadow_compare_total.get(key, 0)) + 1
+
+    def observe_analytics_shadow_compare_diff_fields(self, summary: Dict[str, int] | None) -> None:
+        source = dict(summary or {})
+        with self._lock:
+            for field in ("kpis", "charts", "drilldown"):
+                increment = max(0, int(source.get(field) or 0))
+                if increment <= 0:
+                    continue
+                self._analytics_shadow_compare_diff_fields_total[field] = int(
+                    self._analytics_shadow_compare_diff_fields_total.get(field, 0)
+                ) + increment
+
+    def observe_analytics_shadow_compare_latency(self, duration_ms: float) -> None:
+        with self._lock:
+            self._observe_histogram(
+                self._analytics_shadow_compare_latency_ms,
+                float(duration_ms or 0.0),
+                _ANALYTICS_SHADOW_COMPARE_LATENCY_BUCKETS_MS,
+            )
+
+    def observe_analytics_shadow_compare_last_diff_timestamp(self, timestamp: float | int | None = None) -> None:
+        try:
+            value = float(timestamp if timestamp is not None else time.time())
+        except (TypeError, ValueError):
+            value = time.time()
+        with self._lock:
+            self._analytics_shadow_compare_last_diff_timestamp = max(0.0, value)
+
     def snapshot(self) -> dict:
         with self._lock:
             route_stats = []
@@ -363,6 +404,10 @@ class MetricsRegistry:
                 },
                 "analytics_read_model_rebuild": {
                     "total": int(sum(self._analytics_read_model_rebuild_total.values())),
+                },
+                "analytics_shadow_compare": {
+                    "total": int(sum(self._analytics_shadow_compare_total.values())),
+                    "last_diff_timestamp": float(self._analytics_shadow_compare_last_diff_timestamp),
                 },
             }
 
@@ -459,6 +504,28 @@ class MetricsRegistry:
                         for label, count in self._analytics_read_model_rebuild_duration_seconds["buckets"].items()
                     },
                 },
+                "analytics_shadow_compare_total": {
+                    key: int(value)
+                    for key, value in sorted(
+                        self._analytics_shadow_compare_total.items(),
+                        key=lambda item: (item[0][0], item[0][1]),
+                    )
+                },
+                "analytics_shadow_compare_diff_fields_total": {
+                    key: int(value)
+                    for key, value in sorted(self._analytics_shadow_compare_diff_fields_total.items())
+                },
+                "analytics_shadow_compare_latency_ms": {
+                    "count": int(self._analytics_shadow_compare_latency_ms["count"]),
+                    "sum": float(self._analytics_shadow_compare_latency_ms["sum"]),
+                    "buckets": {
+                        label: int(count)
+                        for label, count in self._analytics_shadow_compare_latency_ms["buckets"].items()
+                    },
+                },
+                "analytics_shadow_compare_last_diff_timestamp": float(
+                    self._analytics_shadow_compare_last_diff_timestamp
+                ),
             }
 
     def reset(self) -> None:
@@ -484,6 +551,12 @@ class MetricsRegistry:
             self._analytics_read_model_rebuild_duration_seconds = self._new_histogram_state(
                 _ANALYTICS_REBUILD_DURATION_BUCKETS_SECONDS
             )
+            self._analytics_shadow_compare_total.clear()
+            self._analytics_shadow_compare_diff_fields_total.clear()
+            self._analytics_shadow_compare_latency_ms = self._new_histogram_state(
+                _ANALYTICS_SHADOW_COMPARE_LATENCY_BUCKETS_MS
+            )
+            self._analytics_shadow_compare_last_diff_timestamp = 0.0
 
 
 _METRICS = MetricsRegistry()
@@ -554,6 +627,22 @@ def observe_analytics_event_store_failed(count: int = 1) -> None:
 
 def observe_analytics_read_model_rebuild(mode: str, result: str, duration_seconds: float) -> None:
     _METRICS.observe_analytics_read_model_rebuild(mode, result, duration_seconds)
+
+
+def observe_analytics_shadow_compare(result: str, primary_source: str) -> None:
+    _METRICS.observe_analytics_shadow_compare(result, primary_source)
+
+
+def observe_analytics_shadow_compare_diff_fields(summary: Dict[str, int] | None) -> None:
+    _METRICS.observe_analytics_shadow_compare_diff_fields(summary)
+
+
+def observe_analytics_shadow_compare_latency(duration_ms: float) -> None:
+    _METRICS.observe_analytics_shadow_compare_latency(duration_ms)
+
+
+def observe_analytics_shadow_compare_last_diff_timestamp(timestamp: float | int | None = None) -> None:
+    _METRICS.observe_analytics_shadow_compare_last_diff_timestamp(timestamp)
 
 
 def _prom_label(value: object) -> str:
@@ -769,6 +858,61 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
         _prom_line(
             "analytics_read_model_rebuild_duration_seconds_count",
             int(rebuild_hist["count"]),
+        )
+    )
+
+    lines.append("# HELP analytics_shadow_compare_total Total shadow compare executions by result and primary source.")
+    lines.append("# TYPE analytics_shadow_compare_total counter")
+    for (result, primary_source), total in snapshot["analytics_shadow_compare_total"].items():
+        lines.append(
+            _prom_line(
+                "analytics_shadow_compare_total",
+                int(total),
+                labels={"result": result, "primary_source": primary_source},
+            )
+        )
+
+    lines.append("# HELP analytics_shadow_compare_diff_fields_total Total diff fields grouped by payload area.")
+    lines.append("# TYPE analytics_shadow_compare_diff_fields_total counter")
+    for field, total in snapshot["analytics_shadow_compare_diff_fields_total"].items():
+        lines.append(
+            _prom_line(
+                "analytics_shadow_compare_diff_fields_total",
+                int(total),
+                labels={"field": field},
+            )
+        )
+
+    lines.append("# HELP analytics_shadow_compare_latency_ms Shadow compare latency in milliseconds.")
+    lines.append("# TYPE analytics_shadow_compare_latency_ms histogram")
+    shadow_hist = snapshot["analytics_shadow_compare_latency_ms"]
+    for le_label, bucket_value in shadow_hist["buckets"].items():
+        lines.append(
+            _prom_line(
+                "analytics_shadow_compare_latency_ms_bucket",
+                int(bucket_value),
+                labels={"le": le_label},
+            )
+        )
+    lines.append(
+        _prom_line(
+            "analytics_shadow_compare_latency_ms_sum",
+            float(shadow_hist["sum"]),
+        )
+    )
+    lines.append(
+        _prom_line(
+            "analytics_shadow_compare_latency_ms_count",
+            int(shadow_hist["count"]),
+        )
+    )
+
+    lines.append("# HELP analytics_shadow_compare_last_diff_timestamp Unix timestamp of the last shadow diff detected.")
+    lines.append("# TYPE analytics_shadow_compare_last_diff_timestamp gauge")
+    lines.append(
+        _prom_line(
+            "analytics_shadow_compare_last_diff_timestamp",
+            float(snapshot["analytics_shadow_compare_last_diff_timestamp"]),
         )
     )
 
