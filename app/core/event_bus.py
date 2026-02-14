@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from threading import RLock
 from typing import Callable, Dict, List, Type
 
+from app.observability import observe_domain_event_emitted
+
 
 EventHandler = Callable[["DomainEvent"], None]
 
@@ -79,6 +81,7 @@ class EventBus:
             handlers.append(handler)
 
     def publish(self, event: DomainEvent) -> None:
+        observe_domain_event_emitted(type(event).__name__)
         with self._lock:
             handlers = list(self._handlers.get(type(event), []))
         for handler in handlers:
@@ -101,4 +104,3 @@ def get_event_bus() -> EventBus:
 
 def reset_event_bus_for_tests() -> None:
     _DEFAULT_EVENT_BUS.clear()
-

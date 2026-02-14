@@ -1,6 +1,6 @@
 import os
 
-from flask import Flask, g, jsonify, request, session
+from flask import Flask, Response, g, jsonify, request, session
 from werkzeug.exceptions import HTTPException
 
 from app.config import Config
@@ -13,6 +13,7 @@ from app.observability import (
     metrics_snapshot,
     observe_response,
     outbox_health,
+    prometheus_metrics_text,
 )
 from app.policies import normalize_role
 from app.procurement.critical_actions import CRITICAL_ACTIONS
@@ -297,29 +298,79 @@ def _register_health(app: Flask) -> None:
 
         db_path = app.config.get("DB_PATH") or "unknown"
         backend = "postgres" if str(db_path).startswith("postgres") else "sqlite"
+        worker_payload = {
+            "worker_status": "unknown",
+            "worker_active": False,
+            "backlog_critical": False,
+            "queue": {
+                "pending_jobs": 0,
+                "running_jobs": 0,
+                "failed_jobs": 0,
+                "completed_jobs": 0,
+                "avg_processing_ms": 0.0,
+                "oldest_pending_age_seconds": 0,
+                "last_started_at": None,
+                "last_finished_at": None,
+                "backlog_critical": False,
+            },
+        }
         payload = {
             "status": "ok",
             "db": backend,
             "env": app.config.get("ENV", "unknown"),
+            "checks": {
+                "db": {"ok": True},
+                "worker": {"ok": True},
+                "backlog": {"ok": True},
+            },
             "metrics": {
                 "http": metrics_snapshot(),
             },
+            "worker": worker_payload,
         }
+
+        db = None
         try:
-            payload["worker"] = outbox_health(get_read_db())
+            db = get_read_db()
+            db.execute("SELECT 1").fetchone()
         except Exception:
             payload["status"] = "degraded"
-            payload["worker"] = {
-                "worker_status": "unknown",
-                "queue": {
-                    "pending_jobs": 0,
-                    "running_jobs": 0,
-                    "failed_jobs": 0,
-                    "completed_jobs": 0,
-                    "avg_processing_ms": 0.0,
-                    "oldest_pending_age_seconds": 0,
-                    "last_started_at": None,
-                    "last_finished_at": None,
-                },
-            }
+            payload["checks"]["db"] = {"ok": False}
+            db = None
+
+        if db is not None:
+            try:
+                payload["worker"] = outbox_health(db)
+            except Exception:
+                payload["status"] = "degraded"
+                payload["worker"] = worker_payload
+                payload["checks"]["worker"] = {"ok": False}
+
+        worker_status = str((payload.get("worker") or {}).get("worker_status") or "unknown")
+        worker_active = bool((payload.get("worker") or {}).get("worker_active"))
+        backlog_critical = bool((payload.get("worker") or {}).get("backlog_critical"))
+
+        payload["checks"]["worker"] = {
+            "ok": worker_active or worker_status == "idle",
+            "status": worker_status,
+        }
+        payload["checks"]["backlog"] = {
+            "ok": not backlog_critical,
+            "critical": backlog_critical,
+        }
+        if not payload["checks"]["worker"]["ok"] or backlog_critical:
+            payload["status"] = "degraded"
+
         return payload, 200
+
+    @app.route("/metrics")
+    def metrics():
+        from app.db import get_read_db
+
+        outbox_state = None
+        try:
+            outbox_state = outbox_health(get_read_db())
+        except Exception:
+            outbox_state = None
+        body = prometheus_metrics_text(outbox_state=outbox_state)
+        return Response(body, mimetype="text/plain; version=0.0.4; charset=utf-8")

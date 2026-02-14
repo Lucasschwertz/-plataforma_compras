@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List
 
@@ -9,6 +10,7 @@ from flask import current_app
 from app.core import ErpOrderAccepted, ErpOrderRejected, EventBus, get_event_bus
 from app.contexts.erp.domain.gateway import ErpGatewayError
 from app.errors import classify_erp_failure
+from app.observability import observe_erp_outbox_processing, observe_erp_outbox_retry, set_log_request_id
 
 
 PO_OUTBOX_SCOPE = "purchase_order"
@@ -426,6 +428,7 @@ def process_purchase_order_outbox(
     limit: int = 25,
     push_fn: Callable[[dict], dict] | None = None,
     event_bus: EventBus | None = None,
+    worker_request_id: str | None = None,
 ) -> Dict[str, int]:
     if push_fn is None:
         raise RuntimeError("push_fn is required for outbox processing. Use worker ERP gateway.")
@@ -437,6 +440,9 @@ def process_purchase_order_outbox(
         run_id = int(candidate["id"])
         run_tenant_id = str(candidate["tenant_id"])
         request_id = str((candidate.get("meta") or {}).get("request_id") or "").strip() or None
+        effective_request_id = request_id or str(worker_request_id or "").strip() or "n/a"
+        set_log_request_id(effective_request_id)
+        started_ms = time.perf_counter()
         purchase_order_id = int((candidate.get("meta") or {}).get("purchase_order_id") or 0)
         if purchase_order_id <= 0:
             if _mark_run_running(db, run_tenant_id, run_id):
@@ -454,6 +460,7 @@ def process_purchase_order_outbox(
                 db.commit()
                 summary["processed"] += 1
                 summary["failed"] += 1
+                observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
             continue
 
         if not _mark_run_running(db, run_tenant_id, run_id):
@@ -487,6 +494,7 @@ def process_purchase_order_outbox(
             db.commit()
             summary["processed"] += 1
             summary["failed"] += 1
+            observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
             continue
 
         current_status = str(po.get("status") or "").strip().lower()
@@ -503,6 +511,7 @@ def process_purchase_order_outbox(
             db.commit()
             summary["processed"] += 1
             summary["succeeded"] += 1
+            observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
             continue
 
         start_reason = "po_push_retry_started" if attempt > 1 or current_status == "erp_error" else "po_push_started"
@@ -579,13 +588,14 @@ def process_purchase_order_outbox(
             current_app.logger.info(
                 "erp_outbox_processed",
                 extra={
-                    "request_id": request_id or "n/a",
+                    "request_id": effective_request_id,
                     "tenant_id": run_tenant_id,
                     "purchase_order_id": purchase_order_id,
                     "sync_run_id": run_id,
                     "result": "succeeded",
                 },
             )
+            observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
         except ErpGatewayError as exc:
             error_details = str(exc)[:1000]
             error_code, message_key, _http_status = classify_erp_failure(error_details)
@@ -636,7 +646,7 @@ def process_purchase_order_outbox(
                 current_app.logger.warning(
                     "erp_outbox_processed",
                     extra={
-                        "request_id": request_id or "n/a",
+                        "request_id": effective_request_id,
                         "tenant_id": run_tenant_id,
                         "purchase_order_id": purchase_order_id,
                         "sync_run_id": run_id,
@@ -644,6 +654,7 @@ def process_purchase_order_outbox(
                         "error_code": message_key,
                     },
                 )
+                observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
                 continue
 
             backoff = _next_backoff_seconds(attempt)
@@ -660,10 +671,11 @@ def process_purchase_order_outbox(
             db.commit()
             summary["processed"] += 1
             summary["requeued"] += 1
+            observe_erp_outbox_retry(1)
             current_app.logger.warning(
                 "erp_outbox_processed",
                 extra={
-                    "request_id": request_id or "n/a",
+                    "request_id": effective_request_id,
                     "tenant_id": run_tenant_id,
                     "purchase_order_id": purchase_order_id,
                     "sync_run_id": run_id,
@@ -671,6 +683,7 @@ def process_purchase_order_outbox(
                     "error_code": message_key,
                 },
             )
+            observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
         except Exception as exc:  # noqa: BLE001
             error_details = str(exc)[:1000]
             if attempt >= _max_attempts():
@@ -691,7 +704,7 @@ def process_purchase_order_outbox(
                 current_app.logger.error(
                     "erp_outbox_processed",
                     extra={
-                        "request_id": request_id or "n/a",
+                        "request_id": effective_request_id,
                         "tenant_id": run_tenant_id,
                         "purchase_order_id": purchase_order_id,
                         "sync_run_id": run_id,
@@ -699,6 +712,7 @@ def process_purchase_order_outbox(
                         "error_code": "erp_push_failed",
                     },
                 )
+                observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
                 continue
 
             backoff = _next_backoff_seconds(attempt)
@@ -715,10 +729,11 @@ def process_purchase_order_outbox(
             db.commit()
             summary["processed"] += 1
             summary["requeued"] += 1
+            observe_erp_outbox_retry(1)
             current_app.logger.warning(
                 "erp_outbox_processed",
                 extra={
-                    "request_id": request_id or "n/a",
+                    "request_id": effective_request_id,
                     "tenant_id": run_tenant_id,
                     "purchase_order_id": purchase_order_id,
                     "sync_run_id": run_id,
@@ -726,6 +741,8 @@ def process_purchase_order_outbox(
                     "error_code": "erp_push_failed",
                 },
             )
+            observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
 
     return summary
+
 

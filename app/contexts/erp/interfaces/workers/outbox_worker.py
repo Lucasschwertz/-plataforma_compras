@@ -9,6 +9,7 @@ from app import create_app
 from app.db import close_db, get_db
 from app.contexts.procurement.infrastructure.erp_outbox import process_purchase_order_outbox
 from app.contexts.erp.interfaces.workers.runtime import build_worker_push_fn
+from app.observability import set_log_request_id
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -20,8 +21,9 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_once(app, tenant_id: str | None, limit: int, push_fn) -> dict:
+def _run_once(app, tenant_id: str | None, limit: int, push_fn, run_request_id: str) -> dict:
     with app.app_context():
+        set_log_request_id(run_request_id)
         db = get_db()
         try:
             result = process_purchase_order_outbox(
@@ -29,6 +31,7 @@ def _run_once(app, tenant_id: str | None, limit: int, push_fn) -> dict:
                 tenant_id=tenant_id,
                 limit=limit,
                 push_fn=push_fn,
+                worker_request_id=run_request_id,
             )
             db.commit()
             return result
@@ -53,7 +56,7 @@ def main() -> int:
 
     while True:
         run_request_id = f"worker-{uuid.uuid4().hex[:12]}"
-        summary = _run_once(app, tenant_id=tenant_id, limit=limit, push_fn=push_fn)
+        summary = _run_once(app, tenant_id=tenant_id, limit=limit, push_fn=push_fn, run_request_id=run_request_id)
         app.logger.info(
             "erp_outbox_worker_batch_completed",
             extra={

@@ -1,5 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import logging
 import threading
@@ -8,7 +10,37 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict
 
-from flask import g, has_request_context, request
+from flask import current_app, g, has_request_context, request
+
+
+_HTTP_DURATION_BUCKETS_MS = (5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0)
+_OUTBOX_PROCESSING_BUCKETS_MS = (10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0, 30000.0)
+
+_LOG_REQUEST_ID_CTX: contextvars.ContextVar[str] = contextvars.ContextVar("log_request_id", default="")
+
+
+def _normalize_request_id(value: str | None) -> str:
+    return str(value or "").strip() or "n/a"
+
+
+def set_log_request_id(request_id: str | None) -> None:
+    _LOG_REQUEST_ID_CTX.set(_normalize_request_id(request_id))
+
+
+@contextlib.contextmanager
+def bind_request_id(request_id: str | None):
+    token = _LOG_REQUEST_ID_CTX.set(_normalize_request_id(request_id))
+    try:
+        yield _LOG_REQUEST_ID_CTX.get()
+    finally:
+        _LOG_REQUEST_ID_CTX.reset(token)
+
+
+def _background_request_id(default: str | None = None) -> str:
+    request_id = str(_LOG_REQUEST_ID_CTX.get() or "").strip()
+    if request_id:
+        return request_id
+    return default or "n/a"
 
 
 class JsonLogFormatter(logging.Formatter):
@@ -44,15 +76,14 @@ class JsonLogFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
         if has_request_context():
-            payload["request_id"] = current_request_id(default="-")
+            payload["request_id"] = current_request_id(default="n/a")
             payload["path"] = request.path
             payload["method"] = request.method
             if request.url_rule is not None:
                 payload["route"] = request.url_rule.rule
         else:
-            request_id = str(getattr(record, "request_id", "") or "").strip()
-            if request_id:
-                payload["request_id"] = request_id
+            record_request_id = str(getattr(record, "request_id", "") or "").strip()
+            payload["request_id"] = record_request_id or _background_request_id(default="n/a")
 
         for key, value in record.__dict__.items():
             if key in self._base_keys or key.startswith("_"):
@@ -87,18 +118,21 @@ def configure_json_logging(app) -> None:
 def ensure_request_id() -> str:
     request_id = str(getattr(g, "request_id", "") or "").strip()
     if request_id:
+        set_log_request_id(request_id)
         return request_id
     incoming = str(request.headers.get("X-Request-Id") or "").strip()
     request_id = incoming or str(uuid.uuid4())
     g.request_id = request_id
+    set_log_request_id(request_id)
     return request_id
 
 
 def current_request_id(default: str | None = None) -> str:
-    request_id = str(getattr(g, "request_id", "") or "").strip()
-    if request_id:
-        return request_id
-    return default or "n/a"
+    if has_request_context():
+        request_id = str(getattr(g, "request_id", "") or "").strip()
+        if request_id:
+            return request_id
+    return _background_request_id(default=default)
 
 
 class MetricsRegistry:
@@ -108,8 +142,43 @@ class MetricsRegistry:
         self._errors_total = 0
         self._by_route: Dict[str, Dict[str, float]] = {}
 
+        self._http_request_total: Dict[tuple[str, str, str], int] = {}
+        self._http_request_duration_ms: Dict[tuple[str, str], dict] = {}
+
+        self._erp_outbox_retry_count = 0
+        self._erp_outbox_processing_time = self._new_histogram_state(_OUTBOX_PROCESSING_BUCKETS_MS)
+
+        self._domain_event_emitted_total: Dict[str, int] = {}
+
+    @staticmethod
+    def _bucket_label(limit: float) -> str:
+        return f"{limit:g}"
+
+    @classmethod
+    def _new_histogram_state(cls, limits: tuple[float, ...]) -> dict:
+        return {
+            "count": 0,
+            "sum": 0.0,
+            "buckets": {cls._bucket_label(limit): 0 for limit in limits} | {"+Inf": 0},
+        }
+
+    @classmethod
+    def _observe_histogram(cls, state: dict, value: float, limits: tuple[float, ...]) -> None:
+        duration = max(0.0, float(value))
+        state["count"] += 1
+        state["sum"] += duration
+        for limit in limits:
+            if duration <= limit:
+                key = cls._bucket_label(limit)
+                state["buckets"][key] = int(state["buckets"].get(key, 0)) + 1
+        state["buckets"]["+Inf"] = int(state["count"])
+
     def observe_http(self, method: str, route: str, status_code: int, duration_ms: float) -> None:
-        key = f"{method.upper()} {route}"
+        method_key = str(method or "GET").strip().upper() or "GET"
+        route_key = str(route or "unknown").strip() or "unknown"
+        status_key = str(int(status_code))
+
+        key = f"{method_key} {route_key}"
         with self._lock:
             bucket = self._by_route.setdefault(
                 key,
@@ -128,6 +197,32 @@ class MetricsRegistry:
                 bucket["errors"] += 1
                 self._errors_total += 1
 
+            self._http_request_total[(method_key, route_key, status_key)] = (
+                int(self._http_request_total.get((method_key, route_key, status_key), 0)) + 1
+            )
+            hist_key = (method_key, route_key)
+            histogram = self._http_request_duration_ms.setdefault(
+                hist_key,
+                self._new_histogram_state(_HTTP_DURATION_BUCKETS_MS),
+            )
+            self._observe_histogram(histogram, duration_ms, _HTTP_DURATION_BUCKETS_MS)
+
+    def observe_erp_outbox_retry(self, count: int = 1) -> None:
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._erp_outbox_retry_count += increment
+
+    def observe_erp_outbox_processing(self, duration_ms: float) -> None:
+        with self._lock:
+            self._observe_histogram(self._erp_outbox_processing_time, duration_ms, _OUTBOX_PROCESSING_BUCKETS_MS)
+
+    def observe_domain_event_emitted(self, event_type: str) -> None:
+        key = str(event_type or "unknown").strip() or "unknown"
+        with self._lock:
+            self._domain_event_emitted_total[key] = int(self._domain_event_emitted_total.get(key, 0)) + 1
+
     def snapshot(self) -> dict:
         with self._lock:
             route_stats = []
@@ -145,18 +240,70 @@ class MetricsRegistry:
                         "max_latency_ms": round(float(bucket["latency_max_ms"]), 2),
                     }
                 )
-        route_stats.sort(key=lambda item: item["requests"], reverse=True)
-        return {
-            "requests_total": int(self._requests_total),
-            "errors_total": int(self._errors_total),
-            "by_route": route_stats[:40],
-        }
+            route_stats.sort(key=lambda item: item["requests"], reverse=True)
+            return {
+                "requests_total": int(self._requests_total),
+                "errors_total": int(self._errors_total),
+                "by_route": route_stats[:40],
+                "erp_outbox": {
+                    "retry_count": int(self._erp_outbox_retry_count),
+                    "processing_count": int(self._erp_outbox_processing_time["count"]),
+                },
+                "domain_events": {
+                    "emitted_total": int(sum(self._domain_event_emitted_total.values())),
+                    "by_type": dict(sorted(self._domain_event_emitted_total.items())),
+                },
+            }
+
+    def prometheus_snapshot(self) -> dict:
+        with self._lock:
+            http_totals = [
+                {
+                    "method": method,
+                    "route": route,
+                    "status": status,
+                    "value": int(value),
+                }
+                for (method, route, status), value in sorted(self._http_request_total.items())
+            ]
+            http_histograms = []
+            for (method, route), histogram in sorted(self._http_request_duration_ms.items()):
+                http_histograms.append(
+                    {
+                        "method": method,
+                        "route": route,
+                        "count": int(histogram["count"]),
+                        "sum": float(histogram["sum"]),
+                        "buckets": {label: int(count) for label, count in histogram["buckets"].items()},
+                    }
+                )
+
+            outbox_hist = {
+                "count": int(self._erp_outbox_processing_time["count"]),
+                "sum": float(self._erp_outbox_processing_time["sum"]),
+                "buckets": {
+                    label: int(count)
+                    for label, count in self._erp_outbox_processing_time["buckets"].items()
+                },
+            }
+            return {
+                "http_request_total": http_totals,
+                "http_request_duration_ms": http_histograms,
+                "erp_outbox_retry_count": int(self._erp_outbox_retry_count),
+                "erp_outbox_processing_time": outbox_hist,
+                "domain_event_emitted_total": dict(sorted(self._domain_event_emitted_total.items())),
+            }
 
     def reset(self) -> None:
         with self._lock:
             self._requests_total = 0
             self._errors_total = 0
             self._by_route.clear()
+            self._http_request_total.clear()
+            self._http_request_duration_ms.clear()
+            self._erp_outbox_retry_count = 0
+            self._erp_outbox_processing_time = self._new_histogram_state(_OUTBOX_PROCESSING_BUCKETS_MS)
+            self._domain_event_emitted_total.clear()
 
 
 _METRICS = MetricsRegistry()
@@ -181,8 +328,94 @@ def metrics_snapshot() -> dict:
     return _METRICS.snapshot()
 
 
+def observe_erp_outbox_retry(count: int = 1) -> None:
+    _METRICS.observe_erp_outbox_retry(count)
+
+
+def observe_erp_outbox_processing(duration_ms: float) -> None:
+    _METRICS.observe_erp_outbox_processing(duration_ms)
+
+
+def observe_domain_event_emitted(event_type: str) -> None:
+    _METRICS.observe_domain_event_emitted(event_type)
+
+
+def _prom_label(value: object) -> str:
+    return str(value).replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
+def _prom_line(name: str, value: int | float, labels: dict[str, object] | None = None) -> str:
+    if labels:
+        labels_blob = ",".join(f'{key}="{_prom_label(val)}"' for key, val in sorted(labels.items()))
+        return f"{name}{{{labels_blob}}} {value}"
+    return f"{name} {value}"
+
+
+def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
+    snapshot = _METRICS.prometheus_snapshot()
+    lines: list[str] = []
+
+    lines.append("# HELP http_request_total Total HTTP requests by method, route and status.")
+    lines.append("# TYPE http_request_total counter")
+    for sample in snapshot["http_request_total"]:
+        lines.append(
+            _prom_line(
+                "http_request_total",
+                int(sample["value"]),
+                labels={
+                    "method": sample["method"],
+                    "route": sample["route"],
+                    "status": sample["status"],
+                },
+            )
+        )
+
+    lines.append("# HELP http_request_duration_ms HTTP request duration in milliseconds.")
+    lines.append("# TYPE http_request_duration_ms histogram")
+    for hist in snapshot["http_request_duration_ms"]:
+        base_labels = {"method": hist["method"], "route": hist["route"]}
+        for le_label, bucket_value in hist["buckets"].items():
+            lines.append(
+                _prom_line(
+                    "http_request_duration_ms_bucket",
+                    int(bucket_value),
+                    labels=base_labels | {"le": le_label},
+                )
+            )
+        lines.append(_prom_line("http_request_duration_ms_sum", float(hist["sum"]), labels=base_labels))
+        lines.append(_prom_line("http_request_duration_ms_count", int(hist["count"]), labels=base_labels))
+
+    outbox_queue = ((outbox_state or {}).get("queue") or {}) if isinstance(outbox_state, dict) else {}
+    lines.append("# HELP erp_outbox_queue_size ERP outbox queue size by state.")
+    lines.append("# TYPE erp_outbox_queue_size gauge")
+    lines.append(_prom_line("erp_outbox_queue_size", int(outbox_queue.get("pending_jobs") or 0), labels={"state": "pending"}))
+    lines.append(_prom_line("erp_outbox_queue_size", int(outbox_queue.get("running_jobs") or 0), labels={"state": "running"}))
+    lines.append(_prom_line("erp_outbox_queue_size", int(outbox_queue.get("failed_jobs") or 0), labels={"state": "failed"}))
+    lines.append(_prom_line("erp_outbox_queue_size", int(outbox_queue.get("completed_jobs") or 0), labels={"state": "completed"}))
+
+    lines.append("# HELP erp_outbox_retry_count Total outbox retries triggered.")
+    lines.append("# TYPE erp_outbox_retry_count counter")
+    lines.append(_prom_line("erp_outbox_retry_count", int(snapshot["erp_outbox_retry_count"])))
+
+    lines.append("# HELP erp_outbox_processing_time ERP outbox processing time in milliseconds.")
+    lines.append("# TYPE erp_outbox_processing_time histogram")
+    processing_hist = snapshot["erp_outbox_processing_time"]
+    for le_label, bucket_value in processing_hist["buckets"].items():
+        lines.append(_prom_line("erp_outbox_processing_time_bucket", int(bucket_value), labels={"le": le_label}))
+    lines.append(_prom_line("erp_outbox_processing_time_sum", float(processing_hist["sum"])))
+    lines.append(_prom_line("erp_outbox_processing_time_count", int(processing_hist["count"])))
+
+    lines.append("# HELP domain_event_emitted_total Domain events emitted by event type.")
+    lines.append("# TYPE domain_event_emitted_total counter")
+    for event_type, total in snapshot["domain_event_emitted_total"].items():
+        lines.append(_prom_line("domain_event_emitted_total", int(total), labels={"event_type": event_type}))
+
+    return "\n".join(lines) + "\n"
+
+
 def reset_metrics_for_tests() -> None:
     _METRICS.reset()
+    set_log_request_id(None)
 
 
 def _parse_timestamp(value: str | None) -> datetime | None:
@@ -197,6 +430,17 @@ def _parse_timestamp(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _outbox_critical_thresholds() -> tuple[int, int]:
+    age_seconds = 900
+    pending_jobs = 50
+    try:
+        age_seconds = int(current_app.config.get("ERP_OUTBOX_CRITICAL_AGE_SECONDS", age_seconds) or age_seconds)
+        pending_jobs = int(current_app.config.get("ERP_OUTBOX_CRITICAL_PENDING_JOBS", pending_jobs) or pending_jobs)
+    except Exception:
+        pass
+    return max(1, age_seconds), max(1, pending_jobs)
 
 
 def outbox_health(db) -> dict:
@@ -250,16 +494,24 @@ def outbox_health(db) -> dict:
             age_since_last_finish = int((now - last_finished_at).total_seconds())
             worker_state = "stalled" if age_since_last_finish > stale_after else "draining"
 
+    critical_age_seconds, critical_pending_jobs = _outbox_critical_thresholds()
+    oldest_age = oldest_queued_age or 0
+    backlog_critical = counters["queued"] >= critical_pending_jobs or oldest_age >= critical_age_seconds
+    worker_active = worker_state in {"running", "draining"}
+
     return {
         "worker_status": worker_state,
+        "worker_active": worker_active,
+        "backlog_critical": backlog_critical,
         "queue": {
             "pending_jobs": counters["queued"],
             "running_jobs": counters["running"],
             "failed_jobs": counters["failed"],
             "completed_jobs": counters["succeeded"],
             "avg_processing_ms": avg_processing_ms,
-            "oldest_pending_age_seconds": oldest_queued_age or 0,
+            "oldest_pending_age_seconds": oldest_age,
             "last_started_at": last_started_at.isoformat().replace("+00:00", "Z") if last_started_at else None,
             "last_finished_at": last_finished_at.isoformat().replace("+00:00", "Z") if last_finished_at else None,
+            "backlog_critical": backlog_critical,
         },
     }

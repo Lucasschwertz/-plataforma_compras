@@ -33,7 +33,7 @@ def register_auth(app) -> None:
         path = request.path or "/"
         if path.startswith("/static/"):
             return None
-        if path in {"/login", "/logout", "/register", "/health"}:
+        if path in {"/login", "/logout", "/register", "/health", "/metrics"}:
             return None
         if path.startswith("/fornecedor/convite/") or path.startswith("/api/fornecedor/convite/"):
             return None
