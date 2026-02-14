@@ -152,6 +152,10 @@ class MetricsRegistry:
         self._erp_retry_backoff_seconds = self._new_histogram_state(_OUTBOX_BACKOFF_BUCKETS_SECONDS)
 
         self._domain_event_emitted_total: Dict[str, int] = {}
+        self._analytics_projection_processed_total: Dict[tuple[str, str], int] = {}
+        self._analytics_projection_failed_total: Dict[tuple[str, str], int] = {}
+        self._analytics_projection_lag_seconds: Dict[str, float] = {}
+        self._analytics_projection_last_success_timestamp: Dict[str, float] = {}
 
     @staticmethod
     def _bucket_label(limit: float) -> str:
@@ -237,6 +241,40 @@ class MetricsRegistry:
         with self._lock:
             self._domain_event_emitted_total[key] = int(self._domain_event_emitted_total.get(key, 0)) + 1
 
+    def observe_analytics_projection_processed(self, projector: str, event_type: str) -> None:
+        projector_key = str(projector or "unknown").strip() or "unknown"
+        event_key = str(event_type or "unknown").strip() or "unknown"
+        key = (projector_key, event_key)
+        with self._lock:
+            self._analytics_projection_processed_total[key] = int(self._analytics_projection_processed_total.get(key, 0)) + 1
+
+    def observe_analytics_projection_failed(self, projector: str, event_type: str) -> None:
+        projector_key = str(projector or "unknown").strip() or "unknown"
+        event_key = str(event_type or "unknown").strip() or "unknown"
+        key = (projector_key, event_key)
+        with self._lock:
+            self._analytics_projection_failed_total[key] = int(self._analytics_projection_failed_total.get(key, 0)) + 1
+
+    def observe_analytics_projection_lag(self, projector: str, occurred_at: datetime | float | int | None) -> None:
+        projector_key = str(projector or "unknown").strip() or "unknown"
+        now_ts = time.time()
+        if isinstance(occurred_at, datetime):
+            value = occurred_at
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            occurred_ts = value.astimezone(timezone.utc).timestamp()
+        elif occurred_at is None:
+            occurred_ts = now_ts
+        else:
+            try:
+                occurred_ts = float(occurred_at)
+            except (TypeError, ValueError):
+                occurred_ts = now_ts
+        lag_seconds = max(0.0, now_ts - occurred_ts)
+        with self._lock:
+            self._analytics_projection_lag_seconds[projector_key] = lag_seconds
+            self._analytics_projection_last_success_timestamp[projector_key] = now_ts
+
     def snapshot(self) -> dict:
         with self._lock:
             route_stats = []
@@ -268,6 +306,11 @@ class MetricsRegistry:
                 "domain_events": {
                     "emitted_total": int(sum(self._domain_event_emitted_total.values())),
                     "by_type": dict(sorted(self._domain_event_emitted_total.items())),
+                },
+                "analytics_projections": {
+                    "processed_total": int(sum(self._analytics_projection_processed_total.values())),
+                    "failed_total": int(sum(self._analytics_projection_failed_total.values())),
+                    "projectors": sorted(set(self._analytics_projection_lag_seconds.keys())),
                 },
             }
 
@@ -318,6 +361,28 @@ class MetricsRegistry:
                 "erp_outbox_processing_time": outbox_hist,
                 "erp_retry_backoff_seconds": backoff_hist,
                 "domain_event_emitted_total": dict(sorted(self._domain_event_emitted_total.items())),
+                "analytics_projection_processed_total": {
+                    key: int(value)
+                    for key, value in sorted(
+                        self._analytics_projection_processed_total.items(),
+                        key=lambda item: (item[0][0], item[0][1]),
+                    )
+                },
+                "analytics_projection_failed_total": {
+                    key: int(value)
+                    for key, value in sorted(
+                        self._analytics_projection_failed_total.items(),
+                        key=lambda item: (item[0][0], item[0][1]),
+                    )
+                },
+                "analytics_projection_lag_seconds": {
+                    key: float(value)
+                    for key, value in sorted(self._analytics_projection_lag_seconds.items())
+                },
+                "analytics_projection_last_success_timestamp": {
+                    key: float(value)
+                    for key, value in sorted(self._analytics_projection_last_success_timestamp.items())
+                },
             }
 
     def reset(self) -> None:
@@ -332,6 +397,10 @@ class MetricsRegistry:
             self._erp_outbox_processing_time = self._new_histogram_state(_OUTBOX_PROCESSING_BUCKETS_MS)
             self._erp_retry_backoff_seconds = self._new_histogram_state(_OUTBOX_BACKOFF_BUCKETS_SECONDS)
             self._domain_event_emitted_total.clear()
+            self._analytics_projection_processed_total.clear()
+            self._analytics_projection_failed_total.clear()
+            self._analytics_projection_lag_seconds.clear()
+            self._analytics_projection_last_success_timestamp.clear()
 
 
 _METRICS = MetricsRegistry()
@@ -374,6 +443,18 @@ def observe_erp_outbox_processing(duration_ms: float) -> None:
 
 def observe_domain_event_emitted(event_type: str) -> None:
     _METRICS.observe_domain_event_emitted(event_type)
+
+
+def observe_analytics_projection_processed(projector: str, event_type: str) -> None:
+    _METRICS.observe_analytics_projection_processed(projector, event_type)
+
+
+def observe_analytics_projection_failed(projector: str, event_type: str) -> None:
+    _METRICS.observe_analytics_projection_failed(projector, event_type)
+
+
+def observe_analytics_projection_lag(projector: str, occurred_at: datetime | float | int | None) -> None:
+    _METRICS.observe_analytics_projection_lag(projector, occurred_at)
 
 
 def _prom_label(value: object) -> str:
@@ -475,6 +556,50 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
     lines.append("# TYPE domain_event_emitted_total counter")
     for event_type, total in snapshot["domain_event_emitted_total"].items():
         lines.append(_prom_line("domain_event_emitted_total", int(total), labels={"event_type": event_type}))
+
+    lines.append("# HELP analytics_projection_processed_total Total processed analytics projection events.")
+    lines.append("# TYPE analytics_projection_processed_total counter")
+    for (projector, event_type), total in snapshot["analytics_projection_processed_total"].items():
+        lines.append(
+            _prom_line(
+                "analytics_projection_processed_total",
+                int(total),
+                labels={"projector": projector, "event_type": event_type},
+            )
+        )
+
+    lines.append("# HELP analytics_projection_failed_total Total failed analytics projection events.")
+    lines.append("# TYPE analytics_projection_failed_total counter")
+    for (projector, event_type), total in snapshot["analytics_projection_failed_total"].items():
+        lines.append(
+            _prom_line(
+                "analytics_projection_failed_total",
+                int(total),
+                labels={"projector": projector, "event_type": event_type},
+            )
+        )
+
+    lines.append("# HELP analytics_projection_lag_seconds Projection lag in seconds by projector.")
+    lines.append("# TYPE analytics_projection_lag_seconds gauge")
+    for projector, value in snapshot["analytics_projection_lag_seconds"].items():
+        lines.append(
+            _prom_line(
+                "analytics_projection_lag_seconds",
+                float(value),
+                labels={"projector": projector},
+            )
+        )
+
+    lines.append("# HELP analytics_projection_last_success_timestamp Unix timestamp of the last projection success.")
+    lines.append("# TYPE analytics_projection_last_success_timestamp gauge")
+    for projector, value in snapshot["analytics_projection_last_success_timestamp"].items():
+        lines.append(
+            _prom_line(
+                "analytics_projection_last_success_timestamp",
+                float(value),
+                labels={"projector": projector},
+            )
+        )
 
     return "\n".join(lines) + "\n"
 

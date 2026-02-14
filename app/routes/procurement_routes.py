@@ -79,8 +79,15 @@ _EVENT_BUS = get_event_bus()
 _ERP_OUTBOX_SERVICE = ErpOutboxService()
 _ERP_OUTBOX_SERVICE.register_event_handlers(_EVENT_BUS)
 _ANALYTICS_SERVICE = AnalyticsService(ttl_seconds=60)
-_ANALYTICS_SERVICE.register_event_handlers(_EVENT_BUS)
 _PROCUREMENT_SERVICE = ProcurementService(outbox_service=_ERP_OUTBOX_SERVICE, event_bus=_EVENT_BUS)
+
+
+@procurement_bp.record_once
+def _bootstrap_analytics_event_handlers(state) -> None:
+    _ANALYTICS_SERVICE.register_event_handlers(
+        _EVENT_BUS,
+        projection_enabled=bool(state.app.config.get("ANALYTICS_PROJECTION_ENABLED", True)),
+    )
 
 
 def _clear_analytics_cache_for_tests() -> None:

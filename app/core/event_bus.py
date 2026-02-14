@@ -21,6 +21,24 @@ def _utc_now() -> datetime:
 class DomainEvent:
     event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     occurred_at: datetime = field(default_factory=_utc_now)
+    workspace_id: str = ""
+
+    def __post_init__(self) -> None:
+        normalized_event_id = str(self.event_id or "").strip() or uuid.uuid4().hex
+        normalized_occurred_at = self.occurred_at if isinstance(self.occurred_at, datetime) else _utc_now()
+        if normalized_occurred_at.tzinfo is None:
+            normalized_occurred_at = normalized_occurred_at.replace(tzinfo=timezone.utc)
+        normalized_occurred_at = normalized_occurred_at.astimezone(timezone.utc)
+
+        normalized_workspace = str(self.workspace_id or "").strip()
+        if not normalized_workspace:
+            normalized_workspace = str(getattr(self, "tenant_id", "") or "").strip()
+        if not normalized_workspace:
+            normalized_workspace = "unknown"
+
+        object.__setattr__(self, "event_id", normalized_event_id)
+        object.__setattr__(self, "occurred_at", normalized_occurred_at)
+        object.__setattr__(self, "workspace_id", normalized_workspace)
 
 
 @dataclass(frozen=True, kw_only=True)

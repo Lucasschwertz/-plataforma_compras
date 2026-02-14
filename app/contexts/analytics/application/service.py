@@ -1,9 +1,12 @@
 ﻿from __future__ import annotations
 
 import copy
+import os
 import threading
 import time
 from typing import Any, Callable, Dict, List
+
+from flask import current_app, has_app_context
 
 from app.core import (
     ErpOrderAccepted,
@@ -14,8 +17,10 @@ from app.core import (
     RfqAwarded,
     RfqCreated,
 )
-from app.domain.contracts import AnalyticsRequestInput
 from app.contexts.analytics.infrastructure.repository import AnalyticsRepository
+from app.contexts.analytics.projections import AnalyticsProjectionDispatcher, default_projection_dispatcher
+from app.db import get_db
+from app.domain.contracts import AnalyticsRequestInput
 
 
 class AnalyticsService:
@@ -23,12 +28,17 @@ class AnalyticsService:
         self,
         ttl_seconds: int = 60,
         repository_factory: Callable[[str], AnalyticsRepository] | None = None,
+        projection_enabled: bool | None = None,
+        projection_dispatcher: AnalyticsProjectionDispatcher | None = None,
     ) -> None:
         self.ttl_seconds = max(1, int(ttl_seconds))
         self._cache: Dict[tuple, dict] = {}
         self._lock = threading.Lock()
         self._repository_factory = repository_factory or (lambda tenant_id: AnalyticsRepository(tenant_id=tenant_id))
+        self._projection_enabled_override = projection_enabled
+        self._projection_dispatcher = projection_dispatcher or default_projection_dispatcher()
         self._event_handlers_registered = False
+        self._projection_handlers_registered = False
 
     @staticmethod
     def _normalize_csv_filter_value(raw_value: str | None) -> str:
@@ -36,6 +46,22 @@ class AnalyticsService:
         if not values:
             return ""
         return ",".join(sorted(dict.fromkeys(values)))
+
+    @staticmethod
+    def _env_bool(name: str, default: bool) -> bool:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _projection_enabled(self, override: bool | None = None) -> bool:
+        if override is not None:
+            return bool(override)
+        if self._projection_enabled_override is not None:
+            return bool(self._projection_enabled_override)
+        if has_app_context():
+            return bool(current_app.config.get("ANALYTICS_PROJECTION_ENABLED", True))
+        return self._env_bool("ANALYTICS_PROJECTION_ENABLED", True)
 
     def _cache_key(
         self,
@@ -95,20 +121,63 @@ class AnalyticsService:
         with self._lock:
             self._cache.clear()
 
-    def register_event_handlers(self, event_bus: EventBus) -> None:
+    def register_event_handlers(self, event_bus: EventBus, *, projection_enabled: bool | None = None) -> None:
+        enable_projection = self._projection_enabled(projection_enabled)
+
+        subscribe_cache = False
+        subscribe_projection = False
         with self._lock:
-            if self._event_handlers_registered:
-                return
-            self._event_handlers_registered = True
-        event_bus.subscribe(PurchaseRequestCreated, self._on_domain_event)
-        event_bus.subscribe(RfqCreated, self._on_domain_event)
-        event_bus.subscribe(RfqAwarded, self._on_domain_event)
-        event_bus.subscribe(PurchaseOrderCreated, self._on_domain_event)
-        event_bus.subscribe(ErpOrderAccepted, self._on_domain_event)
-        event_bus.subscribe(ErpOrderRejected, self._on_domain_event)
+            if projection_enabled is not None:
+                self._projection_enabled_override = bool(projection_enabled)
+            if not self._event_handlers_registered:
+                self._event_handlers_registered = True
+                subscribe_cache = True
+            if enable_projection and not self._projection_handlers_registered:
+                self._projection_handlers_registered = True
+                subscribe_projection = True
+
+        if subscribe_cache:
+            event_bus.subscribe(PurchaseRequestCreated, self._on_domain_event)
+            event_bus.subscribe(RfqCreated, self._on_domain_event)
+            event_bus.subscribe(RfqAwarded, self._on_domain_event)
+            event_bus.subscribe(PurchaseOrderCreated, self._on_domain_event)
+            event_bus.subscribe(ErpOrderAccepted, self._on_domain_event)
+            event_bus.subscribe(ErpOrderRejected, self._on_domain_event)
+
+        if subscribe_projection:
+            event_bus.subscribe(PurchaseRequestCreated, self._on_projection_event)
+            event_bus.subscribe(RfqCreated, self._on_projection_event)
+            event_bus.subscribe(RfqAwarded, self._on_projection_event)
+            event_bus.subscribe(PurchaseOrderCreated, self._on_projection_event)
+            event_bus.subscribe(ErpOrderAccepted, self._on_projection_event)
+            event_bus.subscribe(ErpOrderRejected, self._on_projection_event)
 
     def _on_domain_event(self, _event) -> None:
         self.clear_cache()
+
+    def _on_projection_event(self, event) -> None:
+        if not self._projection_enabled():
+            return
+        if not has_app_context():
+            return
+
+        workspace_id = str(getattr(event, "workspace_id", "") or getattr(event, "tenant_id", "")).strip()
+        if not workspace_id:
+            return
+
+        try:
+            db = get_db()
+            self._projection_dispatcher.process(event, db, workspace_id)
+            db.commit()
+        except Exception:  # noqa: BLE001
+            current_app.logger.exception(
+                "analytics_projection_dispatch_failed",
+                extra={
+                    "event_type": type(event).__name__,
+                    "workspace_id": workspace_id,
+                    "event_id": str(getattr(event, "event_id", "") or "").strip() or None,
+                },
+            )
 
     def _repository(self, tenant_id: str) -> AnalyticsRepository:
         return self._repository_factory(tenant_id)
@@ -175,4 +244,3 @@ class AnalyticsService:
         if role not in {"manager", "admin"}:
             return [item for item in list(sections or []) if item.get("key") != "executive"]
         return list(sections or [])
-
