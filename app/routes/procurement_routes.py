@@ -514,6 +514,59 @@ def analytics_dashboard_api(section: str = "overview"):
     return jsonify(payload)
 
 
+@procurement_bp.route("/internal/analytics/shadow-report", methods=["GET"])
+def analytics_shadow_report_api():
+    _require_roles("admin")
+    db = get_read_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    query_workspace = str(request.args.get("workspace_id") or "").strip()
+    workspace_id = scoped_tenant_id(query_workspace or tenant_id)
+    section_filter = (request.args.get("section") or "").strip().lower() or None
+    start_date = (request.args.get("start_date") or "").strip() or None
+    end_date = (request.args.get("end_date") or "").strip() or None
+    report = _ANALYTICS_SERVICE.build_shadow_compare_report(
+        db,
+        workspace_id=workspace_id,
+        start_date=start_date,
+        end_date=end_date,
+        section=section_filter,
+        limit=50,
+    )
+    return jsonify(report)
+
+
+@procurement_bp.route("/internal/analytics/shadow-report/view", methods=["GET"])
+def analytics_shadow_report_page():
+    _require_roles("admin")
+    db = get_read_db()
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    query_workspace = str(request.args.get("workspace_id") or "").strip()
+    workspace_id = scoped_tenant_id(query_workspace or tenant_id)
+    section_filter = (request.args.get("section") or "").strip().lower() or ""
+    start_date = (request.args.get("start_date") or "").strip() or ""
+    end_date = (request.args.get("end_date") or "").strip() or ""
+    report = _ANALYTICS_SERVICE.build_shadow_compare_report(
+        db,
+        workspace_id=workspace_id,
+        start_date=start_date or None,
+        end_date=end_date or None,
+        section=section_filter or None,
+        limit=50,
+    )
+    return render_template(
+        "internal_shadow_report.html",
+        tenant_id=workspace_id,
+        shadow_report=report,
+        shadow_filters={
+            "workspace_id": workspace_id,
+            "section": section_filter,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        active_nav="integration",
+    )
+
+
 @procurement_bp.route("/api/procurement/analytics/read-model/rebuild", methods=["POST"])
 def analytics_read_model_rebuild_api():
     _require_roles("manager", "admin")

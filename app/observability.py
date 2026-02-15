@@ -171,6 +171,8 @@ class MetricsRegistry:
             _ANALYTICS_SHADOW_COMPARE_LATENCY_BUCKETS_MS
         )
         self._analytics_shadow_compare_last_diff_timestamp = 0.0
+        self._analytics_shadow_compare_diff_rate = 0.0
+        self._analytics_shadow_compare_diff_persisted_total = 0
 
     @staticmethod
     def _bucket_label(limit: float) -> str:
@@ -329,6 +331,14 @@ class MetricsRegistry:
         with self._lock:
             key = (result_key, source_key)
             self._analytics_shadow_compare_total[key] = int(self._analytics_shadow_compare_total.get(key, 0)) + 1
+            total_compares = int(sum(self._analytics_shadow_compare_total.values()))
+            total_diff = int(
+                sum(value for (res, _src), value in self._analytics_shadow_compare_total.items() if res == "diff")
+            )
+            if total_compares <= 0:
+                self._analytics_shadow_compare_diff_rate = 0.0
+            else:
+                self._analytics_shadow_compare_diff_rate = (float(total_diff) * 100.0) / float(total_compares)
 
     def observe_analytics_shadow_compare_diff_fields(self, summary: Dict[str, int] | None) -> None:
         source = dict(summary or {})
@@ -356,6 +366,13 @@ class MetricsRegistry:
             value = time.time()
         with self._lock:
             self._analytics_shadow_compare_last_diff_timestamp = max(0.0, value)
+
+    def observe_analytics_shadow_compare_diff_persisted(self, count: int = 1) -> None:
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._analytics_shadow_compare_diff_persisted_total += increment
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -408,7 +425,32 @@ class MetricsRegistry:
                 "analytics_shadow_compare": {
                     "total": int(sum(self._analytics_shadow_compare_total.values())),
                     "last_diff_timestamp": float(self._analytics_shadow_compare_last_diff_timestamp),
+                    "diff_rate_percent": float(self._analytics_shadow_compare_diff_rate),
+                    "diff_persisted_total": int(self._analytics_shadow_compare_diff_persisted_total),
                 },
+            }
+
+    def analytics_shadow_compare_totals(self) -> dict:
+        with self._lock:
+            total_compares = int(sum(self._analytics_shadow_compare_total.values()))
+            total_diff = int(
+                sum(value for (result, _source), value in self._analytics_shadow_compare_total.items() if result == "diff")
+            )
+            total_equal = int(
+                sum(value for (result, _source), value in self._analytics_shadow_compare_total.items() if result == "equal")
+            )
+            total_error = int(
+                sum(value for (result, _source), value in self._analytics_shadow_compare_total.items() if result == "error")
+            )
+            rate = float(self._analytics_shadow_compare_diff_rate)
+            if total_compares <= 0:
+                rate = 0.0
+            return {
+                "total_compares": total_compares,
+                "total_equal": total_equal,
+                "total_diff": total_diff,
+                "total_error": total_error,
+                "diff_rate_percent": rate,
             }
 
     def prometheus_snapshot(self) -> dict:
@@ -526,6 +568,10 @@ class MetricsRegistry:
                 "analytics_shadow_compare_last_diff_timestamp": float(
                     self._analytics_shadow_compare_last_diff_timestamp
                 ),
+                "analytics_shadow_compare_diff_rate": float(self._analytics_shadow_compare_diff_rate),
+                "analytics_shadow_compare_diff_persisted_total": int(
+                    self._analytics_shadow_compare_diff_persisted_total
+                ),
             }
 
     def reset(self) -> None:
@@ -557,6 +603,8 @@ class MetricsRegistry:
                 _ANALYTICS_SHADOW_COMPARE_LATENCY_BUCKETS_MS
             )
             self._analytics_shadow_compare_last_diff_timestamp = 0.0
+            self._analytics_shadow_compare_diff_rate = 0.0
+            self._analytics_shadow_compare_diff_persisted_total = 0
 
 
 _METRICS = MetricsRegistry()
@@ -579,6 +627,10 @@ def observe_response(response):
 
 def metrics_snapshot() -> dict:
     return _METRICS.snapshot()
+
+
+def analytics_shadow_compare_totals() -> dict:
+    return _METRICS.analytics_shadow_compare_totals()
 
 
 def observe_erp_outbox_retry(count: int = 1) -> None:
@@ -643,6 +695,10 @@ def observe_analytics_shadow_compare_latency(duration_ms: float) -> None:
 
 def observe_analytics_shadow_compare_last_diff_timestamp(timestamp: float | int | None = None) -> None:
     _METRICS.observe_analytics_shadow_compare_last_diff_timestamp(timestamp)
+
+
+def observe_analytics_shadow_compare_diff_persisted(count: int = 1) -> None:
+    _METRICS.observe_analytics_shadow_compare_diff_persisted(count)
 
 
 def _prom_label(value: object) -> str:
@@ -913,6 +969,24 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
         _prom_line(
             "analytics_shadow_compare_last_diff_timestamp",
             float(snapshot["analytics_shadow_compare_last_diff_timestamp"]),
+        )
+    )
+
+    lines.append("# HELP analytics_shadow_compare_diff_rate Current shadow compare diff rate percentage.")
+    lines.append("# TYPE analytics_shadow_compare_diff_rate gauge")
+    lines.append(
+        _prom_line(
+            "analytics_shadow_compare_diff_rate",
+            float(snapshot["analytics_shadow_compare_diff_rate"]),
+        )
+    )
+
+    lines.append("# HELP analytics_shadow_compare_diff_persisted_total Total persisted shadow compare diffs.")
+    lines.append("# TYPE analytics_shadow_compare_diff_persisted_total counter")
+    lines.append(
+        _prom_line(
+            "analytics_shadow_compare_diff_persisted_total",
+            int(snapshot["analytics_shadow_compare_diff_persisted_total"]),
         )
     )
 

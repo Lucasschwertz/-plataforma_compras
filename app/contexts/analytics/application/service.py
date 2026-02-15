@@ -30,11 +30,13 @@ from app.contexts.analytics.application.shadow_compare import (
     should_emit_diff_log,
 )
 from app.observability import (
+    analytics_shadow_compare_totals,
     current_request_id,
     observe_analytics_read_model_hit,
     observe_analytics_read_model_rebuild,
     observe_analytics_shadow_compare,
     observe_analytics_shadow_compare_diff_fields,
+    observe_analytics_shadow_compare_diff_persisted,
     observe_analytics_shadow_compare_last_diff_timestamp,
     observe_analytics_shadow_compare_latency,
 )
@@ -435,8 +437,17 @@ class AnalyticsService:
             observe_analytics_shadow_compare("diff", primary_source)
             observe_analytics_shadow_compare_diff_fields(summary)
             observe_analytics_shadow_compare_last_diff_timestamp(time.time())
-
-            if has_app_context() and should_emit_diff_log(self._shadow_compare_max_diff_logs_per_min()):
+            should_store_or_log = False
+            if has_app_context():
+                should_store_or_log = should_emit_diff_log(self._shadow_compare_max_diff_logs_per_min())
+            if should_store_or_log:
+                self._persist_shadow_diff(
+                    request_input=request_input,
+                    primary_source=primary_source,
+                    payload_primary=payload_primary,
+                    payload_shadow=payload_shadow,
+                    compare_result=compare_result,
+                )
                 raw_filters = dict(filters.get("raw") or {}) if isinstance(filters.get("raw"), dict) else {}
                 current_app.logger.warning(
                     "analytics_shadow_compare_diff",
@@ -467,6 +478,117 @@ class AnalyticsService:
                 )
         finally:
             observe_analytics_shadow_compare_latency((time.perf_counter() - started) * 1000.0)
+
+    def _persist_shadow_diff(
+        self,
+        *,
+        request_input: AnalyticsRequestInput,
+        primary_source: str,
+        payload_primary: Dict[str, Any],
+        payload_shadow: Dict[str, Any],
+        compare_result: Dict[str, Any],
+    ) -> None:
+        if not has_app_context():
+            return
+        if "DB_PATH" not in current_app.config:
+            return
+
+        summary = dict(compare_result.get("summary") or {})
+        fields = list(compare_result.get("diffs") or [])[:10]
+        diff_count = 0
+        for key in ("kpis", "charts", "drilldown"):
+            try:
+                diff_count += max(0, int(summary.get(key) or 0))
+            except (TypeError, ValueError):
+                continue
+        if diff_count <= 0:
+            diff_count = len(fields)
+
+        payload_summary = {
+            "summary": summary,
+            "fields": fields,
+        }
+
+        try:
+            write_db = get_db()
+            repo = self._read_model_repository(request_input.tenant_id)
+            inserted = repo.append_shadow_diff_log(
+                write_db,
+                workspace_id=request_input.tenant_id,
+                section=request_input.section,
+                primary_source=primary_source,
+                primary_hash=hash_payload(payload_primary),
+                shadow_hash=hash_payload(payload_shadow),
+                diff_summary=payload_summary,
+                diff_count=diff_count,
+                request_id=current_request_id(default="n/a"),
+                occurred_at=datetime.now(timezone.utc),
+            )
+            if inserted:
+                write_db.commit()
+                observe_analytics_shadow_compare_diff_persisted(1)
+        except Exception:  # noqa: BLE001
+            current_app.logger.exception(
+                "analytics_shadow_compare_diff_persist_failed",
+                extra={
+                    "request_id": current_request_id(default="n/a"),
+                    "workspace_id": request_input.tenant_id,
+                    "section": request_input.section,
+                    "primary_source": primary_source,
+                },
+            )
+
+    def build_shadow_compare_report(
+        self,
+        db,
+        *,
+        workspace_id: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        section: str | None = None,
+        limit: int = 50,
+    ) -> dict:
+        normalized_workspace = str(workspace_id or "").strip()
+        if not normalized_workspace:
+            raise ValueError("workspace_id is required")
+        read_repo = self._read_model_repository(normalized_workspace)
+        try:
+            persisted = read_repo.build_shadow_diff_report(
+                db,
+                workspace_id=normalized_workspace,
+                start_date=start_date,
+                end_date=end_date,
+                section=section,
+                limit=limit,
+            )
+        except Exception:  # noqa: BLE001
+            if has_app_context():
+                current_app.logger.exception(
+                    "analytics_shadow_report_query_failed",
+                    extra={
+                        "request_id": current_request_id(default="n/a"),
+                        "workspace_id": normalized_workspace,
+                    },
+                )
+            persisted = {"sections_breakdown": [], "recent_diffs": []}
+        counters = analytics_shadow_compare_totals()
+        total_compares = int(counters.get("total_compares") or 0)
+        total_equal = int(counters.get("total_equal") or 0)
+        total_diff = int(counters.get("total_diff") or 0)
+        total_error = int(counters.get("total_error") or 0)
+        diff_rate_percent = float(counters.get("diff_rate_percent") or 0.0)
+        if total_compares <= 0:
+            diff_rate_percent = 0.0
+
+        return {
+            "total_compares": total_compares,
+            "total_equal": total_equal,
+            "total_diff": total_diff,
+            "total_error": total_error,
+            "diff_rate_percent": round(diff_rate_percent, 2),
+            "sections_breakdown": list(persisted.get("sections_breakdown") or []),
+            "recent_diffs": list(persisted.get("recent_diffs") or []),
+        }
 
     def _build_dashboard_payload_transacional(
         self,

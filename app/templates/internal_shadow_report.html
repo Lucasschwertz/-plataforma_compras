@@ -1,0 +1,123 @@
+{% extends "_layout.html" %}
+{% block title %}Shadow Compare Report{% endblock %}
+{% block page_title %}Relatorio Tecnico de Divergencias{% endblock %}
+{% block breadcrumb_tail %}
+  <span class="crumb-sep">/</span><span class="crumb current">Shadow Compare</span>
+{% endblock %}
+{% block page_actions %}
+  <a class="btn btn-ghost" href="/internal/analytics/shadow-report?workspace_id={{ shadow_filters.workspace_id }}">JSON</a>
+{% endblock %}
+
+{% block content %}
+  {% set report = shadow_report or {} %}
+  {% set diff_rate = report.get("diff_rate_percent", 0) | float %}
+  <section class="card compact">
+    <div class="card-header">
+      <h2 class="card-title">Filtros</h2>
+      <span class="meta">Visao interna para validar Read Model vs Transacional.</span>
+    </div>
+    <form method="get" class="grid grid-4">
+      <input class="input" type="text" name="workspace_id" value="{{ shadow_filters.workspace_id }}" placeholder="Workspace" />
+      <input class="input" type="date" name="start_date" value="{{ shadow_filters.start_date }}" />
+      <input class="input" type="date" name="end_date" value="{{ shadow_filters.end_date }}" />
+      <input class="input" type="text" name="section" value="{{ shadow_filters.section }}" placeholder="Secao (opcional)" />
+      <button class="btn" type="submit">Aplicar</button>
+    </form>
+  </section>
+
+  <section class="grid grid-4">
+    <article class="card compact">
+      <div class="card-header"><h2 class="card-title">Total compares</h2></div>
+      <div class="kpi-value">{{ report.get("total_compares", 0) }}</div>
+    </article>
+    <article class="card compact">
+      <div class="card-header">
+        <h2 class="card-title">Diff rate %</h2>
+        {% if diff_rate > 1 %}
+          <span class="pill danger">Acima de 1%</span>
+        {% else %}
+          <span class="pill success">Dentro do alvo</span>
+        {% endif %}
+      </div>
+      <div class="kpi-value">{{ "%.2f"|format(diff_rate) }}%</div>
+    </article>
+    <article class="card compact">
+      <div class="card-header"><h2 class="card-title">Total diffs</h2></div>
+      <div class="kpi-value">{{ report.get("total_diff", 0) }}</div>
+    </article>
+    <article class="card compact">
+      <div class="card-header"><h2 class="card-title">Total errors</h2></div>
+      <div class="kpi-value">{{ report.get("total_error", 0) }}</div>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Breakdown por secao</h2>
+    </div>
+    <div class="table-wrap">
+      <table class="table-mobile-cards table-compact">
+        <thead>
+          <tr>
+            <th>Secao</th>
+            <th>Diffs</th>
+            <th>Compares</th>
+            <th>Diff rate %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in report.get("sections_breakdown", []) %}
+            <tr>
+              <td data-label="Secao"><strong>{{ row.get("section") }}</strong></td>
+              <td data-label="Diffs">{{ row.get("diff_count", 0) }}</td>
+              <td data-label="Compares">{{ row.get("compare_count", 0) }}</td>
+              <td data-label="Diff rate %">{{ "%.2f"|format((row.get("diff_rate_percent", 0) | float)) }}%</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="4" class="empty-row">Sem divergencias no periodo filtrado.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Ultimos 50 diffs</h2>
+    </div>
+    <div class="table-wrap">
+      <table class="table-mobile-cards table-compact">
+        <thead>
+          <tr>
+            <th>Quando</th>
+            <th>Workspace</th>
+            <th>Secao</th>
+            <th>Source</th>
+            <th>Diff count</th>
+            <th>Resumo</th>
+            <th>Request ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in report.get("recent_diffs", []) %}
+            <tr>
+              <td data-label="Quando">{{ row.get("occurred_at") }}</td>
+              <td data-label="Workspace">{{ row.get("workspace_id") }}</td>
+              <td data-label="Secao">{{ row.get("section") }}</td>
+              <td data-label="Source">{{ row.get("primary_source") }}</td>
+              <td data-label="Diff count">{{ row.get("diff_count", 0) }}</td>
+              <td data-label="Resumo"><code>{{ row.get("diff_summary") | tojson }}</code></td>
+              <td data-label="Request ID">{{ row.get("request_id") or "-" }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="7" class="empty-row">Nenhum diff persistido para os filtros aplicados.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

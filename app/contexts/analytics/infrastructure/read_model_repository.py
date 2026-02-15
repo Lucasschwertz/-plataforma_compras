@@ -390,3 +390,176 @@ class AnalyticsReadModelRepository(BaseRepository):
                 f"DELETE FROM {table_name} WHERE workspace_id = ?",
                 (normalized_workspace,),
             )
+
+    @staticmethod
+    def _normalize_section(section: str | None) -> str:
+        return str(section or "").strip().lower()
+
+    @staticmethod
+    def _safe_json_loads(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        raw = str(value or "").strip()
+        if not raw:
+            return {}
+        try:
+            loaded = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(loaded, dict):
+            return dict(loaded)
+        return {}
+
+    def append_shadow_diff_log(
+        self,
+        db,
+        *,
+        workspace_id: str | None,
+        section: str,
+        primary_source: str,
+        primary_hash: str,
+        shadow_hash: str,
+        diff_summary: Dict[str, Any] | str,
+        diff_count: int,
+        request_id: str | None,
+        occurred_at: Any = None,
+    ) -> bool:
+        normalized_workspace = self._normalize_workspace_id(workspace_id)
+        normalized_section = self._normalize_section(section) or "overview"
+        normalized_source = str(primary_source or "").strip().lower() or "unknown"
+        normalized_primary_hash = str(primary_hash or "").strip()
+        normalized_shadow_hash = str(shadow_hash or "").strip()
+        normalized_request_id = str(request_id or "").strip() or None
+
+        summary_obj = self._safe_json_loads(diff_summary)
+        # Persist only a compact sample to avoid large storage growth.
+        fields_sample = list(summary_obj.get("fields") or summary_obj.get("diffs") or [])
+        summary_obj["fields"] = fields_sample[:10]
+        summary_obj.pop("diffs", None)
+        payload_json = json.dumps(summary_obj, ensure_ascii=True, separators=(",", ":"))
+        occurred_dt = _parse_datetime(occurred_at)
+
+        cursor = db.execute(
+            """
+            INSERT INTO analytics_shadow_diff_log (
+                occurred_at,
+                workspace_id,
+                section,
+                primary_source,
+                primary_hash,
+                shadow_hash,
+                diff_summary,
+                diff_count,
+                request_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _to_iso_timestamp(occurred_dt),
+                normalized_workspace,
+                normalized_section,
+                normalized_source,
+                normalized_primary_hash,
+                normalized_shadow_hash,
+                payload_json,
+                max(0, int(diff_count or 0)),
+                normalized_request_id,
+            ),
+        )
+        return int(getattr(cursor, "rowcount", 0) or 0) > 0
+
+    def build_shadow_diff_report(
+        self,
+        db,
+        *,
+        workspace_id: str | None,
+        start_date: Any = None,
+        end_date: Any = None,
+        section: str | None = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        normalized_workspace = self._normalize_workspace_id(workspace_id)
+        start_dt, end_dt = self._datetime_bounds(start_date, end_date)
+        section_filter = self._normalize_section(section)
+
+        where_clause = "workspace_id = ?"
+        params: list[Any] = [normalized_workspace]
+        if start_dt:
+            where_clause += " AND DATE(occurred_at) >= DATE(?)"
+            params.append(start_dt.date().isoformat())
+        if end_dt:
+            where_clause += " AND DATE(occurred_at) <= DATE(?)"
+            params.append(end_dt.date().isoformat())
+        if section_filter:
+            where_clause += " AND section = ?"
+            params.append(section_filter)
+
+        section_rows = db.execute(
+            f"""
+            SELECT section, COUNT(*) AS diff_count
+            FROM analytics_shadow_diff_log
+            WHERE {where_clause}
+            GROUP BY section
+            ORDER BY diff_count DESC, section ASC
+            """
+            ,
+            tuple(params),
+        ).fetchall()
+
+        safe_limit = max(1, min(200, int(limit or 50)))
+        recent_rows = db.execute(
+            f"""
+            SELECT
+                occurred_at,
+                workspace_id,
+                section,
+                primary_source,
+                diff_count,
+                diff_summary,
+                request_id
+            FROM analytics_shadow_diff_log
+            WHERE {where_clause}
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT ?
+            """
+            ,
+            tuple(params) + (safe_limit,),
+        ).fetchall()
+
+        sections_breakdown: List[Dict[str, Any]] = []
+        total_diff = 0
+        for row in section_rows:
+            section_name = str(row["section"] or "").strip().lower() or "overview"
+            diff_count = int(row["diff_count"] or 0)
+            total_diff += diff_count
+            sections_breakdown.append(
+                {
+                    "section": section_name,
+                    "diff_count": diff_count,
+                    # Persisted store tracks only diff records by design.
+                    "compare_count": diff_count,
+                    "diff_rate_percent": 100.0 if diff_count > 0 else 0.0,
+                }
+            )
+
+        recent_diffs: List[Dict[str, Any]] = []
+        for raw_row in recent_rows:
+            row = _row_to_dict(raw_row)
+            occurred_at = _parse_datetime(row.get("occurred_at"))
+            recent_diffs.append(
+                {
+                    "occurred_at": _to_iso_timestamp(occurred_at),
+                    "workspace_id": str(row.get("workspace_id") or "").strip(),
+                    "section": str(row.get("section") or "").strip().lower(),
+                    "primary_source": str(row.get("primary_source") or "").strip().lower(),
+                    "diff_count": int(row.get("diff_count") or 0),
+                    "diff_summary": self._safe_json_loads(row.get("diff_summary")),
+                    "request_id": str(row.get("request_id") or "").strip() or None,
+                }
+            )
+
+        return {
+            "total_diff": total_diff,
+            "sections_breakdown": sections_breakdown,
+            "recent_diffs": recent_diffs,
+        }
