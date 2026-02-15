@@ -147,6 +147,8 @@ Como a CI funciona:
 - Valida migrations com `flask db upgrade` e `flask db downgrade base`.
 - Executa toda a suite com `unittest`:
   `python -m unittest discover -s tests -p "test_*.py" -v`
+- Executa gate de SLO sintetico em etapa separada:
+  `python -m unittest -v tests.test_slo_synthetic_load` com `RUN_SLO_SYNTHETIC=1`
 - Falha o pipeline se qualquer teste falhar.
 - Executa coverage em etapa nao bloqueante (somente relatorio).
 - Publica artefatos de coverage (`coverage.xml`, `coverage.txt`, `htmlcov`).
@@ -175,6 +177,33 @@ coverage html -d htmlcov
 ```
 
 Obs: coverage nao bloqueia CI neste momento; o objetivo atual e visibilidade continua de qualidade.
+
+## SLO e Testes Sinteticos
+
+Variaveis de SLO (defaults):
+- `SLO_ENABLED=true`
+- `SLO_HTTP_P95_MS_DEFAULT=900`
+- `SLO_HTTP_ERROR_RATE_MAX_PERCENT=1.0`
+- `SLO_ANALYTICS_P95_MS=1200`
+- `SLO_ANALYTICS_DEGRADE_ALLOWED=true`
+- `SLO_TEST_WORKSPACES=5`
+- `SLO_TEST_CONCURRENCY=12`
+- `SLO_TEST_DURATION_SECONDS=8`
+
+Como rodar localmente (gate sintetico):
+
+```powershell
+$env:RUN_SLO_SYNTHETIC="1"
+python -m unittest -v tests.test_slo_synthetic_load
+```
+
+O teste sintetico:
+- gera carga concorrente em `/health` e endpoints de analytics;
+- alterna workspaces para validar fairness multi-tenant;
+- valida p95 e error rate com fallback aceitavel quando governance degradada estiver ativa.
+
+Para ajustar limites:
+- sobrescreva as variaveis `SLO_*` por ambiente/CI conforme necessidade de capacidade.
 
 ## Arquitetura em Camadas
 

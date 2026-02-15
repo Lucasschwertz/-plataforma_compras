@@ -53,6 +53,12 @@ jobs:
         run: |
           python -m unittest discover -s tests -p "test_*.py" -v
 
+      - name: Run SLO synthetic load gate
+        env:
+          RUN_SLO_SYNTHETIC: "1"
+        run: |
+          python -m unittest -v tests.test_slo_synthetic_load
+
       - name: Run coverage report (non-blocking)
         continue-on-error: true
         run: |

@@ -778,6 +778,14 @@ def metrics_snapshot() -> dict:
     return _METRICS.snapshot()
 
 
+def http_metrics_snapshot() -> dict:
+    snapshot = _METRICS.prometheus_snapshot()
+    return {
+        "http_request_total": list(snapshot.get("http_request_total") or []),
+        "http_request_duration_ms": list(snapshot.get("http_request_duration_ms") or []),
+    }
+
+
 def analytics_shadow_compare_totals() -> dict:
     return _METRICS.analytics_shadow_compare_totals()
 
