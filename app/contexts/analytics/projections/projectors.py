@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+import time
 from typing import Iterable, Sequence
 
 from app.core import (
@@ -15,6 +16,8 @@ from app.core import (
 )
 from app.observability import (
     observe_analytics_projection_failed,
+    observe_analytics_projection_handler,
+    observe_analytics_projection_handler_duration,
     observe_analytics_projection_lag,
     observe_analytics_projection_processed,
 )
@@ -61,6 +64,68 @@ def _to_decimal(value) -> Decimal:
     if isinstance(value, Decimal):
         return value
     return Decimal(str(value))
+
+
+def _duration_ms(started_at: float) -> int:
+    elapsed = max(0.0, time.perf_counter() - float(started_at or 0.0))
+    return int(round(elapsed * 1000.0))
+
+
+def _error_code(exc: Exception | None) -> str | None:
+    if exc is None:
+        return None
+    base = str(type(exc).__name__ or "Error").strip() or "Error"
+    details = str(exc or "").strip().splitlines()
+    if not details:
+        return base[:120]
+    return f"{base}:{details[0][:96]}"[:120]
+
+
+def _audit_handler_execution(
+    db,
+    *,
+    workspace_id: str,
+    event_id: str,
+    schema_name: str,
+    schema_version: int,
+    handler_name: str,
+    status: str,
+    duration_ms: int,
+    occurred_at: datetime,
+    error_code: str | None = None,
+) -> None:
+    try:
+        db.execute(
+            """
+            INSERT INTO ar_event_handler_audit (
+                workspace_id,
+                event_id,
+                schema_name,
+                schema_version,
+                handler_name,
+                status,
+                duration_ms,
+                error_code,
+                occurred_at,
+                processed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                workspace_id,
+                event_id or "unknown",
+                schema_name or "unknown",
+                max(1, int(schema_version or 1)),
+                handler_name or "unknown",
+                str(status or "ok").strip().lower() or "ok",
+                max(0, int(duration_ms or 0)),
+                str(error_code or "").strip()[:120] or None,
+                _coerce_datetime(occurred_at).isoformat().replace("+00:00", "Z"),
+            ),
+        )
+    except Exception:  # noqa: BLE001
+        # Audit persistence is best-effort and must not block event projection.
+        return
 
 
 def _upsert_kpi_daily(
@@ -341,12 +406,20 @@ class AnalyticsProjectionDispatcher:
         normalized_workspace = str(workspace_id or "").strip()
         event_type = type(event).__name__
         event_id = str(getattr(event, "event_id", "") or "").strip()
+        schema_name = str(getattr(event, "schema_name", "") or event_type).strip() or event_type
+        try:
+            schema_version = int(getattr(event, "schema_version", 1) or 1)
+        except (TypeError, ValueError):
+            schema_version = 1
+        if schema_version < 1:
+            schema_version = 1
         event_occurred_at = _coerce_datetime(getattr(event, "occurred_at", None))
         summary = {"processed": 0, "skipped_dedupe": 0, "failed": 0}
 
         for projector in self._projectors:
             if not matches_event_type(projector, event):
                 continue
+            started_at = time.perf_counter()
             try:
                 if not ensure_idempotent(
                     db,
@@ -362,6 +435,20 @@ class AnalyticsProjectionDispatcher:
                         last_event_id=event_id,
                         last_processed_at=event_occurred_at,
                     )
+                    duration_ms = _duration_ms(started_at)
+                    _audit_handler_execution(
+                        db,
+                        workspace_id=normalized_workspace,
+                        event_id=event_id,
+                        schema_name=schema_name,
+                        schema_version=schema_version,
+                        handler_name=projector.name,
+                        status="skipped",
+                        duration_ms=duration_ms,
+                        occurred_at=event_occurred_at,
+                    )
+                    observe_analytics_projection_handler(projector.name, "skipped")
+                    observe_analytics_projection_handler_duration(projector.name, duration_ms)
                     summary["skipped_dedupe"] += 1
                     continue
 
@@ -384,6 +471,20 @@ class AnalyticsProjectionDispatcher:
                 )
                 observe_analytics_projection_processed(projector.name, event_type)
                 observe_analytics_projection_lag(projector.name, event_occurred_at)
+                duration_ms = _duration_ms(started_at)
+                _audit_handler_execution(
+                    db,
+                    workspace_id=normalized_workspace,
+                    event_id=event_id,
+                    schema_name=schema_name,
+                    schema_version=schema_version,
+                    handler_name=projector.name,
+                    status="ok",
+                    duration_ms=duration_ms,
+                    occurred_at=event_occurred_at,
+                )
+                observe_analytics_projection_handler(projector.name, "ok")
+                observe_analytics_projection_handler_duration(projector.name, duration_ms)
                 summary["processed"] += 1
             except Exception as exc:  # noqa: BLE001
                 try:
@@ -399,6 +500,21 @@ class AnalyticsProjectionDispatcher:
                 except Exception:  # noqa: BLE001
                     pass
                 observe_analytics_projection_failed(projector.name, event_type)
+                duration_ms = _duration_ms(started_at)
+                _audit_handler_execution(
+                    db,
+                    workspace_id=normalized_workspace,
+                    event_id=event_id,
+                    schema_name=schema_name,
+                    schema_version=schema_version,
+                    handler_name=projector.name,
+                    status="failed",
+                    duration_ms=duration_ms,
+                    occurred_at=event_occurred_at,
+                    error_code=_error_code(exc),
+                )
+                observe_analytics_projection_handler(projector.name, "failed")
+                observe_analytics_projection_handler_duration(projector.name, duration_ms)
                 summary["failed"] += 1
         return summary
 

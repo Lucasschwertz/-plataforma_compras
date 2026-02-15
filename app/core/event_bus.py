@@ -14,6 +14,7 @@ from app.observability import (
     observe_analytics_event_store_persisted,
     observe_domain_event_emitted,
 )
+from app.core.event_schemas import validate_event
 
 
 EventHandler = Callable[["DomainEvent"], None]
@@ -28,6 +29,8 @@ class DomainEvent:
     event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     occurred_at: datetime = field(default_factory=_utc_now)
     workspace_id: str = ""
+    schema_name: str = ""
+    schema_version: int = 1
 
     def __post_init__(self) -> None:
         normalized_event_id = str(self.event_id or "").strip() or uuid.uuid4().hex
@@ -42,9 +45,19 @@ class DomainEvent:
         if not normalized_workspace:
             normalized_workspace = "unknown"
 
+        normalized_schema_name = str(self.schema_name or "").strip() or type(self).__name__
+        try:
+            normalized_schema_version = int(self.schema_version)
+        except (TypeError, ValueError):
+            normalized_schema_version = 1
+        if normalized_schema_version < 1:
+            normalized_schema_version = 1
+
         object.__setattr__(self, "event_id", normalized_event_id)
         object.__setattr__(self, "occurred_at", normalized_occurred_at)
         object.__setattr__(self, "workspace_id", normalized_workspace)
+        object.__setattr__(self, "schema_name", normalized_schema_name)
+        object.__setattr__(self, "schema_version", normalized_schema_version)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -106,6 +119,7 @@ class EventBus:
 
     def publish(self, event: DomainEvent) -> None:
         observe_domain_event_emitted(type(event).__name__)
+        validate_event(event)
         self._persist_event_best_effort(event)
         with self._lock:
             handlers = list(self._handlers.get(type(event), []))

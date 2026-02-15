@@ -385,6 +385,7 @@ class AnalyticsReadModelRepository(BaseRepository):
             "ar_process_stage_daily",
             "ar_event_dedupe",
             "ar_projection_state",
+            "ar_event_handler_audit",
         ):
             db.execute(
                 f"DELETE FROM {table_name} WHERE workspace_id = ?",
