@@ -9,6 +9,7 @@ from typing import Callable, Dict, List
 from flask import current_app
 
 from app.core import ErpOrderAccepted, ErpOrderRejected, EventBus, get_event_bus
+from app.core.governance import get_worker_fairness
 from app.contexts.erp.domain.gateway import ErpGatewayError
 from app.contexts.erp.infrastructure.circuit_breaker import get_erp_circuit_breaker
 from app.errors import classify_erp_failure
@@ -17,6 +18,9 @@ from app.observability import (
     observe_erp_outbox_processing,
     observe_erp_outbox_retry,
     observe_erp_outbox_retry_backoff,
+    observe_governance_worker_deferred,
+    observe_governance_worker_overflow,
+    observe_governance_worker_throttled,
     set_log_request_id,
 )
 
@@ -163,6 +167,35 @@ def _next_backoff_seconds(attempt: int) -> float:
 
 def _max_attempts() -> int:
     return max(1, int(current_app.config.get("ERP_OUTBOX_MAX_ATTEMPTS", 4) or 4))
+
+
+def _worker_backoff_on_limit_seconds() -> int:
+    return max(1, int(current_app.config.get("GOV_WORKER_BACKOFF_ON_LIMIT_SECONDS", 30) or 30))
+
+
+def _worker_deadletter_on_overflow() -> bool:
+    return bool(current_app.config.get("GOV_WORKER_DEADLETTER_ON_OVERFLOW", False))
+
+
+def _workspace_backlog_size(db, tenant_id: str) -> int:
+    row = db.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM sync_runs
+        WHERE tenant_id = ?
+          AND scope = ?
+          AND status = ?
+        """,
+        (tenant_id, PO_OUTBOX_SCOPE, PO_OUTBOX_STATUS_QUEUED),
+    ).fetchone()
+    if not row:
+        return 0
+    try:
+        if isinstance(row, dict):
+            return max(0, int(row.get("total") or 0))
+        return max(0, int(row["total"]))
+    except Exception:
+        return 0
 
 
 def _configure_circuit_breaker() -> None:
@@ -540,10 +573,11 @@ def process_purchase_order_outbox(
     if push_fn is None:
         raise RuntimeError("push_fn is required for outbox processing. Use worker ERP gateway.")
     bus = event_bus or get_event_bus()
+    fairness = get_worker_fairness()
     _configure_circuit_breaker()
     circuit_breaker = get_erp_circuit_breaker()
     candidates = _select_due_runs(db, tenant_id, max(1, int(limit)))
-    summary = {"processed": 0, "succeeded": 0, "failed": 0, "requeued": 0}
+    summary = {"processed": 0, "succeeded": 0, "failed": 0, "requeued": 0, "deferred": 0}
 
     for candidate in candidates:
         run_id = int(candidate["id"])
@@ -570,6 +604,51 @@ def process_purchase_order_outbox(
                 summary["processed"] += 1
                 summary["failed"] += 1
                 observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
+            continue
+
+        backlog_size = _workspace_backlog_size(db, run_tenant_id)
+        fairness_decision = fairness.can_process_job(run_tenant_id, backlog_size=backlog_size)
+        if not bool(fairness_decision.get("allowed")):
+            reason = str(fairness_decision.get("reason") or "concurrency").strip().lower() or "concurrency"
+            retry_after = max(1, int(fairness_decision.get("retry_after") or _worker_backoff_on_limit_seconds()))
+            overflow = reason == "backlog"
+            observe_governance_worker_throttled("backlog" if overflow else "concurrency")
+            if overflow:
+                observe_governance_worker_overflow(1)
+            if overflow and _worker_deadletter_on_overflow():
+                _mark_dead_letter(
+                    db,
+                    tenant_id=run_tenant_id,
+                    run_id=run_id,
+                    purchase_order_id=purchase_order_id,
+                    request_id=request_id,
+                    records_in=0,
+                    records_upserted=0,
+                    records_failed=1,
+                    error_summary="governance_overflow",
+                    error_details=f"backlog_size={backlog_size}",
+                )
+                db.commit()
+                summary["processed"] += 1
+                summary["failed"] += 1
+                continue
+
+            _delay_queued_run(
+                db,
+                tenant_id=run_tenant_id,
+                run_id=run_id,
+                purchase_order_id=purchase_order_id,
+                request_id=request_id,
+                next_attempt_at=_utcnow() + timedelta(seconds=retry_after),
+                error_summary="governance_throttled",
+                error_details=f"reason={reason};backlog_size={backlog_size}",
+            )
+            fairness.note_deferred()
+            db.commit()
+            summary["processed"] += 1
+            summary["requeued"] += 1
+            summary["deferred"] += 1
+            observe_governance_worker_deferred(1)
             continue
 
         try:

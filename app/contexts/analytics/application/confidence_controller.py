@@ -7,6 +7,7 @@ from typing import Any, Dict, Tuple
 
 from flask import current_app, has_app_context
 
+from app.core.governance import get_workspace_limiter
 
 _RESULT_KEYS = {"equal", "diff", "error"}
 
@@ -166,13 +167,22 @@ def get_read_model_confidence(workspace_id: str, section: str) -> Dict[str, Any]
     window = _confidence_window_minutes()
     min_samples = _confidence_min_samples()
     threshold = _confidence_max_diff_rate_percent()
-    return _CONFIDENCE.get(
+    payload = _CONFIDENCE.get(
         workspace_id,
         section,
         window_minutes=window,
         min_samples=min_samples,
         threshold_percent=threshold,
     )
+    try:
+        limiter = get_workspace_limiter()
+        if limiter.is_degraded(workspace_id):
+            compare_count = int(payload.get("compare_count") or 0)
+            if compare_count < max(1, int(min_samples) * 2):
+                payload["status"] = "insufficient_data"
+    except Exception:
+        pass
+    return payload
 
 
 def reset_confidence_controller_for_tests() -> None:

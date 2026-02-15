@@ -18,6 +18,7 @@ _OUTBOX_PROCESSING_BUCKETS_MS = (10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 
 _OUTBOX_BACKOFF_BUCKETS_SECONDS = (1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0)
 _ANALYTICS_REBUILD_DURATION_BUCKETS_SECONDS = (0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0)
 _ANALYTICS_SHADOW_COMPARE_LATENCY_BUCKETS_MS = (1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0)
+_ANALYTICS_PROJECTION_HANDLER_DURATION_BUCKETS_MS = (0.5, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0)
 
 _LOG_REQUEST_ID_CTX: contextvars.ContextVar[str] = contextvars.ContextVar("log_request_id", default="")
 
@@ -154,10 +155,13 @@ class MetricsRegistry:
         self._erp_retry_backoff_seconds = self._new_histogram_state(_OUTBOX_BACKOFF_BUCKETS_SECONDS)
 
         self._domain_event_emitted_total: Dict[str, int] = {}
+        self._domain_event_schema_invalid_total: Dict[str, int] = {}
         self._analytics_projection_processed_total: Dict[tuple[str, str], int] = {}
         self._analytics_projection_failed_total: Dict[tuple[str, str], int] = {}
         self._analytics_projection_lag_seconds: Dict[str, float] = {}
         self._analytics_projection_last_success_timestamp: Dict[str, float] = {}
+        self._analytics_projection_handler_total: Dict[tuple[str, str], int] = {}
+        self._analytics_projection_handler_duration_ms: Dict[str, dict] = {}
         self._analytics_read_model_hits_total: Dict[str, int] = {}
         self._analytics_read_model_confidence_status: Dict[str, int] = {}
         self._analytics_read_model_forced_fallback_total = 0
@@ -175,6 +179,11 @@ class MetricsRegistry:
         self._analytics_shadow_compare_last_diff_timestamp = 0.0
         self._analytics_shadow_compare_diff_rate = 0.0
         self._analytics_shadow_compare_diff_persisted_total = 0
+        self._governance_analytics_requests_total: Dict[str, int] = {}
+        self._governance_analytics_degraded_active = 0
+        self._governance_worker_throttled_total: Dict[str, int] = {}
+        self._governance_worker_deferred_total = 0
+        self._governance_worker_overflow_total = 0
 
     @staticmethod
     def _bucket_label(limit: float) -> str:
@@ -260,6 +269,11 @@ class MetricsRegistry:
         with self._lock:
             self._domain_event_emitted_total[key] = int(self._domain_event_emitted_total.get(key, 0)) + 1
 
+    def observe_domain_event_schema_invalid(self, schema_name: str) -> None:
+        key = str(schema_name or "unknown").strip() or "unknown"
+        with self._lock:
+            self._domain_event_schema_invalid_total[key] = int(self._domain_event_schema_invalid_total.get(key, 0)) + 1
+
     def observe_analytics_projection_processed(self, projector: str, event_type: str) -> None:
         projector_key = str(projector or "unknown").strip() or "unknown"
         event_key = str(event_type or "unknown").strip() or "unknown"
@@ -293,6 +307,26 @@ class MetricsRegistry:
         with self._lock:
             self._analytics_projection_lag_seconds[projector_key] = lag_seconds
             self._analytics_projection_last_success_timestamp[projector_key] = now_ts
+
+    def observe_analytics_projection_handler(self, handler: str, status: str) -> None:
+        handler_key = str(handler or "unknown").strip() or "unknown"
+        status_key = str(status or "unknown").strip().lower() or "unknown"
+        key = (handler_key, status_key)
+        with self._lock:
+            self._analytics_projection_handler_total[key] = int(self._analytics_projection_handler_total.get(key, 0)) + 1
+
+    def observe_analytics_projection_handler_duration(self, handler: str, duration_ms: float) -> None:
+        handler_key = str(handler or "unknown").strip() or "unknown"
+        with self._lock:
+            histogram = self._analytics_projection_handler_duration_ms.setdefault(
+                handler_key,
+                self._new_histogram_state(_ANALYTICS_PROJECTION_HANDLER_DURATION_BUCKETS_MS),
+            )
+            self._observe_histogram(
+                histogram,
+                float(duration_ms or 0.0),
+                _ANALYTICS_PROJECTION_HANDLER_DURATION_BUCKETS_MS,
+            )
 
     def observe_analytics_read_model_hit(self, source: str) -> None:
         source_key = str(source or "unknown").strip().lower() or "unknown"
@@ -390,6 +424,49 @@ class MetricsRegistry:
         with self._lock:
             self._analytics_shadow_compare_diff_persisted_total += increment
 
+    def observe_governance_analytics_request(self, result: str, count: int = 1) -> None:
+        result_key = str(result or "blocked").strip().lower() or "blocked"
+        if result_key not in {"allowed", "degraded", "blocked"}:
+            result_key = "blocked"
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._governance_analytics_requests_total[result_key] = (
+                int(self._governance_analytics_requests_total.get(result_key, 0)) + increment
+            )
+
+    def set_governance_analytics_degraded_active(self, active_count: int) -> None:
+        value = max(0, int(active_count or 0))
+        with self._lock:
+            self._governance_analytics_degraded_active = value
+
+    def observe_governance_worker_throttled(self, reason: str, count: int = 1) -> None:
+        reason_key = str(reason or "concurrency").strip().lower() or "concurrency"
+        if reason_key not in {"concurrency", "backlog"}:
+            reason_key = "concurrency"
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._governance_worker_throttled_total[reason_key] = (
+                int(self._governance_worker_throttled_total.get(reason_key, 0)) + increment
+            )
+
+    def observe_governance_worker_deferred(self, count: int = 1) -> None:
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._governance_worker_deferred_total += increment
+
+    def observe_governance_worker_overflow(self, count: int = 1) -> None:
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._governance_worker_overflow_total += increment
+
     def snapshot(self) -> dict:
         with self._lock:
             route_stats = []
@@ -421,10 +498,13 @@ class MetricsRegistry:
                 "domain_events": {
                     "emitted_total": int(sum(self._domain_event_emitted_total.values())),
                     "by_type": dict(sorted(self._domain_event_emitted_total.items())),
+                    "schema_invalid_total": int(sum(self._domain_event_schema_invalid_total.values())),
+                    "schema_invalid_by_name": dict(sorted(self._domain_event_schema_invalid_total.items())),
                 },
                 "analytics_projections": {
                     "processed_total": int(sum(self._analytics_projection_processed_total.values())),
                     "failed_total": int(sum(self._analytics_projection_failed_total.values())),
+                    "handler_total": int(sum(self._analytics_projection_handler_total.values())),
                     "projectors": sorted(set(self._analytics_projection_lag_seconds.keys())),
                 },
                 "analytics_read_model": {
@@ -445,6 +525,15 @@ class MetricsRegistry:
                     "last_diff_timestamp": float(self._analytics_shadow_compare_last_diff_timestamp),
                     "diff_rate_percent": float(self._analytics_shadow_compare_diff_rate),
                     "diff_persisted_total": int(self._analytics_shadow_compare_diff_persisted_total),
+                },
+                "governance": {
+                    "analytics_requests_total": int(sum(self._governance_analytics_requests_total.values())),
+                    "analytics_by_result": dict(sorted(self._governance_analytics_requests_total.items())),
+                    "analytics_degraded_active": int(self._governance_analytics_degraded_active),
+                    "worker_throttled_total": int(sum(self._governance_worker_throttled_total.values())),
+                    "worker_throttled_by_reason": dict(sorted(self._governance_worker_throttled_total.items())),
+                    "worker_deferred_total": int(self._governance_worker_deferred_total),
+                    "worker_overflow_total": int(self._governance_worker_overflow_total),
                 },
             }
 
@@ -518,6 +607,7 @@ class MetricsRegistry:
                 "erp_outbox_processing_time": outbox_hist,
                 "erp_retry_backoff_seconds": backoff_hist,
                 "domain_event_emitted_total": dict(sorted(self._domain_event_emitted_total.items())),
+                "domain_event_schema_invalid_total": dict(sorted(self._domain_event_schema_invalid_total.items())),
                 "analytics_projection_processed_total": {
                     key: int(value)
                     for key, value in sorted(
@@ -539,6 +629,21 @@ class MetricsRegistry:
                 "analytics_projection_last_success_timestamp": {
                     key: float(value)
                     for key, value in sorted(self._analytics_projection_last_success_timestamp.items())
+                },
+                "analytics_projection_handler_total": {
+                    key: int(value)
+                    for key, value in sorted(
+                        self._analytics_projection_handler_total.items(),
+                        key=lambda item: (item[0][0], item[0][1]),
+                    )
+                },
+                "analytics_projection_handler_duration_ms": {
+                    handler: {
+                        "count": int(histogram["count"]),
+                        "sum": float(histogram["sum"]),
+                        "buckets": {label: int(count) for label, count in histogram["buckets"].items()},
+                    }
+                    for handler, histogram in sorted(self._analytics_projection_handler_duration_ms.items())
                 },
                 "analytics_read_model_hits_total": {
                     key: int(value)
@@ -595,6 +700,17 @@ class MetricsRegistry:
                 "analytics_shadow_compare_diff_persisted_total": int(
                     self._analytics_shadow_compare_diff_persisted_total
                 ),
+                "governance_analytics_requests_total": {
+                    key: int(value)
+                    for key, value in sorted(self._governance_analytics_requests_total.items())
+                },
+                "governance_analytics_degraded_active": int(self._governance_analytics_degraded_active),
+                "governance_worker_throttled_total": {
+                    key: int(value)
+                    for key, value in sorted(self._governance_worker_throttled_total.items())
+                },
+                "governance_worker_deferred_total": int(self._governance_worker_deferred_total),
+                "governance_worker_overflow_total": int(self._governance_worker_overflow_total),
             }
 
     def reset(self) -> None:
@@ -609,10 +725,13 @@ class MetricsRegistry:
             self._erp_outbox_processing_time = self._new_histogram_state(_OUTBOX_PROCESSING_BUCKETS_MS)
             self._erp_retry_backoff_seconds = self._new_histogram_state(_OUTBOX_BACKOFF_BUCKETS_SECONDS)
             self._domain_event_emitted_total.clear()
+            self._domain_event_schema_invalid_total.clear()
             self._analytics_projection_processed_total.clear()
             self._analytics_projection_failed_total.clear()
             self._analytics_projection_lag_seconds.clear()
             self._analytics_projection_last_success_timestamp.clear()
+            self._analytics_projection_handler_total.clear()
+            self._analytics_projection_handler_duration_ms.clear()
             self._analytics_read_model_hits_total.clear()
             self._analytics_read_model_confidence_status.clear()
             self._analytics_read_model_forced_fallback_total = 0
@@ -630,6 +749,11 @@ class MetricsRegistry:
             self._analytics_shadow_compare_last_diff_timestamp = 0.0
             self._analytics_shadow_compare_diff_rate = 0.0
             self._analytics_shadow_compare_diff_persisted_total = 0
+            self._governance_analytics_requests_total.clear()
+            self._governance_analytics_degraded_active = 0
+            self._governance_worker_throttled_total.clear()
+            self._governance_worker_deferred_total = 0
+            self._governance_worker_overflow_total = 0
 
 
 _METRICS = MetricsRegistry()
@@ -678,6 +802,10 @@ def observe_domain_event_emitted(event_type: str) -> None:
     _METRICS.observe_domain_event_emitted(event_type)
 
 
+def observe_domain_event_schema_invalid(schema_name: str) -> None:
+    _METRICS.observe_domain_event_schema_invalid(schema_name)
+
+
 def observe_analytics_projection_processed(projector: str, event_type: str) -> None:
     _METRICS.observe_analytics_projection_processed(projector, event_type)
 
@@ -688,6 +816,14 @@ def observe_analytics_projection_failed(projector: str, event_type: str) -> None
 
 def observe_analytics_projection_lag(projector: str, occurred_at: datetime | float | int | None) -> None:
     _METRICS.observe_analytics_projection_lag(projector, occurred_at)
+
+
+def observe_analytics_projection_handler(handler: str, status: str) -> None:
+    _METRICS.observe_analytics_projection_handler(handler, status)
+
+
+def observe_analytics_projection_handler_duration(handler: str, duration_ms: float) -> None:
+    _METRICS.observe_analytics_projection_handler_duration(handler, duration_ms)
 
 
 def observe_analytics_read_model_hit(source: str) -> None:
@@ -732,6 +868,26 @@ def observe_analytics_shadow_compare_last_diff_timestamp(timestamp: float | int 
 
 def observe_analytics_shadow_compare_diff_persisted(count: int = 1) -> None:
     _METRICS.observe_analytics_shadow_compare_diff_persisted(count)
+
+
+def observe_governance_analytics_request(result: str, count: int = 1) -> None:
+    _METRICS.observe_governance_analytics_request(result, count=count)
+
+
+def set_governance_analytics_degraded_active(active_count: int) -> None:
+    _METRICS.set_governance_analytics_degraded_active(active_count)
+
+
+def observe_governance_worker_throttled(reason: str, count: int = 1) -> None:
+    _METRICS.observe_governance_worker_throttled(reason, count=count)
+
+
+def observe_governance_worker_deferred(count: int = 1) -> None:
+    _METRICS.observe_governance_worker_deferred(count=count)
+
+
+def observe_governance_worker_overflow(count: int = 1) -> None:
+    _METRICS.observe_governance_worker_overflow(count=count)
 
 
 def _prom_label(value: object) -> str:
@@ -834,6 +990,11 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
     for event_type, total in snapshot["domain_event_emitted_total"].items():
         lines.append(_prom_line("domain_event_emitted_total", int(total), labels={"event_type": event_type}))
 
+    lines.append("# HELP domain_event_schema_invalid_total Invalid domain event schemas by schema name.")
+    lines.append("# TYPE domain_event_schema_invalid_total counter")
+    for schema_name, total in snapshot["domain_event_schema_invalid_total"].items():
+        lines.append(_prom_line("domain_event_schema_invalid_total", int(total), labels={"schema_name": schema_name}))
+
     lines.append("# HELP analytics_projection_processed_total Total processed analytics projection events.")
     lines.append("# TYPE analytics_projection_processed_total counter")
     for (projector, event_type), total in snapshot["analytics_projection_processed_total"].items():
@@ -853,6 +1014,44 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
                 "analytics_projection_failed_total",
                 int(total),
                 labels={"projector": projector, "event_type": event_type},
+            )
+        )
+
+    lines.append("# HELP analytics_projection_handler_total Total projection handler executions by status.")
+    lines.append("# TYPE analytics_projection_handler_total counter")
+    for (handler, status), total in snapshot["analytics_projection_handler_total"].items():
+        lines.append(
+            _prom_line(
+                "analytics_projection_handler_total",
+                int(total),
+                labels={"handler": handler, "status": status},
+            )
+        )
+
+    lines.append("# HELP analytics_projection_handler_duration_ms Projection handler execution duration in milliseconds.")
+    lines.append("# TYPE analytics_projection_handler_duration_ms histogram")
+    for handler, histogram in snapshot["analytics_projection_handler_duration_ms"].items():
+        base_labels = {"handler": handler}
+        for le_label, bucket_value in histogram["buckets"].items():
+            lines.append(
+                _prom_line(
+                    "analytics_projection_handler_duration_ms_bucket",
+                    int(bucket_value),
+                    labels=base_labels | {"le": le_label},
+                )
+            )
+        lines.append(
+            _prom_line(
+                "analytics_projection_handler_duration_ms_sum",
+                float(histogram["sum"]),
+                labels=base_labels,
+            )
+        )
+        lines.append(
+            _prom_line(
+                "analytics_projection_handler_duration_ms_count",
+                int(histogram["count"]),
+                labels=base_labels,
             )
         )
 
@@ -1040,6 +1239,55 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
         _prom_line(
             "analytics_shadow_compare_diff_persisted_total",
             int(snapshot["analytics_shadow_compare_diff_persisted_total"]),
+        )
+    )
+
+    lines.append("# HELP governance_analytics_requests_total Analytics governance decisions by result.")
+    lines.append("# TYPE governance_analytics_requests_total counter")
+    for result, total in snapshot["governance_analytics_requests_total"].items():
+        lines.append(
+            _prom_line(
+                "governance_analytics_requests_total",
+                int(total),
+                labels={"result": result},
+            )
+        )
+
+    lines.append("# HELP governance_analytics_degraded_active Active degraded workspaces in analytics governance.")
+    lines.append("# TYPE governance_analytics_degraded_active gauge")
+    lines.append(
+        _prom_line(
+            "governance_analytics_degraded_active",
+            int(snapshot["governance_analytics_degraded_active"]),
+        )
+    )
+
+    lines.append("# HELP governance_worker_throttled_total Worker governance throttles by reason.")
+    lines.append("# TYPE governance_worker_throttled_total counter")
+    for reason, total in snapshot["governance_worker_throttled_total"].items():
+        lines.append(
+            _prom_line(
+                "governance_worker_throttled_total",
+                int(total),
+                labels={"reason": reason},
+            )
+        )
+
+    lines.append("# HELP governance_worker_deferred_total Worker jobs deferred by governance.")
+    lines.append("# TYPE governance_worker_deferred_total counter")
+    lines.append(
+        _prom_line(
+            "governance_worker_deferred_total",
+            int(snapshot["governance_worker_deferred_total"]),
+        )
+    )
+
+    lines.append("# HELP governance_worker_overflow_total Worker backlog overflow events.")
+    lines.append("# TYPE governance_worker_overflow_total counter")
+    lines.append(
+        _prom_line(
+            "governance_worker_overflow_total",
+            int(snapshot["governance_worker_overflow_total"]),
         )
     )
 

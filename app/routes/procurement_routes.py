@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple
 from urllib.parse import quote
 
 from app.core import get_event_bus
+from app.core.governance import governance_status_snapshot
 from app.contexts.analytics.application.service import AnalyticsService
 from app.contexts.erp.application.outbox_service import ErpOutboxService
 from app.contexts.procurement.application.service import ProcurementService
@@ -578,6 +579,13 @@ def analytics_read_model_confidence_api():
         sections=analytics_sections(),
     )
     return jsonify(payload)
+
+
+@procurement_bp.route("/internal/governance/status", methods=["GET"])
+def governance_status_api():
+    _require_roles("admin")
+    snapshot = governance_status_snapshot()
+    return jsonify(snapshot)
 
 
 @procurement_bp.route("/api/procurement/analytics/read-model/rebuild", methods=["POST"])

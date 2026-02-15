@@ -25,6 +25,13 @@ from app.ui_strings import confirm_message, get_ui_text, template_bundle
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+    if app.testing:
+        try:
+            from app.core.governance import reset_governance_for_tests
+
+            reset_governance_for_tests()
+        except Exception:
+            pass
     configure_json_logging(app)
 
     _ensure_database_dir(app)
@@ -69,11 +76,13 @@ def _maybe_init_schema(app: Flask) -> None:
 
 
 def _register_blueprints(app: Flask) -> None:
+    from app.contexts.platform.interfaces.http_commands import platform_commands_bp
     from app.routes.home_routes import home_bp
     from app.routes.procurement_routes import procurement_bp
 
     app.register_blueprint(home_bp)
     app.register_blueprint(procurement_bp)
+    app.register_blueprint(platform_commands_bp)
 
 
 def _register_auth(app: Flask) -> None:

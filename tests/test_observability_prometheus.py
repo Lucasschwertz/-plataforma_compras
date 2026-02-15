@@ -57,8 +57,11 @@ class ObservabilityPrometheusTest(unittest.TestCase):
         self.assertIn("erp_retry_backoff_seconds_bucket", payload)
         self.assertIn("erp_circuit_state", payload)
         self.assertIn("domain_event_emitted_total", payload)
+        self.assertIn("domain_event_schema_invalid_total", payload)
         self.assertIn("analytics_projection_processed_total", payload)
         self.assertIn("analytics_projection_failed_total", payload)
+        self.assertIn("analytics_projection_handler_total", payload)
+        self.assertIn("analytics_projection_handler_duration_ms", payload)
         self.assertIn("analytics_projection_lag_seconds", payload)
         self.assertIn("analytics_read_model_lag_seconds", payload)
         self.assertIn("analytics_projection_last_success_timestamp", payload)
@@ -75,6 +78,11 @@ class ObservabilityPrometheusTest(unittest.TestCase):
         self.assertIn("analytics_shadow_compare_last_diff_timestamp", payload)
         self.assertIn("analytics_shadow_compare_diff_rate", payload)
         self.assertIn("analytics_shadow_compare_diff_persisted_total", payload)
+        self.assertIn("governance_analytics_requests_total", payload)
+        self.assertIn("governance_analytics_degraded_active", payload)
+        self.assertIn("governance_worker_throttled_total", payload)
+        self.assertIn("governance_worker_deferred_total", payload)
+        self.assertIn("governance_worker_overflow_total", payload)
         self.assertIn('event_type="PurchaseRequestCreated"', payload)
 
     def test_log_formatter_includes_request_id_outside_request_context(self) -> None:

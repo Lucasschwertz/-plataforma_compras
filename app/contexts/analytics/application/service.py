@@ -21,6 +21,9 @@ from app.core import (
     RfqAwarded,
     RfqCreated,
 )
+from app.core.governance import get_workspace_limiter
+from app.core.event_schemas import latest_schema_version
+from app.core.event_upcasters import upcast
 from app.contexts.analytics.infrastructure.repository import AnalyticsRepository
 from app.contexts.analytics.infrastructure.read_model_repository import AnalyticsReadModelRepository
 from app.contexts.analytics.projections import AnalyticsProjectionDispatcher, default_projection_dispatcher
@@ -28,11 +31,13 @@ from app.contexts.analytics.application.shadow_compare import (
     diff_payload,
     hash_payload,
     should_emit_diff_log,
+    should_skip_shadow_compare,
 )
 from app.contexts.analytics.application.confidence_controller import (
     get_read_model_confidence,
     record_shadow_compare_result,
 )
+from app.errors import ValidationError
 from app.observability import (
     analytics_shadow_compare_totals,
     current_request_id,
@@ -45,10 +50,13 @@ from app.observability import (
     observe_analytics_shadow_compare_diff_persisted,
     observe_analytics_shadow_compare_last_diff_timestamp,
     observe_analytics_shadow_compare_latency,
+    observe_governance_analytics_request,
+    set_governance_analytics_degraded_active,
 )
 from app.contexts.analytics.application.payload import normalize_section_key, section_meta
 from app.db import get_db
 from app.domain.contracts import AnalyticsRequestInput
+from app.ui_strings import get_ui_text
 
 
 class AnalyticsService:
@@ -147,6 +155,53 @@ class AnalyticsService:
             return bool(current_app.config.get("ANALYTICS_CONFIDENCE_ENABLED", True))
         return self._env_bool("ANALYTICS_CONFIDENCE_ENABLED", True)
 
+    def _governance_enabled(self) -> bool:
+        if has_app_context():
+            return bool(current_app.config.get("GOV_ENABLED", True))
+        return self._env_bool("GOV_ENABLED", True)
+
+    def _governance_soft_degrade_on_limit(self) -> bool:
+        if has_app_context():
+            return bool(current_app.config.get("GOV_ANALYTICS_SOFT_DEGRADE_ON_LIMIT", True))
+        return self._env_bool("GOV_ANALYTICS_SOFT_DEGRADE_ON_LIMIT", True)
+
+    def _governance_degrade_ttl_seconds(self) -> int:
+        default = 120
+        if has_app_context():
+            try:
+                value = int(current_app.config.get("GOV_ANALYTICS_DEGRADE_TTL_SECONDS", default))
+            except (TypeError, ValueError):
+                value = default
+            return max(1, value)
+        raw = os.environ.get("GOV_ANALYTICS_DEGRADE_TTL_SECONDS")
+        if raw is None:
+            return default
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return default
+
+    def _governance_cache_ttl_when_degraded(self) -> int:
+        default = 180
+        if has_app_context():
+            try:
+                value = int(current_app.config.get("GOV_ANALYTICS_CACHE_TTL_SECONDS_WHEN_DEGRADED", default))
+            except (TypeError, ValueError):
+                value = default
+            return max(1, value)
+        raw = os.environ.get("GOV_ANALYTICS_CACHE_TTL_SECONDS_WHEN_DEGRADED")
+        if raw is None:
+            return default
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return default
+
+    def _governance_shadow_disable_when_degraded(self) -> bool:
+        if has_app_context():
+            return bool(current_app.config.get("GOV_ANALYTICS_SHADOW_DISABLE_WHEN_DEGRADED", True))
+        return self._env_bool("GOV_ANALYTICS_SHADOW_DISABLE_WHEN_DEGRADED", True)
+
     @staticmethod
     def _is_analytics_path(path: str) -> bool:
         normalized = str(path or "").strip().lower()
@@ -156,6 +211,11 @@ class AnalyticsService:
         if not read_model_enabled:
             return False
         if not self._shadow_compare_enabled():
+            return False
+        if should_skip_shadow_compare(
+            request_input.tenant_id,
+            disable_when_degraded=self._governance_shadow_disable_when_degraded(),
+        ):
             return False
         role = str(request_input.role or "").strip().lower()
         if role == "supplier" or role not in {"buyer", "manager", "admin", "approver"}:
@@ -209,6 +269,55 @@ class AnalyticsService:
             normalized_filter_block,
         )
 
+    @staticmethod
+    def _with_governance(payload: dict, *, degraded: bool, retry_after_seconds: int) -> dict:
+        enriched = copy.deepcopy(payload or {})
+        enriched["governance"] = {
+            "degraded": bool(degraded),
+            "retry_after_seconds": max(0, int(retry_after_seconds or 0)),
+            "message": get_ui_text(
+                "analytics_degraded_mode",
+                "Mostrando dados recentes, atualizando em segundo plano.",
+            ),
+        }
+        return enriched
+
+    def _minimal_governance_payload(
+        self,
+        *,
+        request_input: AnalyticsRequestInput,
+        visibility: Dict[str, Any],
+        filters: Dict[str, Any],
+        source: str,
+        retry_after_seconds: int,
+    ) -> dict:
+        section_key = normalize_section_key(request_input.section)
+        section_info = section_meta(section_key)
+        raw_filters = dict(filters.get("raw") or {}) if isinstance(filters.get("raw"), dict) else {}
+        payload = {
+            "section": section_info,
+            "filters": raw_filters,
+            "visibility": {
+                "role": visibility.get("role"),
+                "scope": visibility.get("scope"),
+            },
+            "meta": {
+                "records_count": 0,
+                "comparison_records_count": 0,
+                "generated_at": self._iso_now(),
+            },
+            "alerts": [],
+            "alerts_meta": {
+                "active_count": 0,
+                "has_active": False,
+            },
+            "kpis": [],
+            "charts": [],
+            "drilldown": {"title": "Dados em atualizacao", "columns": [], "column_keys": [], "rows": []},
+            "source": source,
+        }
+        return self._with_governance(payload, degraded=True, retry_after_seconds=retry_after_seconds)
+
     def _cache_get(self, cache_key: tuple) -> dict | None:
         now = time.time()
         with self._lock:
@@ -220,10 +329,11 @@ class AnalyticsService:
                 return None
             return copy.deepcopy(entry.get("payload") or {})
 
-    def _cache_set(self, cache_key: tuple, payload: dict) -> None:
+    def _cache_set(self, cache_key: tuple, payload: dict, *, ttl_seconds: int | None = None) -> None:
+        ttl = self.ttl_seconds if ttl_seconds is None else max(1, int(ttl_seconds))
         with self._lock:
             self._cache[cache_key] = {
-                "expires_at": time.time() + self.ttl_seconds,
+                "expires_at": time.time() + ttl,
                 "payload": copy.deepcopy(payload),
             }
 
@@ -355,54 +465,128 @@ class AnalyticsService:
             forced_confidence_fallback=force_confidence_fallback,
         )
         cached = self._cache_get(cache_key)
-        if cached is not None:
-            source = str(cached.get("source") or "").strip().lower() or "transacional"
-            if confidence_status:
-                cached["confidence_status"] = confidence_status
-            if force_confidence_fallback:
-                observe_analytics_read_model_forced_fallback(1)
-            elif read_model_enabled:
-                self._maybe_run_shadow_compare(
-                    db,
-                    request_input=request_input,
-                    filters=filters,
-                    visibility=visibility,
-                    build_payload_fn=build_payload_fn,
-                    payload_primary=cached,
-                    primary_source=source,
-                    read_model_enabled=read_model_enabled,
-                )
-            observe_analytics_read_model_hit(source)
-            return cached
+        limiter = get_workspace_limiter()
+        workspace_id = str(request_input.tenant_id or "").strip()
+        workspace_degraded = False
 
-        if force_confidence_fallback:
-            payload = self._build_dashboard_payload_transacional(
-                db,
-                request_input=request_input,
-                filters=filters,
-                visibility=visibility,
-                build_payload_fn=build_payload_fn,
-            )
-            payload["source"] = "transacional"
-            observe_analytics_read_model_forced_fallback(1)
-        elif read_model_enabled:
+        def _record_degraded_gauge() -> None:
             try:
-                payload = self._build_dashboard_payload_from_read_model(
-                    db,
-                    request_input=request_input,
-                    filters=filters,
-                    visibility=visibility,
+                set_governance_analytics_degraded_active(limiter.degraded_active_count())
+            except Exception:
+                pass
+
+        def _degraded_cache_or_minimal(retry_after_seconds: int) -> dict:
+            source_hint = "fallback" if read_model_enabled else "transacional"
+            if cached is not None:
+                payload_cached = self._with_governance(
+                    cached,
+                    degraded=True,
+                    retry_after_seconds=retry_after_seconds,
                 )
-                payload["source"] = "read_model"
-            except Exception:  # noqa: BLE001
-                if has_app_context():
-                    current_app.logger.exception(
-                        "analytics_read_model_fallback",
-                        extra={
-                            "tenant_id": request_input.tenant_id,
-                            "section": request_input.section,
-                        },
+                if confidence_status:
+                    payload_cached["confidence_status"] = confidence_status
+                observe_analytics_read_model_hit(str(payload_cached.get("source") or source_hint))
+                return payload_cached
+
+            payload_min = self._minimal_governance_payload(
+                request_input=request_input,
+                visibility=visibility,
+                filters=filters,
+                source=source_hint,
+                retry_after_seconds=retry_after_seconds,
+            )
+            if confidence_status:
+                payload_min["confidence_status"] = confidence_status
+            observe_analytics_read_model_hit(str(payload_min.get("source") or source_hint))
+            self._cache_set(
+                cache_key,
+                payload_min,
+                ttl_seconds=self._governance_cache_ttl_when_degraded(),
+            )
+            return payload_min
+
+        governance_enabled = self._governance_enabled()
+        if governance_enabled:
+            decision = {"allowed": True, "degraded": False, "retry_after": 0}
+            try:
+                decision = dict(limiter.check_analytics(workspace_id) or decision)
+            except Exception:
+                decision = {"allowed": True, "degraded": False, "retry_after": 0}
+
+            allowed = bool(decision.get("allowed"))
+            retry_after = max(0, int(decision.get("retry_after") or 0))
+            workspace_degraded = bool(decision.get("degraded"))
+            if not allowed:
+                if self._governance_soft_degrade_on_limit():
+                    try:
+                        limiter.mark_degraded(workspace_id, self._governance_degrade_ttl_seconds())
+                        workspace_degraded = True
+                    except Exception:
+                        workspace_degraded = True
+                    observe_governance_analytics_request("degraded")
+                    _record_degraded_gauge()
+                    return _degraded_cache_or_minimal(retry_after)
+
+                observe_governance_analytics_request("blocked")
+                _record_degraded_gauge()
+                raise ValidationError(
+                    code="analytics_rate_limited",
+                    message_key="analytics_rate_limited",
+                    http_status=429,
+                    critical=False,
+                    payload={"retry_after_seconds": retry_after},
+                )
+
+            observe_governance_analytics_request("degraded" if workspace_degraded else "allowed")
+            _record_degraded_gauge()
+
+        analytics_slot_cm = None
+        try:
+            if governance_enabled:
+                analytics_slot_cm = limiter.enter_analytics(workspace_id)
+                entered = bool(analytics_slot_cm.__enter__())
+                if not entered:
+                    if self._governance_soft_degrade_on_limit():
+                        try:
+                            limiter.mark_degraded(workspace_id, self._governance_degrade_ttl_seconds())
+                        except Exception:
+                            pass
+                        observe_governance_analytics_request("degraded")
+                        _record_degraded_gauge()
+                        return _degraded_cache_or_minimal(1)
+                    observe_governance_analytics_request("blocked")
+                    _record_degraded_gauge()
+                    raise ValidationError(
+                        code="analytics_rate_limited",
+                        message_key="analytics_rate_limited",
+                        http_status=429,
+                        critical=False,
+                        payload={"retry_after_seconds": 1},
                     )
+
+            if cached is not None:
+                source = str(cached.get("source") or "").strip().lower() or "transacional"
+                if confidence_status:
+                    cached["confidence_status"] = confidence_status
+                if workspace_degraded:
+                    cached = self._with_governance(cached, degraded=True, retry_after_seconds=0)
+                if force_confidence_fallback:
+                    observe_analytics_read_model_forced_fallback(1)
+                elif read_model_enabled:
+                    self._maybe_run_shadow_compare(
+                        db,
+                        request_input=request_input,
+                        filters=filters,
+                        visibility=visibility,
+                        build_payload_fn=build_payload_fn,
+                        payload_primary=cached,
+                        primary_source=source,
+                        read_model_enabled=read_model_enabled,
+                    )
+                observe_analytics_read_model_hit(source)
+                return cached
+
+            if force_confidence_fallback:
                 payload = self._build_dashboard_payload_transacional(
                     db,
                     request_input=request_input,
@@ -410,36 +594,70 @@ class AnalyticsService:
                     visibility=visibility,
                     build_payload_fn=build_payload_fn,
                 )
-                payload["source"] = "fallback"
-        else:
-            payload = self._build_dashboard_payload_transacional(
-                db,
-                request_input=request_input,
-                filters=filters,
-                visibility=visibility,
-                build_payload_fn=build_payload_fn,
-            )
-            payload["source"] = "transacional"
+                payload["source"] = "transacional"
+                observe_analytics_read_model_forced_fallback(1)
+            elif read_model_enabled:
+                try:
+                    payload = self._build_dashboard_payload_from_read_model(
+                        db,
+                        request_input=request_input,
+                        filters=filters,
+                        visibility=visibility,
+                    )
+                    payload["source"] = "read_model"
+                except Exception:  # noqa: BLE001
+                    if has_app_context():
+                        current_app.logger.exception(
+                            "analytics_read_model_fallback",
+                            extra={
+                                "tenant_id": request_input.tenant_id,
+                                "section": request_input.section,
+                            },
+                        )
+                    payload = self._build_dashboard_payload_transacional(
+                        db,
+                        request_input=request_input,
+                        filters=filters,
+                        visibility=visibility,
+                        build_payload_fn=build_payload_fn,
+                    )
+                    payload["source"] = "fallback"
+            else:
+                payload = self._build_dashboard_payload_transacional(
+                    db,
+                    request_input=request_input,
+                    filters=filters,
+                    visibility=visibility,
+                    build_payload_fn=build_payload_fn,
+                )
+                payload["source"] = "transacional"
 
-        if confidence_status:
-            payload["confidence_status"] = confidence_status
+            if confidence_status:
+                payload["confidence_status"] = confidence_status
 
-        primary_source = str(payload.get("source") or "transacional").strip().lower() or "transacional"
-        if read_model_enabled and not force_confidence_fallback:
-            self._maybe_run_shadow_compare(
-                db,
-                request_input=request_input,
-                filters=filters,
-                visibility=visibility,
-                build_payload_fn=build_payload_fn,
-                payload_primary=payload,
-                primary_source=primary_source,
-                read_model_enabled=read_model_enabled,
-            )
+            if workspace_degraded:
+                payload = self._with_governance(payload, degraded=True, retry_after_seconds=0)
 
-        observe_analytics_read_model_hit(str(payload.get("source") or "transacional"))
-        self._cache_set(cache_key, payload)
-        return payload
+            primary_source = str(payload.get("source") or "transacional").strip().lower() or "transacional"
+            if read_model_enabled and not force_confidence_fallback:
+                self._maybe_run_shadow_compare(
+                    db,
+                    request_input=request_input,
+                    filters=filters,
+                    visibility=visibility,
+                    build_payload_fn=build_payload_fn,
+                    payload_primary=payload,
+                    primary_source=primary_source,
+                    read_model_enabled=read_model_enabled,
+                )
+
+            observe_analytics_read_model_hit(str(payload.get("source") or "transacional"))
+            cache_ttl = self._governance_cache_ttl_when_degraded() if workspace_degraded else self.ttl_seconds
+            self._cache_set(cache_key, payload, ttl_seconds=cache_ttl)
+            return payload
+        finally:
+            if analytics_slot_cm is not None:
+                analytics_slot_cm.__exit__(None, None, None)
 
     def _maybe_run_shadow_compare(
         self,
@@ -1240,6 +1458,21 @@ class AnalyticsService:
         occurred_at = AnalyticsService._parse_datetime(
             row.get("occurred_at") or payload.get("occurred_at")
         )
+        schema_name = str(payload.get("schema_name") or event_type or "").strip() or event_type
+        try:
+            schema_version = int(payload.get("schema_version") or 1)
+        except (TypeError, ValueError):
+            schema_version = 1
+        if schema_version < 1:
+            schema_version = 1
+        target_schema_version = latest_schema_version(schema_name)
+        payload = upcast(schema_name, schema_version, payload, target_schema_version)
+        schema_name = str(payload.get("schema_name") or schema_name or event_type).strip() or event_type
+        try:
+            schema_version = int(payload.get("schema_version") or target_schema_version or 1)
+        except (TypeError, ValueError):
+            schema_version = max(1, int(target_schema_version or 1))
+
         event_registry = {
             "PurchaseRequestCreated": PurchaseRequestCreated,
             "RfqCreated": RfqCreated,
@@ -1257,6 +1490,8 @@ class AnalyticsService:
         payload["occurred_at"] = occurred_at or payload.get("occurred_at")
         payload["workspace_id"] = str(payload.get("workspace_id") or workspace_id).strip() or workspace_id
         payload["tenant_id"] = str(payload.get("tenant_id") or workspace_id).strip() or workspace_id
+        payload["schema_name"] = schema_name or event_type
+        payload["schema_version"] = schema_version or 1
 
         allowed_fields = {field.name for field in dataclass_fields(event_cls)}
         event_kwargs = {key: payload.get(key) for key in allowed_fields if key in payload}

@@ -8,6 +8,8 @@ import time
 from numbers import Number
 from typing import Any, Dict, List
 
+from app.core.governance import get_workspace_limiter
+
 
 _VOLATILE_KEYS = {"generated_at", "duration_ms", "source", "request_id", "confidence_status"}
 _SUMMARY_KEYS = ("kpis", "charts", "drilldown")
@@ -222,6 +224,16 @@ def should_emit_diff_log(max_logs_per_minute: int) -> bool:
             return False
         _LOG_LIMIT_BY_MINUTE[minute_key] = current + 1
         return True
+
+
+def should_skip_shadow_compare(workspace_id: str | None, *, disable_when_degraded: bool) -> bool:
+    if not bool(disable_when_degraded):
+        return False
+    try:
+        limiter = get_workspace_limiter()
+        return bool(limiter.is_degraded(workspace_id))
+    except Exception:
+        return False
 
 
 def _reset_shadow_compare_log_limiter_for_tests() -> None:
