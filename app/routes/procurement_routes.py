@@ -567,6 +567,19 @@ def analytics_shadow_report_page():
     )
 
 
+@procurement_bp.route("/internal/analytics/read-model-confidence", methods=["GET"])
+def analytics_read_model_confidence_api():
+    _require_roles("admin")
+    tenant_id = current_tenant_id() or DEFAULT_TENANT_ID
+    query_workspace = str(request.args.get("workspace_id") or "").strip()
+    workspace_id = scoped_tenant_id(query_workspace or tenant_id)
+    payload = _ANALYTICS_SERVICE.build_read_model_confidence_report(
+        workspace_id=workspace_id,
+        sections=analytics_sections(),
+    )
+    return jsonify(payload)
+
+
 @procurement_bp.route("/api/procurement/analytics/read-model/rebuild", methods=["POST"])
 def analytics_read_model_rebuild_api():
     _require_roles("manager", "admin")

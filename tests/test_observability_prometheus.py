@@ -63,6 +63,8 @@ class ObservabilityPrometheusTest(unittest.TestCase):
         self.assertIn("analytics_read_model_lag_seconds", payload)
         self.assertIn("analytics_projection_last_success_timestamp", payload)
         self.assertIn("analytics_read_model_hits_total", payload)
+        self.assertIn("analytics_read_model_confidence_status", payload)
+        self.assertIn("analytics_read_model_forced_fallback_total", payload)
         self.assertIn("analytics_event_store_persisted_total", payload)
         self.assertIn("analytics_event_store_failed_total", payload)
         self.assertIn("analytics_read_model_rebuild_total", payload)

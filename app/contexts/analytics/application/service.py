@@ -29,9 +29,15 @@ from app.contexts.analytics.application.shadow_compare import (
     hash_payload,
     should_emit_diff_log,
 )
+from app.contexts.analytics.application.confidence_controller import (
+    get_read_model_confidence,
+    record_shadow_compare_result,
+)
 from app.observability import (
     analytics_shadow_compare_totals,
     current_request_id,
+    observe_analytics_read_model_confidence_status,
+    observe_analytics_read_model_forced_fallback,
     observe_analytics_read_model_hit,
     observe_analytics_read_model_rebuild,
     observe_analytics_shadow_compare,
@@ -136,6 +142,11 @@ class AnalyticsService:
         except ValueError:
             return default
 
+    def _confidence_enabled(self) -> bool:
+        if has_app_context():
+            return bool(current_app.config.get("ANALYTICS_CONFIDENCE_ENABLED", True))
+        return self._env_bool("ANALYTICS_CONFIDENCE_ENABLED", True)
+
     @staticmethod
     def _is_analytics_path(path: str) -> bool:
         normalized = str(path or "").strip().lower()
@@ -165,6 +176,7 @@ class AnalyticsService:
         visibility: Dict[str, Any],
         filters: Dict[str, Any],
         read_model_enabled: bool,
+        forced_confidence_fallback: bool = False,
     ) -> tuple:
         raw_filters = filters.get("raw") if isinstance(filters.get("raw"), dict) else {}
         raw_filters = raw_filters or {}
@@ -192,6 +204,7 @@ class AnalyticsService:
             str(visibility.get("scope") or "").strip().lower(),
             str(request_input.section).strip().lower(),
             "read_model" if read_model_enabled else "transacional",
+            "forced_fallback" if forced_confidence_fallback else "normal",
             actors,
             normalized_filter_block,
         )
@@ -326,16 +339,29 @@ class AnalyticsService:
         )
         filters = parse_filters_fn(request_input.request_args, request_input.tenant_id)
         read_model_enabled = self._read_model_enabled()
+        confidence_status = None
+        force_confidence_fallback = False
+        if read_model_enabled and self._confidence_enabled():
+            confidence = get_read_model_confidence(request_input.tenant_id, request_input.section)
+            confidence_status = str(confidence.get("status") or "insufficient_data").strip().lower()
+            observe_analytics_read_model_confidence_status(confidence_status)
+            force_confidence_fallback = confidence_status == "degraded"
+
         cache_key = self._cache_key(
             request_input,
             visibility=visibility,
             filters=filters,
             read_model_enabled=read_model_enabled,
+            forced_confidence_fallback=force_confidence_fallback,
         )
         cached = self._cache_get(cache_key)
         if cached is not None:
             source = str(cached.get("source") or "").strip().lower() or "transacional"
-            if read_model_enabled:
+            if confidence_status:
+                cached["confidence_status"] = confidence_status
+            if force_confidence_fallback:
+                observe_analytics_read_model_forced_fallback(1)
+            elif read_model_enabled:
                 self._maybe_run_shadow_compare(
                     db,
                     request_input=request_input,
@@ -349,7 +375,17 @@ class AnalyticsService:
             observe_analytics_read_model_hit(source)
             return cached
 
-        if read_model_enabled:
+        if force_confidence_fallback:
+            payload = self._build_dashboard_payload_transacional(
+                db,
+                request_input=request_input,
+                filters=filters,
+                visibility=visibility,
+                build_payload_fn=build_payload_fn,
+            )
+            payload["source"] = "transacional"
+            observe_analytics_read_model_forced_fallback(1)
+        elif read_model_enabled:
             try:
                 payload = self._build_dashboard_payload_from_read_model(
                     db,
@@ -385,8 +421,11 @@ class AnalyticsService:
             )
             payload["source"] = "transacional"
 
+        if confidence_status:
+            payload["confidence_status"] = confidence_status
+
         primary_source = str(payload.get("source") or "transacional").strip().lower() or "transacional"
-        if read_model_enabled:
+        if read_model_enabled and not force_confidence_fallback:
             self._maybe_run_shadow_compare(
                 db,
                 request_input=request_input,
@@ -418,6 +457,7 @@ class AnalyticsService:
             return
 
         started = time.perf_counter()
+        compare_result_status = "error"
         try:
             payload_shadow = self._build_dashboard_payload_transacional(
                 db,
@@ -430,10 +470,12 @@ class AnalyticsService:
 
             compare_result = diff_payload(payload_primary, payload_shadow, max_diffs=20)
             if bool(compare_result.get("equal")):
+                compare_result_status = "equal"
                 observe_analytics_shadow_compare("equal", primary_source)
                 return
 
             summary = dict(compare_result.get("summary") or {})
+            compare_result_status = "diff"
             observe_analytics_shadow_compare("diff", primary_source)
             observe_analytics_shadow_compare_diff_fields(summary)
             observe_analytics_shadow_compare_last_diff_timestamp(time.time())
@@ -465,6 +507,7 @@ class AnalyticsService:
                     },
                 )
         except Exception:  # noqa: BLE001
+            compare_result_status = "error"
             observe_analytics_shadow_compare("error", primary_source)
             if has_app_context():
                 current_app.logger.exception(
@@ -477,6 +520,11 @@ class AnalyticsService:
                     },
                 )
         finally:
+            record_shadow_compare_result(
+                request_input.tenant_id,
+                request_input.section,
+                compare_result_status,
+            )
             observe_analytics_shadow_compare_latency((time.perf_counter() - started) * 1000.0)
 
     def _persist_shadow_diff(
@@ -588,6 +636,33 @@ class AnalyticsService:
             "diff_rate_percent": round(diff_rate_percent, 2),
             "sections_breakdown": list(persisted.get("sections_breakdown") or []),
             "recent_diffs": list(persisted.get("recent_diffs") or []),
+        }
+
+    def build_read_model_confidence_report(self, *, workspace_id: str, sections: List[Dict[str, Any]]) -> dict:
+        normalized_workspace = str(workspace_id or "").strip()
+        if not normalized_workspace:
+            raise ValueError("workspace_id is required")
+
+        rows: List[Dict[str, Any]] = []
+        for section in list(sections or []):
+            section_key = str(section.get("key") or "").strip().lower()
+            if not section_key:
+                continue
+            confidence = get_read_model_confidence(normalized_workspace, section_key)
+            status = str(confidence.get("status") or "insufficient_data").strip().lower()
+            rows.append(
+                {
+                    "section": section_key,
+                    "status": status,
+                    "diff_rate_percent": float(confidence.get("diff_rate_percent") or 0.0),
+                    "compare_count": int(confidence.get("compare_count") or 0),
+                    "threshold_percent": float(confidence.get("threshold_percent") or 0.0),
+                    "window_minutes": int(confidence.get("window_minutes") or 0),
+                }
+            )
+        return {
+            "workspace_id": normalized_workspace,
+            "confidence": rows,
         }
 
     def _build_dashboard_payload_transacional(

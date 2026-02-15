@@ -9,7 +9,7 @@ from numbers import Number
 from typing import Any, Dict, List
 
 
-_VOLATILE_KEYS = {"generated_at", "duration_ms", "source", "request_id"}
+_VOLATILE_KEYS = {"generated_at", "duration_ms", "source", "request_id", "confidence_status"}
 _SUMMARY_KEYS = ("kpis", "charts", "drilldown")
 _LOG_LIMIT_LOCK = threading.Lock()
 _LOG_LIMIT_BY_MINUTE: Dict[int, int] = {}

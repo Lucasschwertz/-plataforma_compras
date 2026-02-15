@@ -159,6 +159,8 @@ class MetricsRegistry:
         self._analytics_projection_lag_seconds: Dict[str, float] = {}
         self._analytics_projection_last_success_timestamp: Dict[str, float] = {}
         self._analytics_read_model_hits_total: Dict[str, int] = {}
+        self._analytics_read_model_confidence_status: Dict[str, int] = {}
+        self._analytics_read_model_forced_fallback_total = 0
         self._analytics_event_store_persisted_total: Dict[str, int] = {}
         self._analytics_event_store_failed_total = 0
         self._analytics_read_model_rebuild_total: Dict[tuple[str, str], int] = {}
@@ -299,6 +301,20 @@ class MetricsRegistry:
                 int(self._analytics_read_model_hits_total.get(source_key, 0)) + 1
             )
 
+    def observe_analytics_read_model_confidence_status(self, status: str) -> None:
+        status_key = str(status or "unknown").strip().lower() or "unknown"
+        with self._lock:
+            self._analytics_read_model_confidence_status[status_key] = (
+                int(self._analytics_read_model_confidence_status.get(status_key, 0)) + 1
+            )
+
+    def observe_analytics_read_model_forced_fallback(self, count: int = 1) -> None:
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._analytics_read_model_forced_fallback_total += increment
+
     def observe_analytics_event_store_persisted(self, event_type: str) -> None:
         event_key = str(event_type or "unknown").strip() or "unknown"
         with self._lock:
@@ -414,6 +430,8 @@ class MetricsRegistry:
                 "analytics_read_model": {
                     "hits_total": int(sum(self._analytics_read_model_hits_total.values())),
                     "by_source": dict(sorted(self._analytics_read_model_hits_total.items())),
+                    "confidence_status": dict(sorted(self._analytics_read_model_confidence_status.items())),
+                    "forced_fallback_total": int(self._analytics_read_model_forced_fallback_total),
                 },
                 "analytics_event_store": {
                     "persisted_total": int(sum(self._analytics_event_store_persisted_total.values())),
@@ -526,6 +544,11 @@ class MetricsRegistry:
                     key: int(value)
                     for key, value in sorted(self._analytics_read_model_hits_total.items())
                 },
+                "analytics_read_model_confidence_status": {
+                    key: int(value)
+                    for key, value in sorted(self._analytics_read_model_confidence_status.items())
+                },
+                "analytics_read_model_forced_fallback_total": int(self._analytics_read_model_forced_fallback_total),
                 "analytics_event_store_persisted_total": {
                     key: int(value)
                     for key, value in sorted(self._analytics_event_store_persisted_total.items())
@@ -591,6 +614,8 @@ class MetricsRegistry:
             self._analytics_projection_lag_seconds.clear()
             self._analytics_projection_last_success_timestamp.clear()
             self._analytics_read_model_hits_total.clear()
+            self._analytics_read_model_confidence_status.clear()
+            self._analytics_read_model_forced_fallback_total = 0
             self._analytics_event_store_persisted_total.clear()
             self._analytics_event_store_failed_total = 0
             self._analytics_read_model_rebuild_total.clear()
@@ -667,6 +692,14 @@ def observe_analytics_projection_lag(projector: str, occurred_at: datetime | flo
 
 def observe_analytics_read_model_hit(source: str) -> None:
     _METRICS.observe_analytics_read_model_hit(source)
+
+
+def observe_analytics_read_model_confidence_status(status: str) -> None:
+    _METRICS.observe_analytics_read_model_confidence_status(status)
+
+
+def observe_analytics_read_model_forced_fallback(count: int = 1) -> None:
+    _METRICS.observe_analytics_read_model_forced_fallback(count)
 
 
 def observe_analytics_event_store_persisted(event_type: str) -> None:
@@ -866,6 +899,26 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
                 labels={"source": source},
             )
         )
+
+    lines.append("# HELP analytics_read_model_confidence_status Read model confidence evaluations grouped by status.")
+    lines.append("# TYPE analytics_read_model_confidence_status gauge")
+    for status, total in snapshot["analytics_read_model_confidence_status"].items():
+        lines.append(
+            _prom_line(
+                "analytics_read_model_confidence_status",
+                int(total),
+                labels={"status": status},
+            )
+        )
+
+    lines.append("# HELP analytics_read_model_forced_fallback_total Total forced fallback executions due to degraded confidence.")
+    lines.append("# TYPE analytics_read_model_forced_fallback_total counter")
+    lines.append(
+        _prom_line(
+            "analytics_read_model_forced_fallback_total",
+            int(snapshot["analytics_read_model_forced_fallback_total"]),
+        )
+    )
 
     lines.append("# HELP analytics_event_store_persisted_total Total domain events persisted in analytics event store.")
     lines.append("# TYPE analytics_event_store_persisted_total counter")
