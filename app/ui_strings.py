@@ -368,6 +368,7 @@ UI_TEXTS: Dict[str, str] = {
     "erp.next_action.await_response": "Aguardar retorno do ERP.",
     "erp.next_action.review_data": "Revisar dados da ordem e reenviar ao ERP.",
     "erp.next_action.resend": "Reenviar ao ERP",
+    "erp_simulated_mode_active": "Modo simulador ERP ativo para diagnostico interno.",
 }
 
 
@@ -405,6 +406,8 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "erp_rejected": "O ERP rejeitou a ordem. Revise os dados e tente novamente.",
         "erp_temporarily_unavailable": "Nao conseguimos falar com o ERP agora. Vamos tentar novamente automaticamente.",
         "erp_order_rejected": "O ERP recusou a ordem. Verifique os dados e tente novamente.",
+        "erp_contract_invalid": "Pedido invalido para envio ao ERP.",
+        "erp_payload_invalid_for_erp": "Os dados do pedido nao atendem ao formato exigido para envio ao ERP.",
         "invite_expired": "Convite expirado.",
         "invite_not_found": "Convite nao encontrado.",
         "item_not_found": "Item nao encontrado.",

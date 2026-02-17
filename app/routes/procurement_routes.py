@@ -38,6 +38,7 @@ from app.contexts.analytics.application.payload import (
 )
 from app.contexts.procurement.domain.critical_actions import get_critical_action, resolve_confirmation
 from app.contexts.procurement.infrastructure.erp_outbox import (
+    erp_contract_health_snapshot,
     find_pending_purchase_order_push,
     queue_purchase_order_push,
 )
@@ -586,6 +587,12 @@ def governance_status_api():
     _require_roles("admin")
     snapshot = governance_status_snapshot()
     return jsonify(snapshot)
+
+
+@procurement_bp.route("/internal/erp/contract-health", methods=["GET"])
+def erp_contract_health_api():
+    _require_roles("admin")
+    return jsonify(erp_contract_health_snapshot())
 
 
 @procurement_bp.route("/api/procurement/analytics/read-model/rebuild", methods=["POST"])

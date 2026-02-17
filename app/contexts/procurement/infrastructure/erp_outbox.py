@@ -3,18 +3,31 @@ from __future__ import annotations
 import json
 import random
 import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 from typing import Callable, Dict, List
 
 from flask import current_app
 
 from app.core import ErpOrderAccepted, ErpOrderRejected, EventBus, get_event_bus
 from app.core.governance import get_worker_fairness
+from app.contexts.erp.domain.contracts import (
+    ErpPurchaseOrderLineV1,
+    ErpPurchaseOrderV1,
+    ErpPushResultV1,
+    from_dict as erp_contract_from_dict,
+    validate_contract,
+)
+from app.contexts.erp.domain.schemas import validate_schema
 from app.contexts.erp.domain.gateway import ErpGatewayError
 from app.contexts.erp.infrastructure.circuit_breaker import get_erp_circuit_breaker
 from app.errors import classify_erp_failure
 from app.observability import (
+    observe_erp_contract_failure,
+    observe_erp_contract_invalid,
     observe_erp_outbox_dead_letter,
+    observe_erp_mapper_validation_failed,
     observe_erp_outbox_processing,
     observe_erp_outbox_retry,
     observe_erp_outbox_retry_backoff,
@@ -23,6 +36,7 @@ from app.observability import (
     observe_governance_worker_throttled,
     set_log_request_id,
 )
+from app.ui_strings import error_message
 
 
 PO_OUTBOX_SCOPE = "purchase_order"
@@ -30,6 +44,9 @@ PO_OUTBOX_STATUS_QUEUED = "queued"
 PO_OUTBOX_STATUS_RUNNING = "running"
 PO_OUTBOX_STATUS_SUCCEEDED = "succeeded"
 PO_OUTBOX_STATUS_FAILED = "failed"
+
+_LOCAL_FAILURES_LOCK = Lock()
+_LOCAL_FAILURES: deque[dict[str, object]] = deque(maxlen=10)
 
 
 def _utcnow() -> datetime:
@@ -105,6 +122,154 @@ def _normalize_po_status(value: str | None) -> str:
     if normalized in {"error", "failed", "rejected"}:
         return "erp_error"
     return "erp_accepted"
+
+
+def _friendly_contract_invalid_message() -> str:
+    return error_message("erp_contract_invalid", "Pedido invalido para envio ao ERP.")
+
+
+def _remember_contract_failure(
+    *,
+    external_ref: str | None,
+    status: str,
+    code: str | None,
+    timestamp: str | None = None,
+) -> None:
+    failure = {
+        "external_ref": str(external_ref or "").strip() or None,
+        "status": str(status or "invalid").strip().lower() or "invalid",
+        "code": str(code or "").strip() or None,
+        "timestamp": str(timestamp or _iso_utc(_utcnow())).strip() or _iso_utc(_utcnow()),
+    }
+    with _LOCAL_FAILURES_LOCK:
+        _LOCAL_FAILURES.appendleft(failure)
+    observe_erp_contract_failure(
+        external_ref=failure.get("external_ref"),
+        status=failure.get("status") or "invalid",
+        code=failure.get("code"),
+        timestamp=failure.get("timestamp"),
+    )
+
+
+def latest_contract_failures(limit: int = 10) -> list[dict[str, object]]:
+    with _LOCAL_FAILURES_LOCK:
+        return list(list(_LOCAL_FAILURES)[: max(1, int(limit))])
+
+
+def _normalize_iso_string(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return _iso_utc(_utcnow())
+    if "T" not in raw and " " in raw:
+        raw = raw.replace(" ", "T", 1)
+    if raw.endswith("+00:00"):
+        raw = raw[:-6] + "Z"
+    return raw
+
+
+def _build_canonical_po_from_row(po: Dict[str, object], tenant_id: str) -> ErpPurchaseOrderV1:
+    external_ref = str(po.get("id") or po.get("number") or "").strip()
+    amount = po.get("total_amount")
+    try:
+        gross_total = float(amount or 0.0)
+    except (TypeError, ValueError):
+        gross_total = 0.0
+    line = ErpPurchaseOrderLineV1(
+        line_id=f"{external_ref or 'po'}:1",
+        product_code=str(po.get("number") or external_ref or "item").strip() or "item",
+        description=str(po.get("supplier_name") or "").strip() or None,
+        qty=1.0,
+        unit_price=max(0.0, gross_total),
+        uom=None,
+        cost_center=None,
+        delivery_date=None,
+    )
+    return ErpPurchaseOrderV1(
+        workspace_id=str(tenant_id or "").strip(),
+        external_ref=external_ref,
+        supplier_code=None,
+        supplier_name=str(po.get("supplier_name") or "").strip() or None,
+        currency=str(po.get("currency") or "BRL"),
+        payment_terms=None,
+        issued_at=_normalize_iso_string(str(po.get("updated_at") or po.get("created_at") or "")),
+        lines=[line],
+        totals={
+            "gross_total": max(0.0, gross_total),
+            "net_total": None,
+        },
+    )
+
+
+def _canonical_po_from_meta(meta: Dict[str, object], po: Dict[str, object], tenant_id: str) -> tuple[ErpPurchaseOrderV1 | None, dict[str, object], list[str], str]:
+    raw_payload = meta.get("canonical_po")
+    payload = dict(raw_payload) if isinstance(raw_payload, dict) else {}
+    if not payload:
+        payload = _build_canonical_po_from_row(po, tenant_id).to_dict()
+    payload["workspace_id"] = str(payload.get("workspace_id") or tenant_id)
+    payload["schema_name"] = str(payload.get("schema_name") or "erp.purchase_order")
+    payload["schema_version"] = int(payload.get("schema_version") or 1)
+    schema_name = str(payload.get("schema_name") or "erp.purchase_order")
+    schema_version = int(payload.get("schema_version") or 1)
+    ok_schema, schema_errors = validate_schema(schema_name, schema_version, payload)
+    contract_errors = validate_contract(payload)
+    errors = list(schema_errors)
+    for item in contract_errors:
+        if item not in errors:
+            errors.append(item)
+
+    parsed = erp_contract_from_dict(payload)
+    if not isinstance(parsed, ErpPurchaseOrderV1):
+        errors.append("canonical payload is not erp.purchase_order v1")
+        return (None, payload, errors, schema_name)
+
+    if not ok_schema or errors:
+        return (None, payload, errors, schema_name)
+    return (parsed, payload, [], schema_name)
+
+
+def _coerce_push_result(
+    raw_result: object,
+    *,
+    workspace_id: str,
+    external_ref: str,
+) -> ErpPushResultV1:
+    if isinstance(raw_result, ErpPushResultV1):
+        return raw_result
+    if isinstance(raw_result, dict):
+        data = dict(raw_result)
+        if str(data.get("schema_name") or "").strip().lower() == "erp.push_result":
+            parsed = erp_contract_from_dict(data)
+            if isinstance(parsed, ErpPushResultV1):
+                return parsed
+
+        status_raw = str(data.get("canonical_status") or data.get("status") or "").strip().lower()
+        if status_raw in {"erp_accepted", "accepted", "ok", "success"}:
+            status = "accepted"
+        elif status_raw in {"erp_error", "rejected", "reject", "failed"}:
+            status = "rejected"
+        elif status_raw in {"temporary_failure", "retry", "queued", "sent_to_erp"}:
+            status = "temporary_failure"
+        else:
+            status = "accepted"
+
+        return ErpPushResultV1(
+            workspace_id=workspace_id,
+            external_ref=external_ref,
+            erp_document_number=str(data.get("erp_document_number") or data.get("external_id") or "").strip() or None,
+            status=status,
+            rejection_code=str(data.get("rejection_code") or "").strip() or None,
+            message=str(data.get("message") or "").strip() or None,
+            occurred_at=_normalize_iso_string(str(data.get("occurred_at") or "")),
+        )
+    return ErpPushResultV1(
+        workspace_id=workspace_id,
+        external_ref=external_ref,
+        erp_document_number=None,
+        status="temporary_failure",
+        rejection_code=None,
+        message=error_message("erp_temporarily_unavailable"),
+        occurred_at=_iso_utc(_utcnow()),
+    )
 
 
 def _upsert_integration_watermark(
@@ -275,11 +440,13 @@ def queue_purchase_order_push(
         }
 
     dedup_hash = _dedup_key(tenant_id, purchase_order_id)
+    canonical_po = _build_canonical_po_from_row(purchase_order, tenant_id).to_dict()
     meta = {
         "kind": "po_push",
         "purchase_order_id": purchase_order_id,
         "next_attempt_at": _iso_utc(_utcnow()),
         "request_id": str(request_id or "").strip() or None,
+        "canonical_po": canonical_po,
     }
 
     cursor = db.execute(
@@ -449,12 +616,14 @@ def _requeue_run(
     next_attempt_at: datetime,
     error_summary: str,
     error_details: str,
+    canonical_po: Dict[str, object] | None = None,
 ) -> None:
     meta = {
         "kind": "po_push",
         "purchase_order_id": purchase_order_id,
         "next_attempt_at": _iso_utc(next_attempt_at),
         "request_id": str(request_id or "").strip() or None,
+        "canonical_po": dict(canonical_po or {}),
     }
     db.execute(
         """
@@ -489,12 +658,14 @@ def _delay_queued_run(
     next_attempt_at: datetime,
     error_summary: str,
     error_details: str,
+    canonical_po: Dict[str, object] | None = None,
 ) -> None:
     meta = {
         "kind": "po_push",
         "purchase_order_id": purchase_order_id,
         "next_attempt_at": _iso_utc(next_attempt_at),
         "request_id": str(request_id or "").strip() or None,
+        "canonical_po": dict(canonical_po or {}),
     }
     db.execute(
         """
@@ -582,11 +753,12 @@ def process_purchase_order_outbox(
     for candidate in candidates:
         run_id = int(candidate["id"])
         run_tenant_id = str(candidate["tenant_id"])
-        request_id = str((candidate.get("meta") or {}).get("request_id") or "").strip() or None
+        candidate_meta = dict(candidate.get("meta") or {})
+        request_id = str(candidate_meta.get("request_id") or "").strip() or None
         effective_request_id = request_id or str(worker_request_id or "").strip() or "n/a"
         set_log_request_id(effective_request_id)
         started_ms = time.perf_counter()
-        purchase_order_id = int((candidate.get("meta") or {}).get("purchase_order_id") or 0)
+        purchase_order_id = int(candidate_meta.get("purchase_order_id") or 0)
         if purchase_order_id <= 0:
             if _mark_run_running(db, run_tenant_id, run_id):
                 _update_run_terminal(
@@ -642,6 +814,7 @@ def process_purchase_order_outbox(
                 next_attempt_at=_utcnow() + timedelta(seconds=retry_after),
                 error_summary="governance_throttled",
                 error_details=f"reason={reason};backlog_size={backlog_size}",
+                canonical_po=(candidate_meta.get("canonical_po") if isinstance(candidate_meta.get("canonical_po"), dict) else None),
             )
             fairness.note_deferred()
             db.commit()
@@ -667,6 +840,7 @@ def process_purchase_order_outbox(
                 next_attempt_at=_utcnow() + timedelta(seconds=backoff),
                 error_summary="erp_circuit_open",
                 error_details=f"circuit_state={circuit_state}",
+                canonical_po=(candidate_meta.get("canonical_po") if isinstance(candidate_meta.get("canonical_po"), dict) else None),
             )
             db.commit()
             summary["processed"] += 1
@@ -721,6 +895,55 @@ def process_purchase_order_outbox(
             observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
             continue
 
+        canonical_po, canonical_payload, contract_errors, schema_name = _canonical_po_from_meta(
+            candidate_meta,
+            po,
+            run_tenant_id,
+        )
+        if contract_errors:
+            friendly_message = _friendly_contract_invalid_message()
+            error_details = "; ".join(contract_errors)[:1000]
+            observe_erp_contract_invalid(schema_name)
+            _remember_contract_failure(
+                external_ref=str(po.get("id") or ""),
+                status="invalid_contract",
+                code="erp_contract_invalid",
+            )
+            db.execute(
+                """
+                UPDATE purchase_orders
+                SET status = 'erp_error', erp_last_error = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND tenant_id = ?
+                """,
+                (friendly_message[:200], purchase_order_id, run_tenant_id),
+            )
+            _insert_status_event(
+                db,
+                run_tenant_id,
+                purchase_order_id,
+                str(po.get("status") or "").strip().lower() or None,
+                "erp_error",
+                "po_contract_invalid",
+            )
+            _mark_dead_letter(
+                db,
+                tenant_id=run_tenant_id,
+                run_id=run_id,
+                purchase_order_id=purchase_order_id,
+                request_id=request_id,
+                records_in=1,
+                records_upserted=0,
+                records_failed=1,
+                error_summary="erp_contract_invalid",
+                error_details=error_details,
+            )
+            db.commit()
+            summary["processed"] += 1
+            summary["failed"] += 1
+            observe_erp_outbox_dead_letter(1)
+            observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
+            continue
+
         current_status = str(po.get("status") or "").strip().lower()
         if current_status == "erp_accepted":
             _update_run_terminal(
@@ -758,11 +981,29 @@ def process_purchase_order_outbox(
         )
 
         try:
-            result = push_fn(dict(po))
+            raw_result = push_fn(dict(canonical_payload))
+            push_result = _coerce_push_result(
+                raw_result,
+                workspace_id=run_tenant_id,
+                external_ref=str(canonical_payload.get("external_ref") or purchase_order_id),
+            )
+            if push_result.status == "rejected":
+                raise ErpGatewayError(
+                    str(push_result.message or error_message("erp_order_rejected")),
+                    code=push_result.rejection_code,
+                    definitive=True,
+                )
+            if push_result.status == "temporary_failure":
+                raise ErpGatewayError(
+                    str(push_result.message or error_message("erp_temporarily_unavailable")),
+                    code=push_result.rejection_code,
+                    definitive=False,
+                )
+
             circuit_breaker.record_success()
-            external_id = result.get("external_id")
-            resolved_status = _normalize_po_status(result.get("status"))
-            reason = "po_push_succeeded" if resolved_status != "sent_to_erp" else "po_push_queued"
+            external_id = push_result.erp_document_number
+            resolved_status = _normalize_po_status("erp_accepted")
+            reason = "po_push_succeeded"
 
             db.execute(
                 """
@@ -781,22 +1022,21 @@ def process_purchase_order_outbox(
                 reason,
             )
 
-            if resolved_status == "erp_accepted":
-                _upsert_integration_watermark(
-                    db,
-                    run_tenant_id,
-                    entity="purchase_order",
-                    source_updated_at=None,
-                    source_id=str(external_id or ""),
+            _upsert_integration_watermark(
+                db,
+                run_tenant_id,
+                entity="purchase_order",
+                source_updated_at=None,
+                source_id=str(external_id or ""),
+            )
+            bus.publish(
+                ErpOrderAccepted(
+                    tenant_id=run_tenant_id,
+                    purchase_order_id=purchase_order_id,
+                    sync_run_id=run_id,
+                    external_id=str(external_id or "") or None,
                 )
-                bus.publish(
-                    ErpOrderAccepted(
-                        tenant_id=run_tenant_id,
-                        purchase_order_id=purchase_order_id,
-                        sync_run_id=run_id,
-                        external_id=str(external_id or "") or None,
-                    )
-                )
+            )
 
             _update_run_terminal(
                 db,
@@ -825,6 +1065,23 @@ def process_purchase_order_outbox(
             circuit_breaker.record_failure()
             error_details = str(exc)[:1000]
             error_code, message_key, _http_status = classify_erp_failure(error_details)
+            if str(exc.code or "").strip() == "erp_payload_invalid_for_erp":
+                message_key = "erp_payload_invalid_for_erp"
+                error_code = "erp_order_rejected"
+                observe_erp_mapper_validation_failed(1)
+                _remember_contract_failure(
+                    external_ref=str(canonical_payload.get("external_ref") or purchase_order_id),
+                    status="mapper_validation_failed",
+                    code="erp_payload_invalid_for_erp",
+                )
+            if str(exc.code or "").strip() == "erp_contract_invalid":
+                message_key = "erp_contract_invalid"
+                observe_erp_contract_invalid(str(canonical_payload.get("schema_name") or "erp.purchase_order"))
+                _remember_contract_failure(
+                    external_ref=str(canonical_payload.get("external_ref") or purchase_order_id),
+                    status="invalid_contract",
+                    code="erp_contract_invalid",
+                )
             rejection = bool(exc.definitive) or error_code == "erp_order_rejected"
             failure_reason = "po_push_rejected" if rejection else "po_push_failed"
 
@@ -895,6 +1152,7 @@ def process_purchase_order_outbox(
                 next_attempt_at=_utcnow() + timedelta(seconds=backoff),
                 error_summary=message_key,
                 error_details=error_details,
+                canonical_po=canonical_payload,
             )
             db.commit()
             summary["processed"] += 1
@@ -957,6 +1215,7 @@ def process_purchase_order_outbox(
                 next_attempt_at=_utcnow() + timedelta(seconds=backoff),
                 error_summary="erp_push_failed",
                 error_details=error_details,
+                canonical_po=canonical_payload,
             )
             db.commit()
             summary["processed"] += 1
@@ -977,5 +1236,16 @@ def process_purchase_order_outbox(
             observe_erp_outbox_processing((time.perf_counter() - started_ms) * 1000.0)
 
     return summary
+
+
+def erp_contract_health_snapshot() -> dict:
+    from app.observability import erp_contract_metrics_snapshot
+
+    metrics = erp_contract_metrics_snapshot()
+    return {
+        "invalid_contract_total": int(metrics.get("invalid_contract_total") or 0),
+        "mapper_validation_failed_total": int(metrics.get("mapper_validation_failed_total") or 0),
+        "last_10_failures": latest_contract_failures(limit=10),
+    }
 
 

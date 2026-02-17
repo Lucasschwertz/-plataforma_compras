@@ -3,6 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import List
 
+from app.contexts.erp.domain.contracts import ErpPurchaseOrderV1, ErpPushResultV1
+
 
 class ErpGatewayError(RuntimeError):
     def __init__(
@@ -30,6 +32,5 @@ class ErpGateway(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def push_purchase_order(self, purchase_order: dict) -> dict:
+    def push_purchase_order(self, purchase_order: ErpPurchaseOrderV1) -> ErpPushResultV1:
         raise NotImplementedError
-

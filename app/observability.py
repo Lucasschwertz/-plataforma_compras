@@ -153,6 +153,10 @@ class MetricsRegistry:
         self._erp_dead_letter_total = 0
         self._erp_outbox_processing_time = self._new_histogram_state(_OUTBOX_PROCESSING_BUCKETS_MS)
         self._erp_retry_backoff_seconds = self._new_histogram_state(_OUTBOX_BACKOFF_BUCKETS_SECONDS)
+        self._erp_contract_invalid_total: Dict[str, int] = {}
+        self._erp_mapper_validation_failed_total = 0
+        self._erp_simulator_result_total: Dict[str, int] = {}
+        self._erp_contract_recent_failures: list[dict[str, str]] = []
 
         self._domain_event_emitted_total: Dict[str, int] = {}
         self._domain_event_schema_invalid_total: Dict[str, int] = {}
@@ -263,6 +267,63 @@ class MetricsRegistry:
     def observe_erp_outbox_processing(self, duration_ms: float) -> None:
         with self._lock:
             self._observe_histogram(self._erp_outbox_processing_time, duration_ms, _OUTBOX_PROCESSING_BUCKETS_MS)
+
+    def observe_erp_contract_invalid(self, schema_name: str, count: int = 1) -> None:
+        schema_key = str(schema_name or "unknown").strip().lower() or "unknown"
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._erp_contract_invalid_total[schema_key] = (
+                int(self._erp_contract_invalid_total.get(schema_key, 0)) + increment
+            )
+
+    def observe_erp_mapper_validation_failed(self, count: int = 1) -> None:
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._erp_mapper_validation_failed_total += increment
+
+    def observe_erp_simulator_result(self, status: str, count: int = 1) -> None:
+        status_key = str(status or "unknown").strip().lower() or "unknown"
+        if status_key not in {"accepted", "rejected", "temporary_failure"}:
+            status_key = "unknown"
+        increment = max(0, int(count or 0))
+        if increment <= 0:
+            return
+        with self._lock:
+            self._erp_simulator_result_total[status_key] = (
+                int(self._erp_simulator_result_total.get(status_key, 0)) + increment
+            )
+
+    def observe_erp_contract_failure(
+        self,
+        *,
+        external_ref: str | None,
+        status: str,
+        code: str | None,
+        timestamp: str | None = None,
+    ) -> None:
+        sample = {
+            "external_ref": str(external_ref or "").strip() or "",
+            "status": str(status or "invalid").strip().lower() or "invalid",
+            "code": str(code or "").strip() or "",
+            "timestamp": str(timestamp or "").strip() or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        with self._lock:
+            self._erp_contract_recent_failures.insert(0, sample)
+            del self._erp_contract_recent_failures[10:]
+
+    def erp_contract_metrics_snapshot(self) -> dict:
+        with self._lock:
+            return {
+                "invalid_contract_total": int(sum(self._erp_contract_invalid_total.values())),
+                "invalid_contract_by_schema": dict(sorted(self._erp_contract_invalid_total.items())),
+                "mapper_validation_failed_total": int(self._erp_mapper_validation_failed_total),
+                "simulator_result_total": dict(sorted(self._erp_simulator_result_total.items())),
+                "last_10_failures": [dict(item) for item in self._erp_contract_recent_failures[:10]],
+            }
 
     def observe_domain_event_emitted(self, event_type: str) -> None:
         key = str(event_type or "unknown").strip() or "unknown"
@@ -494,6 +555,9 @@ class MetricsRegistry:
                     "dead_letter_total": int(self._erp_dead_letter_total),
                     "processing_count": int(self._erp_outbox_processing_time["count"]),
                     "retry_backoff_count": int(self._erp_retry_backoff_seconds["count"]),
+                    "contract_invalid_total": int(sum(self._erp_contract_invalid_total.values())),
+                    "mapper_validation_failed_total": int(self._erp_mapper_validation_failed_total),
+                    "simulator_result_total": dict(sorted(self._erp_simulator_result_total.items())),
                 },
                 "domain_events": {
                     "emitted_total": int(sum(self._domain_event_emitted_total.values())),
@@ -606,6 +670,15 @@ class MetricsRegistry:
                 "erp_dead_letter_total": int(self._erp_dead_letter_total),
                 "erp_outbox_processing_time": outbox_hist,
                 "erp_retry_backoff_seconds": backoff_hist,
+                "erp_contract_invalid_total": {
+                    key: int(value)
+                    for key, value in sorted(self._erp_contract_invalid_total.items())
+                },
+                "erp_mapper_validation_failed_total": int(self._erp_mapper_validation_failed_total),
+                "erp_simulator_result_total": {
+                    key: int(value)
+                    for key, value in sorted(self._erp_simulator_result_total.items())
+                },
                 "domain_event_emitted_total": dict(sorted(self._domain_event_emitted_total.items())),
                 "domain_event_schema_invalid_total": dict(sorted(self._domain_event_schema_invalid_total.items())),
                 "analytics_projection_processed_total": {
@@ -724,6 +797,10 @@ class MetricsRegistry:
             self._erp_dead_letter_total = 0
             self._erp_outbox_processing_time = self._new_histogram_state(_OUTBOX_PROCESSING_BUCKETS_MS)
             self._erp_retry_backoff_seconds = self._new_histogram_state(_OUTBOX_BACKOFF_BUCKETS_SECONDS)
+            self._erp_contract_invalid_total.clear()
+            self._erp_mapper_validation_failed_total = 0
+            self._erp_simulator_result_total.clear()
+            self._erp_contract_recent_failures.clear()
             self._domain_event_emitted_total.clear()
             self._domain_event_schema_invalid_total.clear()
             self._analytics_projection_processed_total.clear()
@@ -804,6 +881,37 @@ def observe_erp_outbox_retry_backoff(backoff_seconds: float) -> None:
 
 def observe_erp_outbox_processing(duration_ms: float) -> None:
     _METRICS.observe_erp_outbox_processing(duration_ms)
+
+
+def observe_erp_contract_invalid(schema_name: str, count: int = 1) -> None:
+    _METRICS.observe_erp_contract_invalid(schema_name, count=count)
+
+
+def observe_erp_mapper_validation_failed(count: int = 1) -> None:
+    _METRICS.observe_erp_mapper_validation_failed(count=count)
+
+
+def observe_erp_simulator_result(status: str, count: int = 1) -> None:
+    _METRICS.observe_erp_simulator_result(status, count=count)
+
+
+def observe_erp_contract_failure(
+    *,
+    external_ref: str | None,
+    status: str,
+    code: str | None,
+    timestamp: str | None = None,
+) -> None:
+    _METRICS.observe_erp_contract_failure(
+        external_ref=external_ref,
+        status=status,
+        code=code,
+        timestamp=timestamp,
+    )
+
+
+def erp_contract_metrics_snapshot() -> dict:
+    return _METRICS.erp_contract_metrics_snapshot()
 
 
 def observe_domain_event_emitted(event_type: str) -> None:
@@ -958,6 +1066,37 @@ def prometheus_metrics_text(*, outbox_state: dict | None = None) -> str:
     lines.append("# HELP erp_dead_letter_total Total outbox jobs moved to dead letter.")
     lines.append("# TYPE erp_dead_letter_total counter")
     lines.append(_prom_line("erp_dead_letter_total", int(snapshot["erp_dead_letter_total"])))
+
+    lines.append("# HELP erp_contract_invalid_total Total invalid ERP contracts by schema name.")
+    lines.append("# TYPE erp_contract_invalid_total counter")
+    for schema_name, total in snapshot["erp_contract_invalid_total"].items():
+        lines.append(
+            _prom_line(
+                "erp_contract_invalid_total",
+                int(total),
+                labels={"schema_name": schema_name},
+            )
+        )
+
+    lines.append("# HELP erp_mapper_validation_failed_total Total mapper validation failures before ERP call.")
+    lines.append("# TYPE erp_mapper_validation_failed_total counter")
+    lines.append(
+        _prom_line(
+            "erp_mapper_validation_failed_total",
+            int(snapshot["erp_mapper_validation_failed_total"]),
+        )
+    )
+
+    lines.append("# HELP erp_simulator_result_total Total deterministic simulator outcomes by status.")
+    lines.append("# TYPE erp_simulator_result_total counter")
+    for status, total in snapshot["erp_simulator_result_total"].items():
+        lines.append(
+            _prom_line(
+                "erp_simulator_result_total",
+                int(total),
+                labels={"status": status},
+            )
+        )
 
     lines.append("# HELP erp_outbox_processing_time ERP outbox processing time in milliseconds.")
     lines.append("# TYPE erp_outbox_processing_time histogram")

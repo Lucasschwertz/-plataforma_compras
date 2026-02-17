@@ -84,6 +84,7 @@ class Config:
         "supplier,purchase_request,purchase_order,receipt,quote,quote_process,quote_supplier",
     )
     ERP_MODE = os.environ.get("ERP_MODE", "mock")
+    ERP_SIMULATOR_SEED = _int_env("ERP_SIMULATOR_SEED", 42)
     ERP_BASE_URL = os.environ.get("ERP_BASE_URL")
     ERP_TOKEN = os.environ.get("ERP_TOKEN")
     ERP_API_KEY = os.environ.get("ERP_API_KEY")
