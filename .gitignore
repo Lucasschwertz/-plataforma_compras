@@ -1,5 +1,9 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
+*.pyo
+*.pyd
+venv/
+.venv/
 database/*.db
 *.csv
 *.sqlite
@@ -10,9 +14,12 @@ postgres_data/
 app/templates/*.new.html
 .tmp_rw/
 .tmp_test/
-pc_test_*/
+.tmp_run/
+pc_*/
 COLE_A_*
 SUA_STRING_*
 *.db-journal
 .tmp_import.db
 .tmp_import.db-journal
+Plataforma-Medicina/
+desafio-ia-sctec-empreendedorismo-sc/
